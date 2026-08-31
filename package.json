@@ -1,0 +1,14 @@
+{
+  "name": "sabir-plastic-erp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sabir Plastic ERP Monorepo",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "test:backend": "npm --prefix backend test",
+    "type-check:backend": "npm --prefix backend run type-check",
+    "type-check:frontend": "npm --prefix frontend run type-check",
+    "migrate:latest": "npm --prefix backend run migrate:latest"
+  }
+}
