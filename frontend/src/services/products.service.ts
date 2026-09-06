@@ -2,6 +2,19 @@ import api from './api';
 import { Product, CreateProductData, UpdateProductData, UnitOfMeasure } from '../types/product.types';
 import { ApiSuccess } from '../types/api.types';
 
+export interface ProductBatch {
+  id: string;
+  product_id: string;
+  batch_number: string;
+  initial_qty: number;
+  remaining_qty: number;
+  buy_price_per_kg: number;
+  selected_unit: string;
+  actual_weight_per_unit: number;
+  batch_unit_conversions: Record<string, number> | string;
+  created_at: string;
+}
+
 export const productsService = {
   getProducts: async (): Promise<Product[]> => {
     const response = await api.get<ApiSuccess<Product[]>>('/products');
@@ -12,6 +25,11 @@ export const productsService = {
     const response = await api.get<ApiSuccess<Product[]>>('/products/pos-available', {
       params: { search },
     });
+    return response.data.data;
+  },
+
+  getProductBatches: async (id: string): Promise<ProductBatch[]> => {
+    const response = await api.get<ApiSuccess<ProductBatch[]>>(`/products/${id}/batches`);
     return response.data.data;
   },
 
@@ -35,7 +53,7 @@ export const productsService = {
   },
 
   getUoms: async (): Promise<UnitOfMeasure[]> => {
-    const response = await api.get<ApiSuccess<UnitOfMeasure[]>>('/products/uom');
+    const response = await api.get<ApiSuccess<UnitOfMeasure[]>>('/uom');
     return response.data.data;
   },
 };

@@ -17,6 +17,12 @@ export interface Product {
   sale_price: string | number;
   opening_stock: string | number;
   current_stock?: number;
+  base_unit?: string;
+  purchase_unit?: string;
+  sale_unit?: string;
+  default_kg_per_purchase_unit?: number | string;
+  default_sale_units_per_kg?: number | string;
+  unit_conversions?: Record<string, number>;
   is_active: boolean;
   notes: string | null;
   created_at: string;

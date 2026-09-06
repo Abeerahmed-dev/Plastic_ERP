@@ -1,19 +1,25 @@
 import { useAuthStore } from '../store/auth.store';
-import { Users, Truck, Scale, Box, FileText, Banknote, LayoutDashboard, TrendingUp } from 'lucide-react';
+import { Users, Truck, Scale, Box, FileText, Banknote, LayoutDashboard, TrendingUp, Sliders } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { reportsService } from '../services/reports.service';
+import CashierDashboard from './CashierDashboard';
 
 export const Dashboard = () => {
   const { user } = useAuthStore();
+  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+
+  if (isCashier) {
+    return <CashierDashboard />;
+  }
 
   const { data: metrics } = useQuery({
     queryKey: ['dashboardMetrics'],
     queryFn: () => reportsService.getDashboardMetrics(),
-    enabled: user?.role !== 'Cashier',
   });
 
   const navLinks = [
+    { to: '/onboarding', label: 'Day Zero Setup', icon: Sliders, permission: 'settings:read', color: 'amber' },
     { to: '/users', label: 'Employees', icon: Users, permission: 'users:read', color: 'indigo' },
     { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read', color: 'blue' },
     { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read', color: 'emerald' },

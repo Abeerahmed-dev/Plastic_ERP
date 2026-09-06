@@ -4,6 +4,7 @@ import { Plus, Search, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck } f
 import { purchasesService } from '../../services/purchases.service';
 import { useAuthStore } from '../../store/auth.store';
 import PurchaseFormModal from './PurchaseFormModal';
+import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
 
 const LIMIT = 20;
 
@@ -19,6 +20,8 @@ export default function PurchasesListPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   const handleSearch = (v: string) => {
     setSearch(v);
@@ -38,134 +41,168 @@ export default function PurchasesListPage() {
   const invoices = data?.data || [];
   const meta = data?.meta;
 
+  const handleOpenInvoice = async (id: string) => {
+    try {
+      const detail = await purchasesService.getInvoice(id);
+      setSelectedInvoice(detail as any);
+      setIsDetailModalOpen(true);
+    } catch (err) {
+      console.error('Failed to fetch purchase invoice details:', err);
+    }
+  };
+
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex-none px-6 py-6 sm:px-8 border-b border-slate-200 bg-white">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-              <Truck className="h-6 w-6 text-emerald-600" />
-              Purchases
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              {meta ? `${meta.total.toLocaleString()} purchase invoices` : 'Loading…'}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => refetch()}
-              className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition"
-              title="Refresh"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-            {canWrite && (
-              <button
-                onClick={() => setModalOpen(true)}
-                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition shadow-sm"
-              >
-                <Plus className="h-4 w-4" />
-                New Purchase
-              </button>
-            )}
-          </div>
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Header section */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <Truck className="h-6 w-6 text-purple-600" />
+            Purchase Invoices
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Track inventory stock arrivals and supplier purchase bills. Click purple document icon to view details.
+          </p>
         </div>
-
-        <div className="mt-6 flex items-center gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search by invoice number or supplier..."
-              className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-4 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto p-6 sm:px-8">
-        {isLoading ? (
-          <div className="flex h-32 items-center justify-center text-slate-500">Loading purchases...</div>
-        ) : isError ? (
-          <div className="flex h-32 items-center justify-center text-red-500">Failed to load purchases.</div>
-        ) : invoices.length === 0 ? (
-          <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50">
-            <FileText className="h-10 w-10 text-slate-400 mb-2" />
-            <span className="text-slate-500 font-medium">No purchase invoices found</span>
-            {canWrite && (
-              <button onClick={() => setModalOpen(true)} className="mt-4 text-emerald-600 hover:text-emerald-700 font-medium text-sm">
-                Create your first purchase invoice
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                  <tr>
-                    <th className="px-6 py-4 font-semibold">Date</th>
-                    <th className="px-6 py-4 font-semibold">Invoice #</th>
-                    <th className="px-6 py-4 font-semibold">Supplier</th>
-                    <th className="px-6 py-4 font-semibold text-right">Total Amount</th>
-                    <th className="px-6 py-4 font-semibold text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {invoices.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-slate-50 transition">
-                      <td className="px-6 py-4 text-slate-600">{new Date(inv.date).toLocaleDateString()}</td>
-                      <td className="px-6 py-4 font-medium text-slate-900">{inv.invoice_number}</td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900">{inv.supplier_name || 'Unknown'}</div>
-                      </td>
-                      <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                          inv.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                          inv.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {inv.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Pagination */}
-            {meta && meta.totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4 bg-slate-50">
-                <p className="text-sm text-slate-500">
-                  Showing <span className="font-medium">{(meta.page - 1) * meta.limit + 1}</span> to <span className="font-medium">{Math.min(meta.page * meta.limit, meta.total)}</span> of <span className="font-medium">{meta.total}</span> results
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    className="p-1 rounded hover:bg-slate-200 disabled:opacity-50 transition"
-                  >
-                    <ChevronLeft className="h-5 w-5" />
-                  </button>
-                  <span className="text-sm font-medium text-slate-700">
-                    Page {page} of {meta.totalPages}
-                  </span>
-                  <button
-                    onClick={() => setPage(p => Math.min(meta.totalPages, p + 1))}
-                    disabled={page === meta.totalPages}
-                    className="p-1 rounded hover:bg-slate-200 disabled:opacity-50 transition"
-                  >
-                    <ChevronRight className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+        {canWrite && (
+          <button
+            onClick={() => setModalOpen(true)}
+            className="inline-flex items-center justify-center rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 transition-all gap-2"
+          >
+            <Plus className="h-5 w-5" />
+            New Purchase Invoice
+          </button>
         )}
       </div>
+
+      {/* Search & Actions Bar */}
+      <div className="mb-6 flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div className="relative max-w-md w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search by invoice number or supplier..."
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm placeholder-slate-400 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition shadow-sm"
+          />
+        </div>
+        <button
+          onClick={() => refetch()}
+          className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-sm"
+          title="Refresh List"
+        >
+          <RefreshCw className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Content */}
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center py-20 rounded-2xl bg-white border border-slate-200">
+          <div className="h-8 w-8 animate-spin rounded-full border-3 border-purple-600 border-t-transparent" />
+          <p className="mt-3 text-sm text-slate-500 font-medium">Loading purchase invoices...</p>
+        </div>
+      ) : isError ? (
+        <div className="p-6 rounded-2xl bg-red-50 border border-red-200 text-center">
+          <p className="text-sm font-medium text-red-800">Failed to load purchase invoices.</p>
+          <button onClick={() => refetch()} className="mt-2 text-xs font-semibold text-red-600 hover:underline">
+            Try again
+          </button>
+        </div>
+      ) : invoices.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 rounded-2xl bg-white border border-slate-200 text-center">
+          <FileText className="h-12 w-12 text-slate-300 mb-3" />
+          <span className="text-slate-500 font-medium">No purchase invoices found</span>
+          {canWrite && (
+            <button
+              onClick={() => setModalOpen(true)}
+              className="mt-3 text-sm text-purple-600 hover:text-purple-700 font-semibold"
+            >
+              Create your first purchase invoice
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                <tr>
+                  <th className="px-6 py-4 font-semibold">Invoice #</th>
+                  <th className="px-6 py-4 font-semibold">Date</th>
+                  <th className="px-6 py-4 font-semibold">Supplier</th>
+                  <th className="px-6 py-4 font-semibold text-right">Total Amount</th>
+                  <th className="px-6 py-4 font-semibold text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {invoices.map((inv) => (
+                  <tr key={inv.id} className="hover:bg-slate-50 transition">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <button
+                        onClick={() => handleOpenInvoice(inv.id)}
+                        className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                        title="Click to view purchase invoice details"
+                      >
+                        <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 group-hover:scale-105 transition-all shadow-xs">
+                          <FileText className="h-4 w-4" />
+                        </div>
+                        <div className="ml-3">
+                          <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 group-hover:underline font-mono">
+                            {inv.invoice_number}
+                          </div>
+                        </div>
+                      </button>
+                    </td>
+                    <td className="px-6 py-4 text-slate-600">{new Date(inv.date).toLocaleDateString()}</td>
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-slate-900">{inv.supplier_name || 'Unknown'}</div>
+                    </td>
+                    <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                        inv.status === 'PAID' ? 'bg-green-100 text-green-700' :
+                        inv.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {inv.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {meta && meta.totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4 bg-slate-50">
+              <p className="text-sm text-slate-500">
+                Showing <span className="font-medium">{(meta.page - 1) * meta.limit + 1}</span> to <span className="font-medium">{Math.min(meta.page * meta.limit, meta.total)}</span> of <span className="font-medium">{meta.total}</span> results
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="p-1 rounded hover:bg-slate-200 disabled:opacity-50 transition"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <span className="text-sm font-medium text-slate-700">
+                  Page {page} of {meta.totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(p => Math.min(meta.totalPages, p + 1))}
+                  disabled={page === meta.totalPages}
+                  className="p-1 rounded hover:bg-slate-200 disabled:opacity-50 transition"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {modalOpen && (
         <PurchaseFormModal
@@ -173,6 +210,13 @@ export default function PurchasesListPage() {
           onSuccess={() => refetch()}
         />
       )}
+
+      <InvoiceDetailModal
+        isOpen={isDetailModalOpen}
+        onClose={() => setIsDetailModalOpen(false)}
+        invoice={selectedInvoice}
+        type="purchase"
+      />
     </div>
   );
 }

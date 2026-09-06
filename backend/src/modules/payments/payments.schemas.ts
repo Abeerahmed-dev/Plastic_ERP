@@ -5,7 +5,7 @@ export const createPaymentSchema = z.object({
   invoice_id: z.string().uuid().optional().nullable(),
   payment_date: z.string(), // ISO date string
   amount: z.number().min(0.01, 'Amount must be greater than 0'),
-  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE']),
+  payment_method: z.enum(['CASH', 'BANK', 'PDC', 'BANK_TRANSFER', 'CHEQUE']),
   notes: z.string().optional(),
 });
 

@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
 import { requirePermission } from '../../middleware/requirePermission';
+import { verifyRole } from '../../middleware/requireRole';
 import * as purchasesController from './purchases.controller';
 
 const router = Router();
 
 router.use(requireAuth);
+router.use(verifyRole(['OWNER', 'ADMIN']));
 
 router.get('/', requirePermission('purchases:read'), purchasesController.getPurchaseInvoices);
 router.get('/:id', requirePermission('purchases:read'), purchasesController.getPurchaseInvoiceById);

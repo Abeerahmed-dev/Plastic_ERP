@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 export const checkoutItemSchema = z.object({
   product_id: z.string().uuid(),
-  quantity: z.number().int().positive(),
+  batch_id: z.string().uuid().optional().nullable(),
+  quantity: z.number().positive(),
+  selected_unit: z.string().optional().default('Dasti'),
   unit_price: z.number().nonnegative(),
 });
 

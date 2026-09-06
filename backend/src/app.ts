@@ -17,10 +17,20 @@ import { purchasesRouter } from './modules/purchases/purchases.router';
 import supplierPaymentsRouter from './modules/supplier-payments/supplier-payments.router';
 import { posRouter } from './modules/pos/pos.router';
 import { reportsRouter } from './modules/reports/reports.router';
+import { onboardingRouter } from './modules/onboarding/onboarding.router';
 import { fail } from './shared/apiResponse';
 
 export function createApp(): Application {
   const app = express();
+
+  // ─── Disable ETag & Cache for JSON APIs ───────
+  app.disable('etag');
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
 
   // ─── Security & parsing ────────────────────────
   app.use(helmet());
@@ -40,11 +50,13 @@ export function createApp(): Application {
   app.use('/api/v1/uom', uomRouter);
   app.use('/api/v1/products', productsRouter);
   app.use('/api/v1/invoices', invoicesRouter);
+  app.use('/api/v1/sales', invoicesRouter);
   app.use('/api/v1/payments', paymentsRouter);
   app.use('/api/v1/purchases', purchasesRouter);
   app.use('/api/v1/supplier-payments', supplierPaymentsRouter);
   app.use('/api/v1/pos', posRouter);
   app.use('/api/v1/reports', reportsRouter);
+  app.use('/api/v1/onboarding', onboardingRouter);
 
   // ─── 404 handler ─────────────────────────────
   app.use((_req: Request, res: Response, _next: NextFunction) => {

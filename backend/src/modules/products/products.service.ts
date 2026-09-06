@@ -50,3 +50,7 @@ export async function deactivateProduct(id: string): Promise<void> {
   await getProduct(id);
   await productsRepo.softDeleteProduct(id);
 }
+
+export async function getProductBatches(productId: string) {
+  return productsRepo.getAvailableBatches(productId);
+}

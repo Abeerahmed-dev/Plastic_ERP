@@ -28,7 +28,7 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
 
   const { data: suppliersResponse } = useQuery({ queryKey: ['suppliers'], queryFn: () => getSuppliers({ limit: 100 }) });
   
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
       payment_date: new Date().toISOString().split('T')[0],
@@ -38,6 +38,7 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
   });
 
   const selectedSupplierId = watch('supplier_id');
+  const selectedInvoiceId = watch('purchase_invoice_id');
 
   const { data: invoicesResponse } = useQuery({ 
     queryKey: ['purchases', { supplier_id: selectedSupplierId, status: 'UNPAID,PARTIAL' }], 
@@ -46,6 +47,20 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
   });
 
   const invoices = invoicesResponse?.data?.filter(inv => inv.status !== 'PAID') || [];
+  const selectedBill = invoices.find((inv) => inv.id === selectedInvoiceId);
+  const selectedBillBalance = selectedBill
+    ? Math.max(0, Number(selectedBill.total_amount) - Number(selectedBill.paid_amount))
+    : 0;
+
+  const handleClearFullBalance = () => {
+    if (selectedBillBalance > 0) {
+      setValue('amount', Math.round(selectedBillBalance * 100) / 100, {
+        shouldValidate: true,
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: (data: FormData) => supplierPaymentsService.createPayment({
@@ -110,8 +125,26 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Amount</label>
-              <input type="number" step="0.01" {...register('amount')} className={inputCls(!!errors.amount)} />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-slate-700">Amount</label>
+              </div>
+              <div className="relative w-full">
+                <input
+                  type="number"
+                  step="0.01"
+                  {...register('amount')}
+                  className={inputCls(!!errors.amount) + (selectedBill && selectedBillBalance > 0 ? ' pr-36' : '')}
+                />
+                {selectedBill && selectedBillBalance > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearFullBalance}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200 transition-all cursor-pointer shadow-2xs"
+                  >
+                    Clear Full Balance
+                  </button>
+                )}
+              </div>
               {errors.amount && <p className="mt-1 text-xs text-red-600">{errors.amount.message}</p>}
             </div>
 

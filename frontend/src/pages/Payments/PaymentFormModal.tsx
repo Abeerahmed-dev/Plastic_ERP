@@ -7,13 +7,14 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { paymentsService } from '../../services/payments.service';
 import { getCustomers } from '../../services/customers.service';
 import { invoicesService } from '../../services/invoices.service';
+import { useAuthStore } from '../../store/auth.store';
 
 const paymentSchema = z.object({
   customer_id: z.string().uuid('Please select a customer'),
   invoice_id: z.string().uuid().optional().or(z.literal('')),
   payment_date: z.string().min(1, 'Date is required'),
   amount: z.coerce.number().min(0.01, 'Amount must be greater than 0'),
-  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE']),
+  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'BANK', 'PDC']),
   notes: z.string().optional(),
 });
 
@@ -26,6 +27,8 @@ interface PaymentFormModalProps {
 }
 
 export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModalProps) => {
+  const { user } = useAuthStore();
+  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
   const { data: customersResponse } = useQuery({
     queryKey: ['customers', { page: 1, limit: 100 }],
     queryFn: () => getCustomers({ page: 1, limit: 100 }),
@@ -50,6 +53,7 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
     register,
     handleSubmit,
     watch,
+    setValue,
     reset,
     formState: { errors },
   } = useForm<PaymentFormData>({
@@ -65,11 +69,27 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
   });
 
   const selectedCustomerId = watch('customer_id');
+  const selectedInvoiceId = watch('invoice_id');
 
   // Filter invoices to only show UNPAID or PARTIAL invoices for the selected customer
   const availableInvoices = invoices.filter(
     (inv) => inv.customer_id === selectedCustomerId && ['UNPAID', 'PARTIAL'].includes(inv.status)
   );
+
+  const selectedInvoice = availableInvoices.find((inv) => inv.id === selectedInvoiceId);
+  const selectedInvoiceBalance = selectedInvoice
+    ? Math.max(0, Number(selectedInvoice.total_amount) - Number(selectedInvoice.paid_amount))
+    : 0;
+
+  const handleClearFullBalance = () => {
+    if (selectedInvoiceBalance > 0) {
+      setValue('amount', Math.round(selectedInvoiceBalance * 100) / 100, {
+        shouldValidate: true,
+        shouldDirty: true,
+        shouldTouch: true,
+      });
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -148,18 +168,29 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Payment Method</label>
-                <select {...register('payment_method')} className={inputCls(!!errors.payment_method)}>
-                  <option value="CASH">Cash</option>
-                  <option value="BANK_TRANSFER">Bank Transfer</option>
-                  <option value="CHEQUE">Cheque</option>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Destination Bucket</label>
+                <select
+                  {...register('payment_method')}
+                  disabled={isCashier}
+                  className={inputCls(!!errors.payment_method) + (isCashier ? ' bg-slate-100 font-semibold text-slate-700 cursor-not-allowed' : '')}
+                >
+                  <option value="CASH">Cash in Drawer (Galla)</option>
+                  {!isCashier && <option value="BANK">Bank Account</option>}
+                  {!isCashier && <option value="PDC">PDC (Post-Dated Cheque)</option>}
                 </select>
+                {isCashier && (
+                  <p className="mt-1 text-[11px] text-slate-500 font-medium">
+                    Cashier payments are automatically routed to Cash in Drawer (Galla).
+                  </p>
+                )}
                 {errors.payment_method && <p className="mt-1 text-xs text-red-600">{errors.payment_method.message}</p>}
               </div>
 
               <div className="md:col-span-2">
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Amount Received</label>
-                <div className="relative">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-medium text-slate-700">Amount Received</label>
+                </div>
+                <div className="relative w-full">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <span className="text-slate-500 sm:text-sm">Rs.</span>
                   </div>
@@ -167,12 +198,23 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
                     type="number"
                     step="0.01"
                     {...register('amount')}
-                    className={`block w-full rounded-xl border px-3 py-3 pl-7 text-lg font-medium transition-colors focus:outline-none focus:ring-2 ${
+                    className={`block w-full rounded-xl border px-3 py-3 pl-10 text-lg font-medium transition-colors focus:outline-none focus:ring-2 ${
+                      selectedInvoice && selectedInvoiceBalance > 0 ? 'pr-36' : ''
+                    } ${
                       errors.amount
                         ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
                         : 'border-emerald-200 focus:border-emerald-500 focus:ring-emerald-500/20 text-emerald-900 bg-emerald-50/50'
                     }`}
                   />
+                  {selectedInvoice && selectedInvoiceBalance > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearFullBalance}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-300 transition-all cursor-pointer shadow-2xs"
+                    >
+                      Clear Full Balance
+                    </button>
+                  )}
                 </div>
                 {errors.amount && <p className="mt-1 text-xs text-red-600">{errors.amount.message}</p>}
               </div>

@@ -24,6 +24,9 @@ import { useAuthStore } from './store/auth.store';
  *   Session 04 → /products
  *   …
  */
+import FinancialReports from './pages/FinancialReports';
+import SystemInitialization from './pages/SystemInitialization';
+
 function App() {
   const { user } = useAuthStore();
   return (
@@ -34,6 +37,7 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/onboarding" element={<SystemInitialization />} />
           <Route path="/users" element={<ProtectedRoute requiredPermission="users:read" />}>
             <Route index element={<UsersListPage />} />
           </Route>
@@ -48,6 +52,7 @@ function App() {
           <Route path="/payments" element={<PaymentsListPage />} />
           <Route path="/supplier-payments" element={<SupplierPaymentsListPage />} />
           <Route path="/pos" element={<POSPage />} />
+          <Route path="/reports" element={<FinancialReports />} />
         </Route>
       </Route>
 

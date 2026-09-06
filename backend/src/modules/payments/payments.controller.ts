@@ -15,6 +15,11 @@ export async function listPayments(_req: Request, res: Response, next: NextFunct
 
 export async function createPayment(req: Request, res: Response, next: NextFunction) {
   try {
+    const userRole = (req.user?.roleName || '').toUpperCase();
+    if (userRole === 'CASHIER') {
+      req.body.payment_method = 'CASH';
+    }
+
     const parsed = createPaymentSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));

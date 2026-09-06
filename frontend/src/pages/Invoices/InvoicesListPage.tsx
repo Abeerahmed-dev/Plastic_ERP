@@ -4,11 +4,14 @@ import { Plus, Search, FileText } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
 import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
+import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
 
 export default function InvoicesListPage() {
   const { hasPermission } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   const canWrite = hasPermission('customers:write');
 
@@ -17,6 +20,16 @@ export default function InvoicesListPage() {
     queryFn: invoicesService.getInvoices,
   });
 
+  const handleOpenInvoice = async (id: string) => {
+    try {
+      const detail = await invoicesService.getInvoice(id);
+      setSelectedInvoice(detail as any);
+      setIsDetailModalOpen(true);
+    } catch (err) {
+      console.error('Failed to fetch invoice details:', err);
+    }
+  };
+
   const filteredInvoices = invoices.filter(
     (i) =>
       i.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -24,9 +37,10 @@ export default function InvoicesListPage() {
   );
 
   const formatCurrency = (val: string | number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-PK', {
       style: 'currency',
-      currency: 'USD',
+      currency: 'PKR',
+      minimumFractionDigits: 2,
     }).format(Number(val));
   };
 
@@ -50,7 +64,7 @@ export default function InvoicesListPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Sales Invoices</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Create and manage customer bills and receivables.
+            Create and manage customer bills and receivables. Click purple document icon to view line item details.
           </p>
         </div>
         {canWrite && (
@@ -128,14 +142,23 @@ export default function InvoicesListPage() {
                   return (
                     <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                        <button
+                          onClick={() => handleOpenInvoice(invoice.id)}
+                          className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                          title="Click to view detailed invoice line items"
+                        >
+                          <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-purple-100 text-purple-700 group-hover:bg-purple-200 group-hover:scale-105 transition-all shadow-xs">
                             <FileText className="h-5 w-5" />
                           </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-semibold text-slate-900">{invoice.invoice_number}</div>
+                          <div className="ml-3">
+                            <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 group-hover:underline font-mono">
+                              {invoice.invoice_number}
+                            </div>
+                            <div className="text-[10px] text-purple-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                              View details →
+                            </div>
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-slate-900">{invoice.customer_name}</div>
@@ -171,6 +194,13 @@ export default function InvoicesListPage() {
           setIsModalOpen(false);
           refetch();
         }}
+      />
+
+      <InvoiceDetailModal
+        isOpen={isDetailModalOpen}
+        onClose={() => setIsDetailModalOpen(false)}
+        invoice={selectedInvoice}
+        type="sales"
       />
     </div>
   );

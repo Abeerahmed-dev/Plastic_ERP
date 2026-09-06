@@ -10,6 +10,12 @@ export const createProductSchema = z.object({
   cost_price: z.coerce.number().min(0).default(0),
   sale_price: z.coerce.number().min(0).default(0),
   opening_stock: z.coerce.number().min(0).default(0),
+  base_unit: z.string().default('KG').optional(),
+  purchase_unit: z.string().default('Bora').optional(),
+  sale_unit: z.string().default('Dasti').optional(),
+  default_kg_per_purchase_unit: z.coerce.number().min(0).default(25.00).optional(),
+  default_sale_units_per_kg: z.coerce.number().min(0).default(2.00).optional(),
+  unit_conversions: z.record(z.string(), z.number()).optional().default({ Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 }),
   notes: z.string().optional().nullable(),
 });
 

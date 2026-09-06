@@ -62,3 +62,10 @@ export async function deleteProductController(req: Request, res: Response, next:
     res.status(200).json(ok({ message: 'Product deactivated successfully' }));
   } catch (err) { next(err); }
 }
+
+export async function getProductBatchesController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const batches = await productsService.getProductBatches(req.params.id);
+    res.status(200).json(ok(batches));
+  } catch (err) { next(err); }
+}

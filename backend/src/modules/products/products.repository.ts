@@ -11,6 +11,11 @@ export interface ProductRow {
   cost_price: number;
   sale_price: number;
   opening_stock: number;
+  base_unit: string;
+  purchase_unit: string;
+  sale_unit: string;
+  default_kg_per_purchase_unit: number;
+  default_sale_units_per_kg: number;
   is_active: boolean;
   notes: string | null;
   created_by: string | null;
@@ -51,22 +56,22 @@ export async function computeCurrentStock(productId: string): Promise<number> {
   
   let currentStock = Number(product.opening_stock);
 
-  // Add purchased quantities
+  // Add purchased quantities in KG balance
   const purchases = await db('purchase_invoice_items')
     .where('product_id', productId)
-    .sum('quantity as total_in')
+    .select(db.raw('SUM(COALESCE(net_kg_processed, COALESCE(net_kg_added, quantity))) as total_in'))
     .first();
-  if (purchases && purchases.total_in) {
-    currentStock += Number(purchases.total_in);
+  if (purchases && (purchases as any).total_in) {
+    currentStock += Number((purchases as any).total_in);
   }
 
-  // Subtract sold quantities
+  // Subtract sold quantities in KG balance
   const sales = await db('sales_invoice_items')
     .where('product_id', productId)
-    .sum('quantity as total_out')
+    .select(db.raw('SUM(COALESCE(net_kg_processed, quantity)) as total_out'))
     .first();
-  if (sales && sales.total_out) {
-    currentStock -= Number(sales.total_out);
+  if (sales && (sales as any).total_out) {
+    currentStock -= Number((sales as any).total_out);
   }
 
   return currentStock;
@@ -173,6 +178,11 @@ export async function createProduct(
       cost_price: data.cost_price,
       sale_price: data.sale_price,
       opening_stock: data.opening_stock,
+      base_unit: data.base_unit ?? 'KG',
+      purchase_unit: data.purchase_unit ?? 'Bora',
+      sale_unit: data.sale_unit ?? 'Dasti',
+      default_kg_per_purchase_unit: data.default_kg_per_purchase_unit ?? 25.00,
+      default_sale_units_per_kg: data.default_sale_units_per_kg ?? 2.00,
       notes: data.notes ?? null,
       created_by: createdBy,
     })
@@ -199,4 +209,39 @@ export async function updateProduct(
 export async function softDeleteProduct(id: string): Promise<boolean> {
   const count = await db('products').where({ id }).update({ is_active: false, updated_at: new Date() });
   return count > 0;
+}
+
+export async function getAvailableBatches(productId: string) {
+  const batches = await db('inventory_batches')
+    .where('product_id', productId)
+    .andWhere('remaining_qty', '>', 0)
+    .orderBy('created_at', 'asc');
+
+  if (batches.length === 0) {
+    const product = await db('products').where({ id: productId }).first();
+    if (product) {
+      const currentStock = await computeCurrentStock(productId);
+      if (currentStock > 0) {
+        const conversions = typeof product.unit_conversions === 'string'
+          ? JSON.parse(product.unit_conversions)
+          : (product.unit_conversions || { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 });
+
+        const [newBatch] = await db('inventory_batches')
+          .insert({
+            product_id: productId,
+            batch_number: `BATCH-AUTO-${product.code}`,
+            initial_qty: currentStock,
+            remaining_qty: currentStock,
+            buy_price_per_kg: Number(product.cost_price || 0),
+            selected_unit: product.purchase_unit || 'Bora',
+            actual_weight_per_unit: Number(product.default_kg_per_purchase_unit || 25.0),
+            batch_unit_conversions: JSON.stringify(conversions),
+          })
+          .returning('*');
+        return [newBatch];
+      }
+    }
+  }
+
+  return batches;
 }

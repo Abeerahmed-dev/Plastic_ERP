@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Users, Box, FileText, Truck, Scale, Menu, X, HandCoins, ShoppingCart, LayoutDashboard } from 'lucide-react';
+import { LogOut, Users, Box, FileText, Truck, Scale, Menu, X, HandCoins, ShoppingCart, LayoutDashboard, PieChart, Sliders } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
 import { authService } from '../../services/auth.service';
 
@@ -23,7 +23,9 @@ export const MainLayout = () => {
 
   const navLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: null },
+    { to: '/onboarding', label: 'Day Zero Setup', icon: Sliders, permission: null },
     { to: '/pos', label: 'Walk-in POS', icon: ShoppingCart, permission: 'sales:write' },
+    { to: '/reports', label: 'Financial Reports', icon: PieChart, permission: null },
     { to: '/users', label: 'Employees', icon: Users, permission: 'users:read' },
     { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read' },
     { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },
@@ -57,13 +59,26 @@ export const MainLayout = () => {
                 </div>
                 <span className="font-bold text-xl text-slate-900 tracking-tight hidden sm:block">Sabir Plastic</span>
               </div>
+
+              {/* Desktop Navigation Links */}
+              <div className="hidden md:flex items-center gap-1 ml-4 border-l border-slate-200 pl-4">
+                <Link to="/dashboard" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname === '/dashboard' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Dashboard</Link>
+                {user?.roleName?.toUpperCase() !== 'CASHIER' && (
+                  <>
+                    <Link to="/reports" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/reports') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Financial Reports</Link>
+                    <Link to="/purchases" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/purchases') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Purchases</Link>
+                  </>
+                )}
+                <Link to="/invoices" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/invoices') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Sales Invoices</Link>
+                <Link to="/pos" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/pos') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>POS</Link>
+              </div>
             </div>
 
             {/* Profile & Logout (Top Right) */}
             <div className="flex items-center gap-4">
               <div className="flex flex-col items-end">
                 <span className="text-sm font-medium text-slate-900">{user?.name}</span>
-                <span className="text-xs text-slate-500 capitalize">{user?.role}</span>
+                <span className="text-xs text-slate-500 capitalize">{user?.roleName || user?.role}</span>
               </div>
               <button
                 onClick={handleLogout}
@@ -81,11 +96,11 @@ export const MainLayout = () => {
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-[100] flex">
           {/* Backdrop */}
-          <div 
+          <div
             className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm"
             onClick={() => setIsMobileMenuOpen(false)}
           ></div>
-          
+
           {/* Drawer */}
           <div className="relative w-64 max-w-sm bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-left duration-200">
             <div className="p-4 border-b border-slate-100 flex items-center justify-between">
@@ -97,9 +112,13 @@ export const MainLayout = () => {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
+
             <div className="p-4 flex flex-col gap-2 overflow-y-auto">
               {navLinks.map(({ to, label, icon: Icon, permission }) => {
+                const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+                if (isCashier && ['/reports', '/purchases', '/onboarding', '/users', '/supplier-payments'].includes(to)) {
+                  return null;
+                }
                 // If permission is strictly required, check it
                 if (permission && !user?.permissions?.includes(permission)) return null;
 
@@ -111,11 +130,10 @@ export const MainLayout = () => {
                     key={to}
                     to={to}
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${
-                      isActive 
-                        ? 'bg-blue-50 text-blue-700' 
+                    className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${isActive
+                        ? 'bg-blue-50 text-blue-700'
                         : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     <Icon className={`h-5 w-5 ${isActive ? 'text-blue-700' : 'text-slate-400'}`} />
                     {label}
@@ -123,7 +141,7 @@ export const MainLayout = () => {
                 );
               })}
             </div>
-            
+
             <div className="mt-auto border-t border-slate-100 p-4">
               <button
                 onClick={handleLogout}
