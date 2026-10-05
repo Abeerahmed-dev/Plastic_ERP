@@ -1,5 +1,6 @@
 import React from 'react';
-import { X, Printer, FileText, Calendar, User, Truck, DollarSign, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Printer, FileText, Calendar, User, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useAuthStore } from '../store/auth.store';
 
 export interface InvoiceDetailItem {
   id?: string;
@@ -22,6 +23,9 @@ export interface InvoiceDetailData {
   date: string;
   due_date?: string | null;
   status: string;
+  invoice_type?: string;
+  parent_invoice_id?: string | null;
+  return_reason?: string | null;
   customer_name?: string;
   customer_code?: string;
   customer_phone?: string;
@@ -32,10 +36,12 @@ export interface InvoiceDetailData {
   supplier_city?: string;
   subtotal: number;
   discount: number;
+  delivery_charge?: number;
   total_amount: number;
   paid_amount: number;
   notes?: string | null;
   items: InvoiceDetailItem[];
+  credit_notes?: InvoiceDetailData[];
 }
 
 interface InvoiceDetailModalProps {
@@ -43,9 +49,13 @@ interface InvoiceDetailModalProps {
   onClose: () => void;
   invoice: InvoiceDetailData | null;
   type?: 'sales' | 'purchase';
+  onProcessReturn?: (invoiceId: string) => void;
 }
 
-export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales' }: InvoiceDetailModalProps) {
+export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn }: InvoiceDetailModalProps) {
+  const { user } = useAuthStore();
+  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+
   if (!isOpen || !invoice) return null;
 
   const formatPKR = (val: number | undefined | null) => {
@@ -69,13 +79,28 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
   const subtotal = Number(invoice.subtotal || invoice.total_amount + (invoice.discount || 0));
   const discount = Number(invoice.discount || 0);
+  const deliveryCharge = Number(invoice.delivery_charge || 0);
   const totalAmount = Number(invoice.total_amount || 0);
   const paidAmount = Number(invoice.paid_amount || 0);
   const balanceDue = Math.max(0, totalAmount - paidAmount);
 
+  const isCreditNote = invoice.invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || totalAmount < 0;
   const statusUpper = (invoice.status || 'UNPAID').toUpperCase();
 
+  // Child Credit Notes Calculation
+  const creditNotes = invoice.credit_notes || [];
+  const totalReturnedAmount = creditNotes.reduce((acc, cn) => acc + Math.abs(Number(cn.total_amount || 0)), 0);
+  const netFinalInvoiceTotal = Math.max(0, totalAmount - totalReturnedAmount);
+
   const getStatusBadge = () => {
+    if (isCreditNote) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-red-100 text-red-800 border border-red-300">
+          <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+          CREDIT NOTE
+        </span>
+      );
+    }
     if (statusUpper === 'PAID') {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -110,15 +135,15 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 print:bg-white print:border-b-2 print:border-slate-900">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-purple-50 text-purple-600 print:hidden">
+            <div className={`p-2 rounded-xl print:hidden ${isCreditNote ? 'bg-red-100 text-red-700' : 'bg-purple-50 text-purple-600'}`}>
               <FileText className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-900 font-mono tracking-tight">
-                {type === 'purchase' ? 'Purchase Invoice' : 'Invoice'} #{invoice.invoice_number}
+              <h2 className="text-lg font-black text-slate-900 font-mono tracking-tight flex items-center gap-2">
+                {isCreditNote ? 'Credit Note Invoice' : (type === 'purchase' ? 'Purchase Invoice' : 'Sales Invoice')} #{invoice.invoice_number}
               </h2>
               <p className="text-xs text-slate-500 font-medium print:hidden">
-                Detailed line-item & batch breakdown
+                {isCreditNote ? `Return Reason: ${invoice.return_reason || 'N/A'}` : 'Detailed line-item & batch breakdown'}
               </p>
             </div>
           </div>
@@ -175,7 +200,9 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <th className="py-2.5 px-3">#</th>
                   <th className="py-2.5 px-3">Product</th>
                   <th className="py-2.5 px-3">Batch Info</th>
-                  <th className="py-2.5 px-3 text-right">Qty</th>
+                  <th className="py-2.5 px-3 text-right">Original Qty</th>
+                  {creditNotes.length > 0 && <th className="py-2.5 px-3 text-right text-red-600">Returned</th>}
+                  {creditNotes.length > 0 && <th className="py-2.5 px-3 text-right text-purple-700 font-bold">Net Qty</th>}
                   <th className="py-2.5 px-3">Unit</th>
                   <th className="py-2.5 px-3 text-right">Unit Price</th>
                   <th className="py-2.5 px-3 text-right">Total</th>
@@ -184,7 +211,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               <tbody className="divide-y divide-slate-100">
                 {(!invoice.items || invoice.items.length === 0) ? (
                   <tr>
-                    <td colSpan={7} className="py-6 text-center text-slate-400 italic">
+                    <td colSpan={creditNotes.length > 0 ? 9 : 7} className="py-6 text-center text-slate-400 italic">
                       No line items found for this invoice.
                     </td>
                   </tr>
@@ -193,8 +220,16 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                     const unitName = item.selected_unit || 'Dasti';
                     const batchNo = item.batch_number || 'DEFAULT';
 
+                    const returnedQty = creditNotes.reduce((acc, cn) => {
+                      const matching = (cn.items || []).filter((i) => i.product_id === item.product_id);
+                      return acc + matching.reduce((sum, ci) => sum + Math.abs(Number(ci.quantity || 0)), 0);
+                    }, 0);
+
+                    const origQty = Number(item.quantity || 0);
+                    const netQty = Math.max(0, origQty - returnedQty);
+
                     return (
-                      <tr key={item.id || idx} className="hover:bg-slate-50">
+                      <tr key={item.id || idx} className={isCreditNote ? 'bg-red-50/50' : 'hover:bg-slate-50'}>
                         <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
                         <td className="py-2.5 px-3 font-semibold text-slate-900">
                           {item.product_name}
@@ -209,13 +244,23 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                           )}
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-medium text-slate-800">
-                          {formatNumber(item.quantity)}
+                          {formatNumber(origQty)}
                         </td>
+                        {creditNotes.length > 0 && (
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-red-600">
+                            {returnedQty > 0 ? `-${formatNumber(returnedQty)}` : '-'}
+                          </td>
+                        )}
+                        {creditNotes.length > 0 && (
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-purple-700">
+                            {formatNumber(netQty)}
+                          </td>
+                        )}
                         <td className="py-2.5 px-3 text-slate-600 font-medium">{unitName}</td>
                         <td className="py-2.5 px-3 text-right font-mono text-slate-700">
                           {formatPKR(item.unit_price)}
                         </td>
-                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                        <td className={`py-2.5 px-3 text-right font-mono font-bold ${isCreditNote ? 'text-red-700' : 'text-slate-900'}`}>
                           {formatPKR(item.total_price)}
                         </td>
                       </tr>
@@ -226,18 +271,51 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             </table>
           </div>
 
+          {/* Child Credit Notes Section */}
+          {creditNotes.length > 0 && (
+            <div className="p-4 rounded-xl bg-red-50/70 border border-red-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-red-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <RotateCcw className="w-4 h-4 text-red-600" />
+                  Processed Returns / Credit Notes ({creditNotes.length})
+                </span>
+                <span className="text-xs font-mono font-bold text-red-700">
+                  Total Refunded: -{formatPKR(totalReturnedAmount)}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {creditNotes.map((cn) => (
+                  <div key={cn.id} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-red-200/60">
+                    <div>
+                      <span className="font-mono font-bold text-slate-900 mr-2">#{cn.invoice_number}</span>
+                      <span className="text-slate-500">{new Date(cn.date).toLocaleDateString()}</span>
+                      {cn.return_reason && (
+                        <span className="ml-2 px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                          {cn.return_reason}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono font-bold text-red-600">
+                      -{formatPKR(Math.abs(cn.total_amount))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Summary Footer */}
           <div className="flex flex-col md:flex-row justify-between gap-4 pt-2">
             <div className="text-xs text-slate-500 space-y-1">
               {invoice.notes && (
                 <div>
-                  <strong className="text-slate-700 block">Notes:</strong>
+                  <strong className="text-slate-700 block">Notes / Reason:</strong>
                   <p className="italic bg-slate-50 p-2 rounded border border-slate-200">{invoice.notes}</p>
                 </div>
               )}
             </div>
 
-            <div className="w-full md:w-64 space-y-2 text-xs border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-6">
+            <div className="w-full md:w-72 space-y-2 text-xs border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-6">
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal:</span>
                 <span className="font-mono font-semibold">{formatPKR(subtotal)}</span>
@@ -248,25 +326,47 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <span className="font-mono font-semibold">-{formatPKR(discount)}</span>
                 </div>
               )}
+              {deliveryCharge > 0 && (
+                <div className="flex justify-between text-blue-600">
+                  <span>Delivery / Freight:</span>
+                  <span className="font-mono font-semibold">+{formatPKR(deliveryCharge)}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-slate-900 text-sm pt-1 border-t border-slate-200">
-                <span>Grand Total:</span>
-                <span className="font-mono">{formatPKR(totalAmount)}</span>
+                <span>Original Grand Total:</span>
+                <span className={`font-mono ${isCreditNote ? 'text-red-600 font-bold' : ''}`}>{formatPKR(totalAmount)}</span>
               </div>
-              <div className="flex justify-between text-slate-700">
+
+              {creditNotes.length > 0 && (
+                <>
+                  <div className="flex justify-between font-bold text-red-600 text-xs">
+                    <span>Less Returns (Credit Notes):</span>
+                    <span className="font-mono">-{formatPKR(totalReturnedAmount)}</span>
+                  </div>
+                  <div className="flex justify-between font-black text-purple-700 text-sm pt-1.5 border-t border-purple-200 bg-purple-50/50 p-1.5 rounded">
+                    <span>Net Final Invoice Total:</span>
+                    <span className="font-mono">{formatPKR(netFinalInvoiceTotal)}</span>
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-between text-slate-700 pt-1">
                 <span>Amount Paid:</span>
                 <span className="font-mono font-medium">{formatPKR(paidAmount)}</span>
               </div>
 
-              {balanceDue > 0 ? (
-                <div className="flex justify-between font-black text-rose-600 text-sm pt-1.5 border-t border-rose-200">
-                  <span>Balance Due:</span>
-                  <span className="font-mono">{formatPKR(balanceDue)}</span>
-                </div>
-              ) : (
-                <div className="flex justify-between font-bold text-emerald-600 text-xs pt-1 border-t border-emerald-100">
-                  <span>Balance Due:</span>
-                  <span className="font-mono">Rs. 0.00 (Fully Paid)</span>
-                </div>
+              {!isCashier && (
+                balanceDue > 0 ? (
+                  <div className="flex justify-between font-black text-rose-600 text-sm pt-1.5 border-t border-rose-200">
+                    <span>Balance Due:</span>
+                    <span className="font-mono">{formatPKR(balanceDue)}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between font-bold text-emerald-600 text-xs pt-1 border-t border-emerald-100">
+                    <span>Balance Due:</span>
+                    <span className="font-mono">Rs. 0.00 (Fully Settled)</span>
+                  </div>
+                )
               )}
             </div>
           </div>
@@ -281,15 +381,31 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             Close
           </button>
 
-          <button
-            onClick={handlePrint}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-md transition active:scale-95"
-          >
-            <Printer className="w-4 h-4" />
-            Print Invoice
-          </button>
+          <div className="flex items-center gap-3">
+            {!isCashier && type === 'sales' && !isCreditNote && onProcessReturn && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onProcessReturn(invoice.id);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-sm font-bold shadow-xs transition active:scale-95"
+              >
+                <RotateCcw className="w-4 h-4 text-red-600" />
+                Process Return (Credit Note)
+              </button>
+            )}
+
+            <button
+              onClick={handlePrint}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-md transition active:scale-95"
+            >
+              <Printer className="w-4 h-4" />
+              Print Invoice
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+

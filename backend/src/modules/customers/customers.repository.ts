@@ -10,6 +10,7 @@ export interface CustomerRow {
   address: string | null;
   city: string | null;
   region: string | null;
+  customer_type: 'CASH' | 'CREDIT';
   credit_limit: number;
   opening_balance: number;
   is_active: boolean;
@@ -21,6 +22,7 @@ export interface CustomerRow {
 
 export interface CustomerWithBalance extends CustomerRow {
   outstanding_balance: number;
+  net_lifetime_volume_kg: number;
 }
 
 /**
@@ -43,8 +45,6 @@ export async function generateCustomerCode(): Promise<string> {
 
 /**
  * Compute outstanding balance for a single customer.
- * Session 03: only opening_balance.
- * Sessions 08/09/13 will add sales/payments/returns to this query.
  */
 export async function computeOutstandingBalance(customerId: string): Promise<number> {
   const customer = await db('customers').where({ id: customerId }).select('opening_balance').first<{ opening_balance: number }>();
@@ -76,13 +76,35 @@ export async function computeOutstandingBalance(customerId: string): Promise<num
 }
 
 /**
+ * Compute net lifetime volume (KG) for a single customer (sales minus returns).
+ */
+export async function computeNetLifetimeVolumeKg(customerId: string): Promise<number> {
+  const result = await db('sales_invoices as si')
+    .join('sales_invoice_items as sii', 'si.id', 'sii.invoice_id')
+    .where('si.customer_id', customerId)
+    .select(
+      db.raw(`
+        SUM(
+          CASE 
+            WHEN si.invoice_type = 'CREDIT_NOTE' OR sii.quantity < 0 THEN -ABS(sii.net_kg_processed)
+            ELSE ABS(sii.net_kg_processed)
+          END
+        ) as net_volume
+      `)
+    )
+    .first();
+
+  return Math.max(0, Number(result?.net_volume || 0));
+}
+
+/**
  * List customers with pagination, search, and filters.
  */
 export async function findAllCustomers(query: CustomerQuery): Promise<{
   rows: CustomerWithBalance[];
   total: number;
 }> {
-  const { page, limit, search, city, region, is_active } = query;
+  const { page, limit, search, city, customer_type, region, is_active } = query;
   const offset = (page - 1) * limit;
 
   const baseQuery = db('customers').modify((qb) => {
@@ -95,6 +117,7 @@ export async function findAllCustomers(query: CustomerQuery): Promise<{
       });
     }
     if (city) qb.whereILike('city', `%${city}%`);
+    if (customer_type) qb.where({ customer_type });
     if (region) qb.where({ region });
     if (is_active !== undefined) qb.where({ is_active });
     else qb.where({ is_active: true }); // default: active only
@@ -110,14 +133,15 @@ export async function findAllCustomers(query: CustomerQuery): Promise<{
     .limit(limit)
     .offset(offset);
 
-  // Attach outstanding_balance for each row
-  // Dynamically compute balance based on opening balance, sales invoices, and payments
+  // Attach outstanding_balance and net_lifetime_volume_kg for each row
   const withBalance: CustomerWithBalance[] = await Promise.all(
     rows.map(async (r: CustomerRow) => {
       const outstanding_balance = await computeOutstandingBalance(r.id);
+      const net_lifetime_volume_kg = await computeNetLifetimeVolumeKg(r.id);
       return {
         ...r,
         outstanding_balance,
+        net_lifetime_volume_kg,
       };
     })
   );
@@ -126,14 +150,15 @@ export async function findAllCustomers(query: CustomerQuery): Promise<{
 }
 
 /**
- * Find a single customer by ID with balance.
+ * Find a single customer by ID with balance and net volume.
  */
 export async function findCustomerById(id: string): Promise<CustomerWithBalance | undefined> {
   const row = await db('customers').where({ id }).first<CustomerRow>();
   if (!row) return undefined;
 
   const outstanding_balance = await computeOutstandingBalance(id);
-  return { ...row, outstanding_balance };
+  const net_lifetime_volume_kg = await computeNetLifetimeVolumeKg(id);
+  return { ...row, outstanding_balance, net_lifetime_volume_kg };
 }
 
 /**
@@ -154,6 +179,7 @@ export async function createCustomer(
       address: data.address ?? null,
       city: data.city ?? null,
       region: data.region ?? null,
+      customer_type: data.customer_type || 'CREDIT',
       credit_limit: data.credit_limit,
       opening_balance: data.opening_balance,
       notes: data.notes ?? null,
@@ -197,7 +223,7 @@ export async function softDeleteCustomer(id: string): Promise<boolean> {
 export interface LedgerEntry {
   id: string;
   date: string;
-  type: 'INVOICE' | 'PAYMENT' | 'OPENING_BALANCE';
+  type: 'INVOICE' | 'PAYMENT' | 'OPENING_BALANCE' | 'CREDIT_NOTE';
   reference: string;
   debit: number;  // increases balance
   credit: number; // decreases balance
@@ -222,19 +248,36 @@ export async function getCustomerLedger(id: string): Promise<LedgerEntry[]> {
     balance: runningBalance
   });
 
-  // 2. Fetch Invoices
+  // 2. Fetch Invoices & Credit Notes
   const invoices = await db('sales_invoices')
     .where('customer_id', id)
-    .select('id', 'date', 'invoice_number', 'total_amount');
+    .select('id', 'date', 'invoice_number', 'total_amount', 'invoice_type');
     
-  const invoiceEntries = invoices.map(inv => ({
-    id: inv.id,
-    date: new Date(inv.date).toISOString(),
-    type: 'INVOICE' as const,
-    reference: inv.invoice_number,
-    debit: Number(inv.total_amount),
-    credit: 0
-  }));
+  const invoiceEntries = invoices.map(inv => {
+    const total = Number(inv.total_amount);
+    const isCreditNote = inv.invoice_type === 'CREDIT_NOTE' || total < 0;
+    
+    if (isCreditNote) {
+      const positiveAmt = Math.abs(total);
+      return {
+        id: inv.id,
+        date: new Date(inv.date).toISOString(),
+        type: 'CREDIT_NOTE' as const,
+        reference: inv.invoice_number,
+        debit: 0,
+        credit: positiveAmt
+      };
+    }
+
+    return {
+      id: inv.id,
+      date: new Date(inv.date).toISOString(),
+      type: 'INVOICE' as const,
+      reference: inv.invoice_number,
+      debit: total,
+      credit: 0
+    };
+  });
 
   // 3. Fetch Payments
   const payments = await db('customer_payments')

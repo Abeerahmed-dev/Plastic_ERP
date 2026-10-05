@@ -21,6 +21,7 @@ export interface SupplierRow {
 
 export interface SupplierWithBalance extends SupplierRow {
   outstanding_payable: number;
+  outstanding_balance: number;
 }
 
 export interface SupplierLedgerEntry {
@@ -122,6 +123,7 @@ export async function findAllSuppliers(query: SupplierQuery): Promise<{
       return {
         ...r,
         outstanding_payable,
+        outstanding_balance: outstanding_payable,
       };
     })
   );
@@ -133,7 +135,7 @@ export async function findSupplierById(id: string): Promise<SupplierWithBalance 
   const row = await db('suppliers').where({ id }).first<SupplierRow>();
   if (!row) return undefined;
   const outstanding_payable = await computeOutstandingPayable(id);
-  return { ...row, outstanding_payable };
+  return { ...row, outstanding_payable, outstanding_balance: outstanding_payable };
 }
 
 export async function createSupplier(
@@ -158,7 +160,8 @@ export async function createSupplier(
     })
     .returning('*');
 
-  return { ...row, outstanding_payable: Number(row.opening_payable) };
+  const balance = Number(row.opening_payable);
+  return { ...row, outstanding_payable: balance, outstanding_balance: balance };
 }
 
 export async function updateSupplier(
@@ -172,7 +175,7 @@ export async function updateSupplier(
 
   if (!row) return undefined;
   const outstanding_payable = await computeOutstandingPayable(id);
-  return { ...row, outstanding_payable };
+  return { ...row, outstanding_payable, outstanding_balance: outstanding_payable };
 }
 
 export async function softDeleteSupplier(id: string): Promise<boolean> {

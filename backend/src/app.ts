@@ -9,16 +9,19 @@ import authRouter from './modules/auth/auth.router';
 import usersRouter from './modules/users/users.router';
 import customersRouter from './modules/customers/customers.router';
 import suppliersRouter from './modules/suppliers/suppliers.router';
-import uomRouter from './modules/uom/uom.router';
+import categoriesRouter from './modules/categories/categories.router';
 import productsRouter from './modules/products/products.router';
 import invoicesRouter from './modules/invoices/invoices.router';
 import paymentsRouter from './modules/payments/payments.router';
 import { purchasesRouter } from './modules/purchases/purchases.router';
 import supplierPaymentsRouter from './modules/supplier-payments/supplier-payments.router';
+import { expensesRouter } from './modules/expenses/expenses.router';
 import { posRouter } from './modules/pos/pos.router';
 import { reportsRouter } from './modules/reports/reports.router';
 import { onboardingRouter } from './modules/onboarding/onboarding.router';
-import { fail } from './shared/apiResponse';
+import bankAccountsRouter from './modules/bank-accounts/bank-accounts.router';
+import devRouter from './modules/dev/dev.router';
+import { fail, ok } from './shared/apiResponse';
 
 export function createApp(): Application {
   const app = express();
@@ -47,16 +50,31 @@ export function createApp(): Application {
   app.use('/api/v1/users', usersRouter);
   app.use('/api/v1/customers', customersRouter);
   app.use('/api/v1/suppliers', suppliersRouter);
-  app.use('/api/v1/uom', uomRouter);
+  app.use('/api/v1/categories', categoriesRouter);
+  app.use('/api/v1/uom', (_req: Request, res: Response) => res.json(ok([]))); // Deprecated fallback
   app.use('/api/v1/products', productsRouter);
   app.use('/api/v1/invoices', invoicesRouter);
+  app.use('/api/invoices', invoicesRouter);
   app.use('/api/v1/sales', invoicesRouter);
-  app.use('/api/v1/payments', paymentsRouter);
+  app.use('/api/sales', invoicesRouter);
   app.use('/api/v1/purchases', purchasesRouter);
+  app.use('/api/purchases', purchasesRouter);
   app.use('/api/v1/supplier-payments', supplierPaymentsRouter);
+  app.use('/api/supplier-payments', supplierPaymentsRouter);
+  app.use('/api/v1/payments', paymentsRouter);
+  app.use('/api/payments', paymentsRouter);
+  app.use('/api/v1/expenses', expensesRouter);
+  app.use('/api/expenses', expensesRouter);
   app.use('/api/v1/pos', posRouter);
   app.use('/api/v1/reports', reportsRouter);
+  app.use('/api/reports', reportsRouter);
+  app.use('/api/v1/bank-accounts', bankAccountsRouter);
+  app.use('/api/bank-accounts', bankAccountsRouter);
+  app.use('/api/v1/banks', bankAccountsRouter);
+  app.use('/api/banks', bankAccountsRouter);
   app.use('/api/v1/onboarding', onboardingRouter);
+  app.use('/api/dev', devRouter);
+  app.use('/api/v1/dev', devRouter);
 
   // ─── 404 handler ─────────────────────────────
   app.use((_req: Request, res: Response, _next: NextFunction) => {

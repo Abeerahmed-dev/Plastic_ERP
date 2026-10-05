@@ -2,18 +2,20 @@ import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { X, Loader2 } from 'lucide-react';
-import { Product, UnitOfMeasure } from '../../types/product.types';
+import { X, Loader2, Info } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Product } from '../../types/product.types';
+import { categoriesService, Category } from '../../services/categories.service';
 
 const productSchema = z.object({
   code: z.string().optional(),
   name: z.string().min(2, 'Name is required').max(150),
+  size: z.string().optional(),
   description: z.string().optional(),
-  category: z.string().min(1, 'Category is required').max(50),
-  uom_id: z.string().uuid('Please select a unit of measure'),
-  cost_price: z.coerce.number().min(0, 'Must be at least 0'),
-  sale_price: z.coerce.number().min(0, 'Must be at least 0'),
-  opening_stock: z.coerce.number().min(0, 'Must be at least 0'),
+  category_id: z.string().min(1, 'Category is required'),
+  cost_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
+  sale_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
+  opening_stock: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   is_active: z.boolean().optional(),
   notes: z.string().optional(),
 });
@@ -26,7 +28,7 @@ interface ProductFormModalProps {
   onSubmit: (data: any) => void;
   isSubmitting: boolean;
   initialData?: Product | null;
-  uoms: UnitOfMeasure[];
+  categories?: Category[];
 }
 
 export const ProductFormModal = ({
@@ -35,21 +37,30 @@ export const ProductFormModal = ({
   onSubmit,
   isSubmitting,
   initialData,
-  uoms,
+  categories: propCategories,
 }: ProductFormModalProps) => {
+  const { data: fetchedCategories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesService.getCategories(),
+    enabled: isOpen,
+  });
+
+  const categories = propCategories || fetchedCategories;
+
   const {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
     defaultValues: {
       code: '',
       name: '',
+      size: '',
       description: '',
-      category: 'Plastic Bag',
-      uom_id: '',
+      category_id: '',
       cost_price: 0,
       sale_price: 0,
       opening_stock: 0,
@@ -58,15 +69,18 @@ export const ProductFormModal = ({
     },
   });
 
+  const selectedCategoryId = watch('category_id');
+  const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+
   useEffect(() => {
     if (isOpen) {
       if (initialData) {
         reset({
           code: initialData.code,
           name: initialData.name,
+          size: initialData.size || '',
           description: initialData.description || '',
-          category: initialData.category,
-          uom_id: initialData.uom_id,
+          category_id: initialData.category_id,
           cost_price: Number(initialData.cost_price),
           sale_price: Number(initialData.sale_price),
           opening_stock: Number(initialData.opening_stock),
@@ -77,9 +91,9 @@ export const ProductFormModal = ({
         reset({
           code: '',
           name: '',
+          size: '',
           description: '',
-          category: 'Finished Goods',
-          uom_id: '',
+          category_id: categories.length > 0 ? categories[0].id : '',
           cost_price: 0,
           sale_price: 0,
           opening_stock: 0,
@@ -88,7 +102,7 @@ export const ProductFormModal = ({
         });
       }
     }
-  }, [isOpen, initialData, reset]);
+  }, [isOpen, initialData, reset, categories]);
 
   if (!isOpen) return null;
 
@@ -133,42 +147,41 @@ export const ProductFormModal = ({
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Product Name <span className="text-red-500">*</span>
                 </label>
-                <input {...register('name')} placeholder="Plastic Chair" className={inputCls(!!errors.name)} />
+                <input {...register('name')} placeholder="e.g. Shopping Bag" className={inputCls(!!errors.name)} />
                 {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
               </div>
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Category <span className="text-red-500">*</span>
+                  Size <span className="text-slate-400 font-normal text-xs">(Format: Width x Height, e.g., 10x15)</span>
                 </label>
-                <select {...register('category')} className={inputCls(!!errors.category)}>
-                  <option value="Plastic Bag">Plastic Bag</option>
-                  <option value="Roll">Roll</option>
-                  <option value="Sheet">Sheet</option>
-                  <option value="Granules">Granules</option>
-                  <option value="Packaging">Packaging</option>
-                  <option value="Other">Other</option>
-                </select>
-                {errors.category && <p className="mt-1 text-xs text-red-600">{errors.category.message}</p>}
+                <input {...register('size')} placeholder="e.g. 10x15" className={inputCls(!!errors.size)} />
+                {errors.size && <p className="mt-1 text-xs text-red-600">{errors.size.message}</p>}
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Unit of Measure <span className="text-red-500">*</span>
+                  Category <span className="text-red-500">*</span>
                 </label>
-                <select {...register('uom_id')} className={inputCls(!!errors.uom_id)}>
-                  <option value="">Select UOM...</option>
-                  {uoms.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.abbreviation})
+                <select {...register('category_id')} className={inputCls(!!errors.category_id)}>
+                  <option value="">Select Category...</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({Number(c.bag_weight_kg).toFixed(2)} KG / Bag)
                     </option>
                   ))}
                 </select>
-                {errors.uom_id && <p className="mt-1 text-xs text-red-600">{errors.uom_id.message}</p>}
+                {errors.category_id && <p className="mt-1 text-xs text-red-600">{errors.category_id.message}</p>}
+                {selectedCategory && (
+                  <p className="mt-2 text-xs font-semibold text-blue-700 bg-blue-50 p-2.5 rounded-xl border border-blue-100 flex items-center gap-2">
+                    <Info className="h-4 w-4 shrink-0 text-blue-500" />
+                    Conversion weight inherited from category ({Number(selectedCategory.bag_weight_kg).toFixed(2)} KG/Bag)
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Cost Price</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Cost Price (Per Unit/KG)</label>
                 <input
                   {...register('cost_price')}
                   type="number"
@@ -179,7 +192,7 @@ export const ProductFormModal = ({
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Sale Price</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Sale Price (Per KG)</label>
                 <input
                   {...register('sale_price')}
                   type="number"
@@ -193,15 +206,16 @@ export const ProductFormModal = ({
             {!initialData && (
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Opening Stock <span className="text-red-500">*</span>
+                  Opening Stock (KG) <span className="text-slate-400 font-normal text-xs">(Optional)</span>
                 </label>
                 <input
                   {...register('opening_stock')}
                   type="number"
                   step="0.01"
+                  placeholder="0"
                   className={inputCls(!!errors.opening_stock)}
                 />
-                <p className="mt-1 text-xs text-slate-500">Stock level at the time of system go-live.</p>
+                <p className="mt-1 text-xs text-slate-500">Opening stock in KG at system go-live (leave blank or 0 if starting with zero stock).</p>
                 {errors.opening_stock && (
                   <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
                 )}

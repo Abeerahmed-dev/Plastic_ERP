@@ -25,3 +25,7 @@ export async function getPayment(id: string) {
   if (!payment) throw new NotFoundError('Payment not found');
   return payment;
 }
+
+export async function clearCheque(paymentId: string) {
+  return await repo.clearSupplierCheque(paymentId);
+}

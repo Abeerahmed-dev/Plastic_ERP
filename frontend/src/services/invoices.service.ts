@@ -16,5 +16,16 @@ export const invoicesService = {
   createInvoice: async (data: CreateInvoiceData): Promise<Invoice> => {
     const response = await api.post<ApiSuccess<Invoice>>('/invoices', data);
     return response.data.data;
+  },
+
+  getInvoiceReturnSummary: async (id: string): Promise<{ parentInvoice: any; items: any[] }> => {
+    const response = await api.get<ApiSuccess<{ parentInvoice: any; items: any[] }>>(`/invoices/${id}/returns/summary`);
+    return response.data.data;
+  },
+
+  createSalesReturn: async (parentInvoiceId: string, data: { return_reason: string; items: { product_id: string; return_quantity: number }[] }): Promise<Invoice> => {
+    const response = await api.post<ApiSuccess<Invoice>>(`/sales/${parentInvoiceId}/returns`, data);
+    return response.data.data;
   }
 };
+

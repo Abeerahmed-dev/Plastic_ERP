@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
-import { requirePermission } from '../../middleware/requirePermission';
+import { verifyRole } from '../../middleware/requireRole';
 import {
   listCustomersController,
   getCustomerController,
@@ -12,11 +12,11 @@ import {
 
 const router = Router();
 
-router.get('/', requireAuth, requirePermission('customers:read'), listCustomersController);
-router.get('/:id', requireAuth, requirePermission('customers:read'), getCustomerController);
-router.get('/:id/ledger', requireAuth, requirePermission('customers:read'), getCustomerLedgerController);
-router.post('/', requireAuth, requirePermission('customers:write'), createCustomerController);
-router.put('/:id', requireAuth, requirePermission('customers:write'), updateCustomerController);
-router.delete('/:id', requireAuth, requirePermission('customers:delete'), deleteCustomerController);
+router.get('/', requireAuth, listCustomersController);
+router.get('/:id', requireAuth, getCustomerController);
+router.get('/:id/ledger', requireAuth, getCustomerLedgerController);
+router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER']), createCustomerController);
+router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), updateCustomerController);
+router.delete('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), deleteCustomerController);
 
 export default router;

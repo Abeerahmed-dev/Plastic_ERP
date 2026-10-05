@@ -5,17 +5,15 @@ export interface ProductRow {
   id: string;
   code: string;
   name: string;
+  size: string | null;
   description: string | null;
-  category: string;
-  uom_id: string;
+  category_id: string;
   cost_price: number;
   sale_price: number;
+  fixed_retail_price_per_kg: number;
   opening_stock: number;
-  base_unit: string;
-  purchase_unit: string;
-  sale_unit: string;
-  default_kg_per_purchase_unit: number;
-  default_sale_units_per_kg: number;
+  total_stock_kg: number;
+  rolling_avg_cost_per_kg: number;
   is_active: boolean;
   notes: string | null;
   created_by: string | null;
@@ -25,7 +23,10 @@ export interface ProductRow {
 
 export interface ProductWithStock extends ProductRow {
   current_stock: number;
-  uom_abbreviation: string;
+  category_name: string;
+  category: string;
+  bag_weight_kg: number;
+  uom_abbreviation?: string;
 }
 
 /**
@@ -33,6 +34,7 @@ export interface ProductWithStock extends ProductRow {
  */
 export async function generateProductCode(): Promise<string> {
   const result = await db('products')
+    .whereILike('code', 'PROD-%')
     .max('code as max_code')
     .first<{ max_code: string | null }>();
 
@@ -42,59 +44,38 @@ export async function generateProductCode(): Promise<string> {
 
   const parts = result.max_code.split('-');
   const num = parseInt(parts[1] ?? '0', 10);
-  return `PROD-${String(num + 1).padStart(4, '0')}`;
+  const nextNum = isNaN(num) ? 1 : num + 1;
+  return `PROD-${String(nextNum).padStart(4, '0')}`;
 }
 
 /**
- * Compute current stock for a product.
- * Session 04: only opening_stock.
- * Future sessions (Inventory) will add stock movements.
+ * Compute current stock for a product in KG.
  */
 export async function computeCurrentStock(productId: string): Promise<number> {
-  const product = await db('products').where({ id: productId }).select('opening_stock').first<{ opening_stock: number }>();
-  if (!product) return 0;
-  
-  let currentStock = Number(product.opening_stock);
-
-  // Add purchased quantities in KG balance
-  const purchases = await db('purchase_invoice_items')
-    .where('product_id', productId)
-    .select(db.raw('SUM(COALESCE(net_kg_processed, COALESCE(net_kg_added, quantity))) as total_in'))
-    .first();
-  if (purchases && (purchases as any).total_in) {
-    currentStock += Number((purchases as any).total_in);
-  }
-
-  // Subtract sold quantities in KG balance
-  const sales = await db('sales_invoice_items')
-    .where('product_id', productId)
-    .select(db.raw('SUM(COALESCE(net_kg_processed, quantity)) as total_out'))
-    .first();
-  if (sales && (sales as any).total_out) {
-    currentStock -= Number((sales as any).total_out);
-  }
-
-  return currentStock;
+  const product = await db('products').where({ id: productId }).select('total_stock_kg').first<{ total_stock_kg: number }>();
+  return product ? Number(product.total_stock_kg || 0) : 0;
 }
 
 export async function findAllProducts(query: ProductQuery): Promise<{
   rows: ProductWithStock[];
   total: number;
 }> {
-  const { page, limit, search, category, is_active } = query;
+  const { page, limit, search, category_id, category, is_active } = query;
   const offset = (page - 1) * limit;
 
   const baseQuery = db('products')
-    .join('units_of_measure as u', 'products.uom_id', 'u.id')
+    .join('categories as c', 'products.category_id', 'c.id')
     .modify((qb) => {
       if (search) {
         qb.where((inner) => {
           inner
             .whereILike('products.name', `%${search}%`)
-            .orWhereILike('products.code', `%${search}%`);
+            .orWhereILike('products.code', `%${search}%`)
+            .orWhereILike('products.size', `%${search}%`);
         });
       }
-      if (category) qb.where({ 'products.category': category });
+      if (category_id) qb.where({ 'products.category_id': category_id });
+      if (category) qb.whereILike('c.name', `%${category}%`);
       if (is_active !== undefined) qb.where({ 'products.is_active': is_active });
       else qb.where({ 'products.is_active': true });
     });
@@ -104,25 +85,38 @@ export async function findAllProducts(query: ProductQuery): Promise<{
 
   const rows = await baseQuery
     .clone()
-    .select('products.*', 'u.abbreviation as uom_abbreviation')
+    .select(
+      'products.*',
+      'c.name as category_name',
+      'c.name as category',
+      'c.bag_weight_kg as bag_weight_kg'
+    )
     .orderBy('products.name', 'asc')
     .limit(limit)
     .offset(offset);
 
-  const withStock: ProductWithStock[] = await Promise.all(
-    rows.map(async (r: ProductRow & { uom_abbreviation: string }) => ({
-      ...r,
-      current_stock: await computeCurrentStock(r.id),
-    }))
-  );
+  const withStock: ProductWithStock[] = rows.map((r: any) => ({
+    ...r,
+    total_stock_kg: Number(r.total_stock_kg || 0),
+    rolling_avg_cost_per_kg: Number(r.rolling_avg_cost_per_kg || r.cost_price || 0),
+    fixed_retail_price_per_kg: Number(r.fixed_retail_price_per_kg || r.sale_price || 0),
+    bag_weight_kg: Number(r.bag_weight_kg || 25),
+    uom_abbreviation: 'KG',
+    current_stock: Number(r.total_stock_kg || 0),
+  }));
 
   return { rows: withStock, total };
 }
 
 export async function findProductById(id: string): Promise<ProductWithStock | undefined> {
   const product = await db('products')
-    .join('units_of_measure as u', 'products.uom_id', 'u.id')
-    .select('products.*', 'u.abbreviation as uom_abbreviation')
+    .join('categories as c', 'products.category_id', 'c.id')
+    .select(
+      'products.*',
+      'c.name as category_name',
+      'c.name as category',
+      'c.bag_weight_kg as bag_weight_kg'
+    )
     .where({ 'products.id': id })
     .first();
 
@@ -130,65 +124,116 @@ export async function findProductById(id: string): Promise<ProductWithStock | un
 
   return {
     ...product,
-    current_stock: await computeCurrentStock(product.id),
+    total_stock_kg: Number(product.total_stock_kg || 0),
+    rolling_avg_cost_per_kg: Number(product.rolling_avg_cost_per_kg || product.cost_price || 0),
+    fixed_retail_price_per_kg: Number(product.fixed_retail_price_per_kg || product.sale_price || 0),
+    bag_weight_kg: Number(product.bag_weight_kg || 25),
+    uom_abbreviation: 'KG',
+    current_stock: Number(product.total_stock_kg || 0),
   };
 }
 
 export async function findPOSAvailableProducts(search?: string): Promise<ProductWithStock[]> {
   const baseQuery = db('products')
-    .join('units_of_measure as u', 'products.uom_id', 'u.id')
+    .join('categories as c', 'products.category_id', 'c.id')
     .where('products.is_active', true)
+    .where('products.total_stock_kg', '>', 0)
     .modify((qb) => {
       if (search) {
         qb.where((inner) => {
           inner
             .whereILike('products.name', `%${search}%`)
-            .orWhereILike('products.code', `%${search}%`);
+            .orWhereILike('products.code', `%${search}%`)
+            .orWhereILike('products.size', `%${search}%`);
         });
       }
     });
 
   const rows = await baseQuery
-    .select('products.*', 'u.abbreviation as uom_abbreviation')
+    .select(
+      'products.*',
+      'c.name as category_name',
+      'c.name as category',
+      'c.bag_weight_kg as bag_weight_kg'
+    )
     .orderBy('products.name', 'asc');
 
-  const withStock: ProductWithStock[] = await Promise.all(
-    rows.map(async (r: ProductRow & { uom_abbreviation: string }) => ({
-      ...r,
-      current_stock: await computeCurrentStock(r.id),
-    }))
-  );
-
-  return withStock.filter((p) => p.current_stock > 0);
+  return rows.map((r: any) => ({
+    ...r,
+    total_stock_kg: Number(r.total_stock_kg || 0),
+    rolling_avg_cost_per_kg: Number(r.rolling_avg_cost_per_kg || r.cost_price || 0),
+    fixed_retail_price_per_kg: Number(r.fixed_retail_price_per_kg || r.sale_price || 0),
+    bag_weight_kg: Number(r.bag_weight_kg || 25),
+    uom_abbreviation: 'KG',
+    current_stock: Number(r.total_stock_kg || 0),
+  }));
 }
 
 export async function createProduct(
   data: CreateProductInput,
-  createdBy: string,
+  createdBy?: string | null,
 ): Promise<ProductWithStock> {
-  const code = await generateProductCode();
+  const code = (data.code && data.code.trim().length > 0)
+    ? data.code.trim()
+    : await generateProductCode();
+  const initialStock = data.opening_stock || 0;
+  const initialCost = data.cost_price || 0;
+  const fixedPrice = data.fixed_retail_price_per_kg || data.sale_price || 0;
+
+  // Retrieve category name to satisfy products.category NOT NULL string constraint
+  const categoryRow = await db('categories').where({ id: data.category_id }).first();
+  const categoryName = categoryRow ? categoryRow.name : 'General';
+
+  const insertPayload: Record<string, any> = {
+    code,
+    name: data.name,
+    size: data.size ?? null,
+    description: data.description ?? null,
+    category_id: data.category_id,
+    category: categoryName,
+    cost_price: initialCost,
+    sale_price: data.sale_price || 0,
+    fixed_retail_price_per_kg: fixedPrice,
+    opening_stock: initialStock,
+    total_stock_kg: initialStock,
+    rolling_avg_cost_per_kg: initialCost,
+    notes: data.notes ?? null,
+    created_by: createdBy || null,
+  };
 
   const [row] = await db('products')
-    .insert({
-      code,
-      name: data.name,
-      description: data.description ?? null,
-      category: data.category,
-      uom_id: data.uom_id,
-      cost_price: data.cost_price,
-      sale_price: data.sale_price,
-      opening_stock: data.opening_stock,
-      base_unit: data.base_unit ?? 'KG',
-      purchase_unit: data.purchase_unit ?? 'Bora',
-      sale_unit: data.sale_unit ?? 'Dasti',
-      default_kg_per_purchase_unit: data.default_kg_per_purchase_unit ?? 25.00,
-      default_sale_units_per_kg: data.default_sale_units_per_kg ?? 2.00,
-      notes: data.notes ?? null,
-      created_by: createdBy,
-    })
+    .insert(insertPayload)
     .returning('*');
 
-  // fetch the joined row
+  if (initialStock > 0) {
+    const hasBatches = await db.schema.hasTable('inventory_batches');
+    if (hasBatches) {
+      const batchNum = `PB-INIT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      await db('inventory_batches').insert({
+        product_id: row.id,
+        batch_number: batchNum,
+        batch_buy_price_per_kg: initialCost,
+        original_qty: initialStock,
+        remaining_qty: initialStock,
+        status: 'ACTIVE',
+      });
+    }
+
+    const hasTx = await db.schema.hasTable('inventory_transactions');
+    if (hasTx) {
+      await db('inventory_transactions').insert({
+        product_id: row.id,
+        transaction_type: 'OPENING_STOCK',
+        quantity_kg: initialStock,
+        unit_cost: initialCost,
+        total_asset_value: initialStock * initialCost,
+        capital_equity_value: initialStock * initialCost,
+        notes: 'Initial opening stock on product creation',
+        created_by: createdBy || null,
+      });
+    }
+  }
+
   return findProductById(row.id) as Promise<ProductWithStock>;
 }
 
@@ -211,37 +256,6 @@ export async function softDeleteProduct(id: string): Promise<boolean> {
   return count > 0;
 }
 
-export async function getAvailableBatches(productId: string) {
-  const batches = await db('inventory_batches')
-    .where('product_id', productId)
-    .andWhere('remaining_qty', '>', 0)
-    .orderBy('created_at', 'asc');
-
-  if (batches.length === 0) {
-    const product = await db('products').where({ id: productId }).first();
-    if (product) {
-      const currentStock = await computeCurrentStock(productId);
-      if (currentStock > 0) {
-        const conversions = typeof product.unit_conversions === 'string'
-          ? JSON.parse(product.unit_conversions)
-          : (product.unit_conversions || { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 });
-
-        const [newBatch] = await db('inventory_batches')
-          .insert({
-            product_id: productId,
-            batch_number: `BATCH-AUTO-${product.code}`,
-            initial_qty: currentStock,
-            remaining_qty: currentStock,
-            buy_price_per_kg: Number(product.cost_price || 0),
-            selected_unit: product.purchase_unit || 'Bora',
-            actual_weight_per_unit: Number(product.default_kg_per_purchase_unit || 25.0),
-            batch_unit_conversions: JSON.stringify(conversions),
-          })
-          .returning('*');
-        return [newBatch];
-      }
-    }
-  }
-
-  return batches;
+export async function getAvailableBatches(_productId: string) {
+  return [];
 }

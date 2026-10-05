@@ -9,6 +9,7 @@ export const createCustomerSchema = z.object({
   address: z.string().optional().nullable(),
   city: z.string().max(100).optional().nullable(),
   region: z.enum(REGIONS).optional().nullable(),
+  customer_type: z.enum(['CASH', 'CREDIT']).default('CREDIT'),
   credit_limit: z.coerce.number().min(0).default(0),
   opening_balance: z.coerce.number().min(0).default(0),
   notes: z.string().optional().nullable(),
@@ -26,6 +27,7 @@ export const customerQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().optional(),
   city: z.string().optional(),
+  customer_type: z.enum(['CASH', 'CREDIT']).optional(),
   region: z.enum(REGIONS).optional(),
   is_active: z
     .string()

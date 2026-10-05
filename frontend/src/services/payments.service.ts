@@ -3,8 +3,8 @@ import { Payment, CreatePaymentData } from '../types/payment.types';
 import { ApiSuccess } from '../types/api.types';
 
 export const paymentsService = {
-  getPayments: async (): Promise<Payment[]> => {
-    const response = await api.get<ApiSuccess<Payment[]>>('/payments');
+  getPayments: async (params?: any): Promise<Payment[]> => {
+    const response = await api.get<ApiSuccess<Payment[]>>('/payments', { params });
     return response.data.data;
   },
 

@@ -32,3 +32,11 @@ export async function getPaymentController(req: Request, res: Response, next: Ne
     res.status(200).json(ok(payment));
   } catch (err) { next(err); }
 }
+
+export async function clearChequeController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    await supplierPaymentsService.clearCheque(id);
+    res.status(200).json(ok({ success: true, message: 'Supplier cheque marked as cleared' }));
+  } catch (err) { next(err); }
+}

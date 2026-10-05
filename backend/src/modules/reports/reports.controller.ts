@@ -127,3 +127,123 @@ export async function getCashierTallyController(
     next(err);
   }
 }
+
+export async function getPnLController(
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): Promise<void> {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const data = await reportsService.getPnLReport(startDate, endDate);
+    res.status(200).json(ok(data));
+  } catch (err: any) {
+    console.error("P&L API CRASH:", err?.message || err, err?.stack);
+    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+  }
+}
+
+export async function getCashLedgerController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const data = await reportsService.getCashLedgerReport(startDate, endDate);
+    res.status(200).json(ok(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getPdcController(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await reportsService.getPdcReport();
+    res.status(200).json(ok(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getIssuedPdcController(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await reportsService.getIssuedPdcReport();
+    res.status(200).json(ok(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getIncomeStatementController(
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): Promise<void> {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const data = await reportsService.getIncomeStatementReport(startDate, endDate);
+    res.status(200).json(ok(data));
+  } catch (err: any) {
+    console.error('Income Statement Controller Crash:', err?.message || err, err?.stack);
+    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+  }
+}
+
+export async function getIncomeStatementReturnsDetailController(
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): Promise<void> {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const data = await reportsService.getIncomeStatementReturnsDetail(startDate, endDate);
+    res.status(200).json(ok(data));
+  } catch (err: any) {
+    console.error('Income Statement Returns Detail Controller Crash:', err?.message || err, err?.stack);
+    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+  }
+}
+
+export async function getMarginAnalyticsController(
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): Promise<void> {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+    const data = await reportsService.getMarginAnalyticsReport(startDate, endDate);
+    res.status(200).json(ok(data));
+  } catch (err: any) {
+    console.error('Margin Analytics Controller Crash:', err?.message || err, err?.stack);
+    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+  }
+}
+
+export async function getInventoryValuationController(
+  _req: Request,
+  res: Response,
+  _next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await reportsService.getInventoryValuationReport();
+    res.status(200).json(ok(data));
+  } catch (err: any) {
+    console.error('Inventory Valuation Controller Crash:', err?.message || err, err?.stack);
+    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+  }
+}
+

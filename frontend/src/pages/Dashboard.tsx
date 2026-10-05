@@ -1,12 +1,12 @@
 import { useAuthStore } from '../store/auth.store';
-import { Users, Truck, Scale, Box, FileText, Banknote, LayoutDashboard, TrendingUp, Sliders } from 'lucide-react';
+import { Users, Truck, Tag, Box, FileText, Banknote, LayoutDashboard, TrendingUp, Sliders, Receipt } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { reportsService } from '../services/reports.service';
 import CashierDashboard from './CashierDashboard';
 
 export const Dashboard = () => {
-  const { user } = useAuthStore();
+  const { user, hasPermission } = useAuthStore();
   const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
 
   if (isCashier) {
@@ -24,7 +24,8 @@ export const Dashboard = () => {
     { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read', color: 'blue' },
     { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read', color: 'emerald' },
     { to: '/products', label: 'Products', icon: Box, permission: 'products:read', color: 'violet' },
-    { to: '/uom', label: 'Units', icon: Scale, permission: 'products:read', color: 'slate' },
+    { to: '/categories', label: 'Categories', icon: Tag, permission: 'products:read', color: 'slate' },
+    { to: '/expenses', label: 'Expenses', icon: Receipt, permission: null, subtitle: 'Manage operating expenses', color: 'rose' },
     { to: '/purchases', label: 'Purchases', icon: Truck, permission: 'purchases:read', color: 'emerald' },
     { to: '/supplier-payments', label: 'Supp. Payments', icon: Banknote, permission: 'payments:read', color: 'emerald' },
     { to: '/invoices', label: 'Invoices', icon: FileText, permission: 'sales:read', color: 'indigo' },
@@ -67,8 +68,8 @@ export const Dashboard = () => {
           Quick Access
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-          {navLinks.map(({ to, label, icon: Icon, permission }) => {
-            if (!user?.permissions?.includes(permission)) return null;
+          {navLinks.map(({ to, label, icon: Icon, permission, subtitle }) => {
+            if (permission && !hasPermission(permission)) return null;
             return (
               <Link
                 key={to}
@@ -80,7 +81,7 @@ export const Dashboard = () => {
                 </div>
                 <div>
                   <div className="font-semibold text-slate-900">{label}</div>
-                  <div className="text-xs text-slate-500">Manage {label.toLowerCase()}</div>
+                  <div className="text-xs text-slate-500">{subtitle || `Manage ${label.toLowerCase()}`}</div>
                 </div>
               </Link>
             );

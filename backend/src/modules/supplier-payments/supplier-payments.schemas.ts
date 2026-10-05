@@ -5,8 +5,13 @@ export const createSupplierPaymentSchema = z.object({
   purchase_invoice_id: z.string().uuid().optional().nullable(),
   payment_date: z.string().refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid date' }),
   amount: z.number().positive(),
-  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE']),
+  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'PDC']),
+  bank_account_id: z.string().uuid().optional().nullable(),
   notes: z.string().optional().nullable(),
+  cheque_number: z.string().optional().nullable(),
+  cheque_bank_name: z.string().optional().nullable(),
+  cheque_due_date: z.string().optional().nullable(),
+  cheque_status: z.enum(['PENDING', 'CLEARED', 'BOUNCED']).optional().nullable(),
 });
 
 export type CreateSupplierPaymentInput = z.infer<typeof createSupplierPaymentSchema>;

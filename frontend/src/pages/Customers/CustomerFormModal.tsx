@@ -7,12 +7,15 @@ import { X, Loader2 } from 'lucide-react';
 import { createCustomer, updateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 
+import { useAuthStore } from '../../store/auth.store';
+
 import { CustomerLedger } from './CustomerLedger';
 
 const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
 
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
+  customer_type: z.enum(['CASH', 'CREDIT']).default('CREDIT'),
   phone: z.string().max(30).optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   address: z.string().optional(),
@@ -31,6 +34,8 @@ interface Props {
 }
 
 export default function CustomerFormModal({ customer, onClose }: Props) {
+  const { user } = useAuthStore();
+  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
   const isEdit = Boolean(customer);
   const qc = useQueryClient();
   const [serverError, setServerError] = useState('');
@@ -45,6 +50,7 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
     defaultValues: customer
       ? {
           name: customer.name,
+          customer_type: customer.customer_type ?? 'CREDIT',
           phone: customer.phone ?? '',
           email: customer.email ?? '',
           address: customer.address ?? '',
@@ -53,7 +59,9 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
           credit_limit: customer.credit_limit,
           notes: customer.notes ?? '',
         }
-      : {},
+      : {
+          customer_type: 'CREDIT',
+        },
   });
 
   const mutation = useMutation({
@@ -86,7 +94,7 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
             <h2 className="text-lg font-semibold text-gray-900">
               {isEdit ? 'Customer Profile' : 'Add New Customer'}
             </h2>
-            {isEdit && (
+            {isEdit && !isCashier && (
               <div className="flex space-x-2">
                 <button
                   onClick={() => setActiveTab('DETAILS')}
@@ -125,13 +133,24 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
                 </div>
               )}
 
-              {/* Name */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                  Name <span className="text-red-500">*</span>
-                </label>
-                <input {...register('name')} placeholder="Ahmed Traders" className={inputCls(!!errors.name)} />
-                {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
+              {/* Name & Customer Type */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input {...register('name')} placeholder="Ahmed Traders" className={inputCls(!!errors.name)} />
+                  {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Customer Type
+                  </label>
+                  <select {...register('customer_type')} className={inputCls(false)}>
+                    <option value="CREDIT">Credit Account (Udhaar)</option>
+                    <option value="CASH">Walk-in Cash Entity</option>
+                  </select>
+                </div>
               </div>
 
               {/* Phone + Email */}

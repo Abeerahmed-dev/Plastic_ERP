@@ -1,11 +1,24 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
 import { requirePermission } from '../../middleware/requirePermission';
-import { checkoutController } from './pos.controller';
+import { checkoutController, getTodayCashTallyController, getCashierShiftAuditController } from './pos.controller';
 
 const router = Router();
 
-// Requires sales:write as POS is essentially a sale
+router.get(
+  '/today-tally',
+  requireAuth,
+  requirePermission('sales:read'),
+  getTodayCashTallyController
+);
+
+router.get(
+  '/shift-audit',
+  requireAuth,
+  requirePermission('sales:read'),
+  getCashierShiftAuditController
+);
+
 router.post(
   '/checkout',
   requireAuth,
@@ -14,3 +27,4 @@ router.post(
 );
 
 export { router as posRouter };
+

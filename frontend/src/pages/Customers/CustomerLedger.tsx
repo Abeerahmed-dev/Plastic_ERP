@@ -73,6 +73,7 @@ export const CustomerLedger = ({ customerId }: CustomerLedgerProps) => {
                   <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${
                     entry.type === 'INVOICE' ? 'bg-blue-50 text-blue-700 ring-blue-700/10' :
                     entry.type === 'PAYMENT' ? 'bg-emerald-50 text-emerald-700 ring-emerald-700/10' :
+                    entry.type === 'CREDIT_NOTE' ? 'bg-red-50 text-red-700 ring-red-700/10 font-bold' :
                     'bg-slate-50 text-slate-700 ring-slate-700/10'
                   }`}>
                     {entry.type.replace('_', ' ')}
@@ -87,7 +88,9 @@ export const CustomerLedger = ({ customerId }: CustomerLedgerProps) => {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-slate-700">
                   {entry.credit > 0 ? formatCurrency(entry.credit) : '-'}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-slate-900">
+                <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-bold ${
+                  entry.balance < 0 ? 'text-red-600' : 'text-slate-900'
+                }`}>
                   {formatCurrency(entry.balance)}
                 </td>
               </tr>

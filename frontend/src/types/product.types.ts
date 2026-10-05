@@ -1,28 +1,27 @@
-export interface UnitOfMeasure {
+export interface Category {
   id: string;
   name: string;
-  abbreviation: string;
+  bag_weight_kg: number;
+  description: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Product {
   id: string;
   code: string;
   name: string;
+  size?: string | null;
   description: string | null;
-  category: string;
-  uom_id: string;
-  uom_name: string;
-  uom_abbreviation: string;
-  cost_price: string | number; // sometimes numerical fields come as strings from DB
+  category_id: string;
+  category_name?: string;
+  category?: string;
+  bag_weight_kg?: number;
+  cost_price: string | number;
   sale_price: string | number;
+  fixed_retail_price_per_kg?: string | number;
   opening_stock: string | number;
   current_stock?: number;
-  base_unit?: string;
-  purchase_unit?: string;
-  sale_unit?: string;
-  default_kg_per_purchase_unit?: number | string;
-  default_sale_units_per_kg?: number | string;
-  unit_conversions?: Record<string, number>;
   is_active: boolean;
   notes: string | null;
   created_at: string;
@@ -32,9 +31,9 @@ export interface Product {
 export interface CreateProductData {
   code?: string;
   name: string;
+  size?: string;
   description?: string;
-  category: string;
-  uom_id: string;
+  category_id: string;
   cost_price: number;
   sale_price: number;
   opening_stock: number;
@@ -44,9 +43,9 @@ export interface CreateProductData {
 export interface UpdateProductData {
   code?: string;
   name?: string;
+  size?: string;
   description?: string;
-  category?: string;
-  uom_id?: string;
+  category_id?: string;
   cost_price?: number;
   sale_price?: number;
   is_active?: boolean;

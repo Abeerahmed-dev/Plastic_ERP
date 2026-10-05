@@ -8,6 +8,8 @@ interface ReceiptProps {
 
 export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
   ({ invoice, items, cashierName }, ref) => {
+    const isRefund = Number(invoice.total_amount) < 0;
+
     return (
       <div ref={ref} className="hidden print:block w-[80mm] bg-white text-black p-4 font-mono text-sm leading-tight">
         <div className="text-center mb-4">
@@ -31,21 +33,31 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
             </tr>
           </thead>
           <tbody>
-            {items.map((item, idx) => (
-              <tr key={idx}>
-                <td className="py-1 pr-1 truncate max-w-[40mm]">{item.productName}</td>
-                <td className="py-1 text-right">{item.quantity}</td>
-                <td className="py-1 text-right">{item.unit_price}</td>
-                <td className="py-1 text-right">{item.quantity * item.unit_price}</td>
-              </tr>
-            ))}
+            {items.map((item, idx) => {
+              const isItemReturn = item.isReturn || item.quantity < 0;
+              const displayQty = isItemReturn ? -Math.abs(item.quantity) : item.quantity;
+              const lineTotal = displayQty * item.unit_price;
+
+              return (
+                <tr key={idx}>
+                  <td className="py-1 pr-1 max-w-[40mm] break-words">
+                    {isItemReturn ? `[RETURNED] ${item.productName}` : item.productName}
+                  </td>
+                  <td className="py-1 text-right">{displayQty}</td>
+                  <td className="py-1 text-right">{item.unit_price}</td>
+                  <td className="py-1 text-right">{lineTotal.toLocaleString()}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
         <div className="border-t border-dashed border-gray-400 pt-2 mb-4 text-right">
-          <p>Subtotal: Rs. {invoice.subtotal}</p>
-          {invoice.discount > 0 && <p>Discount: Rs. {invoice.discount}</p>}
-          <p className="font-bold text-lg mt-1">TOTAL: Rs. {invoice.total_amount}</p>
+          <p>Subtotal: Rs. {Number(invoice.subtotal).toLocaleString()}</p>
+          {Number(invoice.discount) > 0 && <p>Discount: Rs. {Number(invoice.discount).toLocaleString()}</p>}
+          <p className="font-bold text-lg mt-1">
+            {isRefund ? `REFUND: Rs. ${Math.abs(Number(invoice.total_amount)).toLocaleString()}` : `TOTAL: Rs. ${Number(invoice.total_amount).toLocaleString()}`}
+          </p>
         </div>
 
         <div className="text-center text-xs mt-6 pt-4 border-t border-dashed border-gray-400">
@@ -57,3 +69,4 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
   }
 );
 ReceiptPrinter.displayName = 'ReceiptPrinter';
+

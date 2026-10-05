@@ -13,14 +13,18 @@ function formatRs(n: number | string) {
 }
 
 export default function SuppliersListPage() {
-  const { hasPermission } = useAuthStore();
-  const canWrite = hasPermission('suppliers:write');
-  const canDelete = hasPermission('suppliers:delete');
+  const { user, hasPermission } = useAuthStore();
+  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = userRole === 'CASHIER';
+  const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:write');
+  const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:delete'));
   const qc = useQueryClient();
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [city, setCity] = useState('');
+  const [debouncedCity, setDebouncedCity] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Supplier | undefined>();
 
@@ -33,9 +37,18 @@ export default function SuppliersListPage() {
     }, 350);
   };
 
+  const handleCity = (v: string) => {
+    setCity(v);
+    clearTimeout((window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer);
+    (window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer = setTimeout(() => {
+      setDebouncedCity(v);
+      setPage(1);
+    }, 350);
+  };
+
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['suppliers', page, debouncedSearch],
-    queryFn: () => getSuppliers({ page, limit: LIMIT, search: debouncedSearch || undefined }),
+    queryKey: ['suppliers', page, debouncedSearch, debouncedCity],
+    queryFn: () => getSuppliers({ page, limit: LIMIT, search: debouncedSearch || undefined, city: debouncedCity || undefined }),
   });
 
   const deactivateMutation = useMutation({
@@ -72,14 +85,23 @@ export default function SuppliersListPage() {
             )}
           </div>
         </div>
-        <div className="mt-4">
-          <div className="relative max-w-md">
+        {/* Search & City Filters */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[240px] max-w-md">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder="Search by name, phone, or code…"
               className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+            />
+          </div>
+          <div className="relative w-48">
+            <input
+              value={city}
+              onChange={(e) => handleCity(e.target.value)}
+              placeholder="Filter by city…"
+              className="w-full rounded-lg border border-gray-300 py-2 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
             />
           </div>
         </div>
@@ -95,37 +117,56 @@ export default function SuppliersListPage() {
                 <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">City</th>
                 <th className="px-4 py-3 font-semibold text-gray-600 text-center">Terms</th>
-                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Outstanding</th>
+                {!isCashier && (
+                  <>
+                    <th className="px-4 py-3 font-semibold text-gray-600 text-right">Outstanding</th>
+                    <th className="px-4 py-3 font-semibold text-gray-600 text-right">Advance (Credit)</th>
+                  </>
+                )}
                 <th className="px-4 py-3 font-semibold text-gray-600 text-center">Status</th>
                 {(canWrite || canDelete) && <th className="px-4 py-3 font-semibold text-gray-600 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={8} className="py-16 text-center text-gray-400">Loading suppliers…</td></tr>
+                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">Loading suppliers…</td></tr>
               )}
               {isError && (
-                <tr><td colSpan={8} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
+                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
               )}
               {!isLoading && !isError && suppliers.length === 0 && (
-                <tr><td colSpan={8} className="py-16 text-center text-gray-400">
+                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">
                   {debouncedSearch ? `No suppliers matching "${debouncedSearch}"` : 'No suppliers yet.'}
                 </td></tr>
               )}
-              {suppliers.map((s, idx) => (
-                <tr key={s.id} className={`border-b border-gray-50 hover:bg-blue-50/40 transition ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                  <td className="px-4 py-3">
-                    <span className="inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-mono font-semibold text-emerald-700">{s.code}</span>
-                  </td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{s.phone ?? '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{s.city ?? '—'}</td>
-                  <td className="px-4 py-3 text-center text-gray-600">{s.payment_terms}d</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={`font-semibold ${Number(s.outstanding_payable) > 0 ? 'text-orange-600' : 'text-gray-500'}`}>
-                      {formatRs(s.outstanding_payable)}
-                    </span>
-                  </td>
+              {suppliers.map((s, idx) => {
+                const masterBalance = Number(s.outstanding_payable || 0);
+                const displayOutstanding = Math.max(0, masterBalance);
+                const displayAdvance = Math.abs(Math.min(0, masterBalance));
+
+                return (
+                  <tr key={s.id} className={`border-b border-gray-50 hover:bg-blue-50/40 transition ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                    <td className="px-4 py-3">
+                      <span className="inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-mono font-semibold text-emerald-700">{s.code}</span>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
+                    <td className="px-4 py-3 text-gray-600">{s.phone ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-600">{s.city ?? '—'}</td>
+                    <td className="px-4 py-3 text-center text-gray-600">{s.payment_terms}d</td>
+                    {!isCashier && (
+                      <>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`font-semibold ${displayOutstanding > 0 ? 'text-orange-600 font-bold' : 'text-gray-400'}`}>
+                            {formatRs(displayOutstanding)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className={`font-semibold ${displayAdvance > 0 ? 'text-emerald-600 font-bold' : 'text-gray-400'}`}>
+                            {formatRs(displayAdvance)}
+                          </span>
+                        </td>
+                      </>
+                    )}
                   <td className="px-4 py-3 text-center">
                     <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${s.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {s.is_active ? 'Active' : 'Inactive'}
@@ -151,7 +192,8 @@ export default function SuppliersListPage() {
                     </td>
                   )}
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
         </div>

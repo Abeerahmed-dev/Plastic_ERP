@@ -9,8 +9,15 @@ import {
   getLiquidityPayablesController,
   getLiquidityUnsoldStockController,
   getProfitMatrixController,
-  getSalesMarginController,
   getCashierTallyController,
+  getPnLController,
+  getIncomeStatementController,
+  getIncomeStatementReturnsDetailController,
+  getMarginAnalyticsController,
+  getInventoryValuationController,
+  getCashLedgerController,
+  getPdcController,
+  getIssuedPdcController,
 } from './reports.controller';
 
 const router = Router();
@@ -26,8 +33,17 @@ router.get('/liquidity/receivables', verifyRole(['OWNER', 'ADMIN']), getLiquidit
 router.get('/liquidity/payables', verifyRole(['OWNER', 'ADMIN']), getLiquidityPayablesController);
 router.get('/liquidity/unsold-stock', verifyRole(['OWNER', 'ADMIN']), getLiquidityUnsoldStockController);
 router.get('/liquidity', verifyRole(['OWNER', 'ADMIN']), getLiquidityLedgerController);
+router.get('/pdc', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), getPdcController);
+router.get('/issued-pdc', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), getIssuedPdcController);
+router.get('/pnl', verifyRole(['OWNER', 'ADMIN']), getPnLController);
+router.get('/income-statement/returns-detail', verifyRole(['OWNER', 'ADMIN']), getIncomeStatementReturnsDetailController);
+router.get('/income-statement', verifyRole(['OWNER', 'ADMIN']), getIncomeStatementController);
+router.get('/margin-analytics', verifyRole(['OWNER', 'ADMIN']), getMarginAnalyticsController);
+router.get('/inventory-valuation', verifyRole(['OWNER', 'ADMIN']), getInventoryValuationController);
+router.get('/cash-ledger', verifyRole(['OWNER', 'ADMIN']), getCashLedgerController);
 router.get('/profit', verifyRole(['OWNER', 'ADMIN']), getProfitMatrixController);
-router.get('/sales-margin', verifyRole(['OWNER', 'ADMIN']), getSalesMarginController);
+router.get('/sales-margin', verifyRole(['OWNER', 'ADMIN']), getMarginAnalyticsController);
 
 export { router as reportsRouter };
 export default router;
+

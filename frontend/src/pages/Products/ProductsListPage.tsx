@@ -2,28 +2,32 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Edit2, Box } from 'lucide-react';
 import { productsService } from '../../services/products.service';
+import { categoriesService } from '../../services/categories.service';
 import { ProductFormModal } from './ProductFormModal';
 import { Product, CreateProductData, UpdateProductData } from '../../types/product.types';
 import { useAuthStore } from '../../store/auth.store';
 
 export default function ProductsListPage() {
   const queryClient = useQueryClient();
-  const { hasPermission } = useAuthStore();
+  const { user, hasPermission } = useAuthStore();
+  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = userRole === 'CASHIER';
+  const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
   
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const canWrite = hasPermission('products:write');
+  const canWrite = isCashier || isOwner || hasPermission('products:write');
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products'],
     queryFn: productsService.getProducts,
   });
 
-  const { data: uoms = [] } = useQuery({
-    queryKey: ['uoms'],
-    queryFn: productsService.getUoms,
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: categoriesService.getCategories,
   });
 
   const createMutation = useMutation({
@@ -48,7 +52,8 @@ export default function ProductsListPage() {
     (p) =>
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.category.toLowerCase().includes(searchTerm.toLowerCase())
+      (p.size || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.category || p.category_name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleOpenCreate = () => {
@@ -83,7 +88,7 @@ export default function ProductsListPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Product Catalog</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Manage raw materials, finished goods, and product pricing.
+            Manage raw materials, finished goods, and product category conversions.
           </p>
         </div>
         {canWrite && (
@@ -106,7 +111,7 @@ export default function ProductsListPage() {
           <input
             type="text"
             className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
-            placeholder="Search by code, name, or category..."
+            placeholder="Search by code, name, size, or category..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -123,13 +128,16 @@ export default function ProductsListPage() {
                   Product
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Category
+                  Size
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Category (Bag Weight)
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Pricing
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Opening Stock
+                  Current Stock (KG)
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Status
@@ -142,7 +150,7 @@ export default function ProductsListPage() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       <span className="mt-2">Loading catalog...</span>
@@ -151,7 +159,7 @@ export default function ProductsListPage() {
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
                     No products found.
                   </td>
                 </tr>
@@ -164,27 +172,40 @@ export default function ProductsListPage() {
                           <Box className="h-5 w-5" />
                         </div>
                         <div className="ml-4">
-                          <div className="text-sm font-semibold text-slate-900">{product.name}</div>
+                          <div className="text-sm font-semibold text-slate-900">
+                            {product.size ? `${product.name} (${product.size})` : product.name}
+                          </div>
                           <div className="text-xs text-slate-500 font-mono mt-0.5">{product.code}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center rounded-md bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800">
-                        {product.category}
+                      {product.size ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-100 text-xs font-semibold">
+                          {product.size}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400 font-mono">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 border border-blue-100">
+                        {product.category || product.category_name} ({Number(product.bag_weight_kg || 25).toFixed(2)} KG/Bag)
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-slate-900 font-medium">
-                        {formatCurrency(product.sale_price)}
+                        {formatCurrency(product.sale_price)} / KG
                       </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        Cost: {formatCurrency(product.cost_price)}
-                      </div>
+                      {!isCashier && (
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          Cost: {formatCurrency(product.cost_price)}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-slate-900 font-medium">
-                        {Number(product.opening_stock).toLocaleString()} {product.uom_abbreviation}
+                      <div className="text-sm text-slate-900 font-bold">
+                        {Number(product.current_stock ?? product.opening_stock).toLocaleString()} KG
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -222,7 +243,7 @@ export default function ProductsListPage() {
         onSubmit={handleSubmit}
         isSubmitting={createMutation.isPending || updateMutation.isPending}
         initialData={editingProduct}
-        uoms={uoms}
+        categories={categories}
       />
     </div>
   );

@@ -24,6 +24,11 @@ export interface InventoryLedgerItem {
   total_kg: number;
   avg_cost: number;
   total_asset_value: number;
+  total_exact_boras?: number;
+  secondary_units_summary?: string;
+  all_time_kg_purchased?: number;
+  all_time_kg_sold?: number;
+  all_time_profit?: number;
   batches: BatchItem[];
 }
 

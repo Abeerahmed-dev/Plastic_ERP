@@ -1,21 +1,15 @@
 import { z } from 'zod';
 
-const CATEGORIES = ['Plastic Bag', 'Roll', 'Sheet', 'Granules', 'Packaging', 'Other'] as const;
-
 export const createProductSchema = z.object({
+  code: z.string().optional().nullable(),
   name: z.string().min(1, 'Name is required').max(150),
+  size: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
-  category: z.enum(CATEGORIES),
-  uom_id: z.string().uuid('Invalid UOM ID'),
-  cost_price: z.coerce.number().min(0).default(0),
-  sale_price: z.coerce.number().min(0).default(0),
-  opening_stock: z.coerce.number().min(0).default(0),
-  base_unit: z.string().default('KG').optional(),
-  purchase_unit: z.string().default('Bora').optional(),
-  sale_unit: z.string().default('Dasti').optional(),
-  default_kg_per_purchase_unit: z.coerce.number().min(0).default(25.00).optional(),
-  default_sale_units_per_kg: z.coerce.number().min(0).default(2.00).optional(),
-  unit_conversions: z.record(z.string(), z.number()).optional().default({ Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 }),
+  category_id: z.string().uuid('Invalid Category ID'),
+  cost_price: z.preprocess((val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)), z.number().min(0).default(0)).optional(),
+  sale_price: z.preprocess((val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)), z.number().min(0).default(0)).optional(),
+  fixed_retail_price_per_kg: z.preprocess((val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)), z.number().min(0).default(0)).optional(),
+  opening_stock: z.preprocess((val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)), z.number().min(0).default(0)).optional(),
   notes: z.string().optional().nullable(),
 });
 
@@ -30,7 +24,8 @@ export const productQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   search: z.string().optional(),
-  category: z.enum(CATEGORIES).optional(),
+  category_id: z.string().optional(),
+  category: z.string().optional(),
   is_active: z
     .string()
     .optional()

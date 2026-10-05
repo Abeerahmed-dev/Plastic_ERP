@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
-import { requirePermission } from '../../middleware/requirePermission';
+import { verifyRole } from '../../middleware/requireRole';
 import {
   listProductsController,
   listPOSAvailableProductsController,
@@ -13,12 +13,12 @@ import {
 
 const router = Router();
 
-router.get('/', requireAuth, requirePermission('products:read'), listProductsController);
-router.get('/pos-available', requireAuth, requirePermission('sales:write'), listPOSAvailableProductsController);
+router.get('/', requireAuth, listProductsController);
+router.get('/pos-available', requireAuth, listPOSAvailableProductsController);
 router.get('/:id/batches', requireAuth, getProductBatchesController);
-router.get('/:id', requireAuth, requirePermission('products:read'), getProductController);
-router.post('/', requireAuth, requirePermission('products:write'), createProductController);
-router.put('/:id', requireAuth, requirePermission('products:write'), updateProductController);
-router.delete('/:id', requireAuth, requirePermission('products:delete'), deleteProductController);
+router.get('/:id', requireAuth, getProductController);
+router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER']), createProductController);
+router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), updateProductController);
+router.delete('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), deleteProductController);
 
 export default router;

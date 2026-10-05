@@ -1,19 +1,27 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, FileText } from 'lucide-react';
+import { Plus, Search, FileText, RotateCcw } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
 import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
+import { ProcessReturnModal } from './ProcessReturnModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
 
 export default function InvoicesListPage() {
-  const { hasPermission } = useAuthStore();
+  const { user, hasPermission } = useAuthStore();
+  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = userRole === 'CASHIER';
+  const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
+
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
-  const canWrite = hasPermission('customers:write');
+  const [returnInvoiceId, setReturnInvoiceId] = useState<string | null>(null);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+
+  const canWrite = isCashier || isOwner || hasPermission('customers:write') || hasPermission('sales:write');
 
   const { data: invoices = [], isLoading, refetch } = useQuery({
     queryKey: ['invoices'],
@@ -30,6 +38,11 @@ export default function InvoicesListPage() {
     }
   };
 
+  const handleInitiateReturn = (id: string) => {
+    setReturnInvoiceId(id);
+    setIsReturnModalOpen(true);
+  };
+
   const filteredInvoices = invoices.filter(
     (i) =>
       i.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -44,8 +57,44 @@ export default function InvoicesListPage() {
     }).format(Number(val));
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
+  const renderCreatorBadge = (invoice: any) => {
+    const role = (invoice.created_by_role || invoice.creator?.role || 'ADMIN').toUpperCase();
+    const name = invoice.created_by_name || invoice.creator?.name || 'User';
+
+    if (role === 'CASHIER') {
+      return (
+        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200" title={`Issued by Cashier: ${name}`}>
+          Cashier
+        </span>
+      );
+    }
+    if (role === 'OWNER') {
+      return (
+        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200" title={`Issued by Owner: ${name}`}>
+          Owner
+        </span>
+      );
+    }
+    return (
+      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200" title={`Issued by Admin: ${name}`}>
+        Admin
+      </span>
+    );
+  };
+
+  const getStatusBadge = (invoice: any) => {
+    const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
+    if (isCreditNote) {
+      return <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-black text-red-800 border border-red-300">CREDIT NOTE</span>;
+    }
+
+    const totalAmt = Number(invoice.total_amount || 0);
+    const paidAmt = Number(invoice.paid_amount || 0);
+    if (totalAmt > 0 && paidAmt >= totalAmt) {
+      return <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">Paid</span>;
+    }
+
+    switch (invoice.status) {
       case 'PAID':
         return <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">Paid</span>;
       case 'PARTIAL':
@@ -53,7 +102,7 @@ export default function InvoicesListPage() {
       case 'UNPAID':
         return <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700 border border-rose-200">Unpaid</span>;
       default:
-        return <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800 border border-slate-200">{status}</span>;
+        return <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800 border border-slate-200">{invoice.status}</span>;
     }
   };
 
@@ -62,9 +111,9 @@ export default function InvoicesListPage() {
       {/* Header section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Sales Invoices</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Sales Invoices & Credit Notes</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Create and manage customer bills and receivables. Click purple document icon to view line item details.
+            Create sales invoices and process strict invoice-anchored returns (Credit Notes).
           </p>
         </div>
         {canWrite && (
@@ -87,7 +136,7 @@ export default function InvoicesListPage() {
           <input
             type="text"
             className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
-            placeholder="Search by invoice number or customer..."
+            placeholder="Search by invoice number, credit note, or customer..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -101,7 +150,7 @@ export default function InvoicesListPage() {
             <thead className="bg-slate-50/50">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Invoice
+                  Invoice / Credit Note
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Customer
@@ -112,18 +161,23 @@ export default function InvoicesListPage() {
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Amount
                 </th>
-                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Balance Due
-                </th>
+                {!isCashier && (
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Balance Due
+                  </th>
+                )}
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Status
+                </th>
+                <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Actions
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       <span className="mt-2">Loading invoices...</span>
@@ -132,33 +186,47 @@ export default function InvoicesListPage() {
                 </tr>
               ) : filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     No invoices found.
                   </td>
                 </tr>
               ) : (
                 filteredInvoices.map((invoice) => {
-                  const balanceDue = Number(invoice.total_amount) - Number(invoice.paid_amount);
+                  const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
+                  const balanceDue = Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0));
+
                   return (
-                    <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors">
+                    <tr
+                      key={invoice.id}
+                      className={`transition-colors ${
+                        isCreditNote ? 'bg-red-50/70 border-l-4 border-l-red-500' : 'hover:bg-slate-50/50'
+                      }`}
+                    >
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => handleOpenInvoice(invoice.id)}
-                          className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
-                          title="Click to view detailed invoice line items"
-                        >
-                          <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-purple-100 text-purple-700 group-hover:bg-purple-200 group-hover:scale-105 transition-all shadow-xs">
-                            <FileText className="h-5 w-5" />
-                          </div>
-                          <div className="ml-3">
-                            <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 group-hover:underline font-mono">
-                              {invoice.invoice_number}
+                        <div className="flex items-center">
+                          <button
+                            onClick={() => handleOpenInvoice(invoice.id)}
+                            className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                            title="Click to view detailed line items"
+                          >
+                            <div className={`h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl group-hover:scale-105 transition-all shadow-xs ${
+                              isCreditNote ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'
+                            }`}>
+                              {isCreditNote ? <RotateCcw className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
                             </div>
-                            <div className="text-[10px] text-purple-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
-                              View details →
+                            <div className="ml-3">
+                              <div className={`text-sm font-bold font-mono group-hover:underline flex items-center ${
+                                isCreditNote ? 'text-red-900 group-hover:text-red-700' : 'text-slate-900 group-hover:text-purple-700'
+                              }`}>
+                                {invoice.invoice_number}
+                              </div>
+                              <div className="text-[10px] text-purple-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                                View details →
+                              </div>
                             </div>
-                          </div>
-                        </button>
+                          </button>
+                          {isOwner && renderCreatorBadge(invoice)}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-slate-900">{invoice.customer_name}</div>
@@ -169,14 +237,28 @@ export default function InvoicesListPage() {
                           {new Date(invoice.date).toLocaleDateString()}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 font-medium">
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isCreditNote ? 'text-red-700 font-bold font-mono' : 'text-slate-900'}`}>
                         {formatCurrency(invoice.total_amount)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-rose-600">
-                        {formatCurrency(balanceDue)}
-                      </td>
+                      {!isCashier && (
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-rose-600">
+                          {formatCurrency(balanceDue)}
+                        </td>
+                      )}
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(invoice.status)}
+                        {getStatusBadge(invoice)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-xs">
+                        {!isCreditNote && canWrite && (
+                          <button
+                            onClick={() => handleInitiateReturn(invoice.id)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 transition-all active:scale-95 shadow-2xs"
+                            title="Process Sales Return & Issue Credit Note"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                            Return
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -201,7 +283,23 @@ export default function InvoicesListPage() {
         onClose={() => setIsDetailModalOpen(false)}
         invoice={selectedInvoice}
         type="sales"
+        onProcessReturn={(invId) => handleInitiateReturn(invId)}
       />
+
+      {returnInvoiceId && (
+        <ProcessReturnModal
+          parentInvoiceId={returnInvoiceId}
+          isOpen={isReturnModalOpen}
+          onClose={() => {
+            setIsReturnModalOpen(false);
+            setReturnInvoiceId(null);
+          }}
+          onSuccess={() => {
+            refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
+

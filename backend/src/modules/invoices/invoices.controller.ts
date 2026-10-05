@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import * as invoicesService from './invoices.service';
-import { createInvoiceSchema } from './invoices.schemas';
+import { createInvoiceSchema, createSalesReturnSchema } from './invoices.schemas';
 import { ok } from '../../shared/apiResponse';
-import { ValidationError } from '../../shared/errors';
+import { ValidationError, ForbiddenError } from '../../shared/errors';
 
 export async function listInvoices(_req: Request, res: Response, next: NextFunction) {
   try {
@@ -22,17 +22,54 @@ export async function getInvoice(req: Request, res: Response, next: NextFunction
   }
 }
 
-export async function createInvoice(req: Request, res: Response, next: NextFunction) {
+export async function createInvoice(req: Request, res: Response, _next: NextFunction) {
   try {
     const parsed = createInvoiceSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
     }
 
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').toUpperCase();
+    const isCashier = userRole === 'CASHIER';
+
+    const amountPaid = Number((req.body as any).amount_paid || (req.body as any).paid_amount || 0);
+    const subtotal = parsed.data.items.reduce((acc, i) => acc + (Number(i.quantity) * Number(i.unit_price)), 0);
+    const grandTotal = subtotal - (parsed.data.discount || 0);
+
+    if (isCashier && amountPaid > grandTotal + 0.01) {
+      throw new ForbiddenError('Cashiers cannot receive excess ledger payments.');
+    }
+
     const userId = req.user?.id;
     const invoice = await invoicesService.createInvoice(parsed.data, userId);
     res.status(201).json(ok(invoice));
+  } catch (error: any) {
+    console.error("SALES API CRASH:", error);
+    res.status(500).json({ error: error.message || "Internal Server Error", detail: error.detail });
+  }
+}
+
+export async function getInvoiceReturnSummary(req: Request, res: Response, next: NextFunction) {
+  try {
+    const summary = await invoicesService.getInvoiceReturnSummary(req.params.id);
+    res.json(ok(summary));
   } catch (error) {
     next(error);
   }
 }
+
+export async function createSalesReturn(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = createSalesReturnSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
+    }
+
+    const userId = req.user?.id;
+    const creditNote = await invoicesService.processSalesReturn(req.params.id, parsed.data, userId);
+    res.status(201).json(ok(creditNote));
+  } catch (error) {
+    next(error);
+  }
+}
+

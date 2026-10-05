@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { X, Plus, Trash2, Loader2, Layers } from 'lucide-react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -6,15 +6,12 @@ import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invoicesService } from '../../services/invoices.service';
 import { getCustomers } from '../../services/customers.service';
-import { productsService, ProductBatch } from '../../services/products.service';
+import { productsService } from '../../services/products.service';
 
 const itemSchema = z.object({
   product_id: z.string().min(1, 'Product is required'),
-  batch_id: z.string().min(1, 'Batch selection is required'),
-  quantity: z.coerce.number().min(0.01, 'Quantity must be greater than 0'),
-  selected_unit: z.string().optional().default('Dasti'),
-  unit_price: z.coerce.number().min(0, 'Price cannot be negative'),
-  actual_weight_per_unit: z.coerce.number().min(0).optional().nullable(),
+  quantity: z.coerce.number().min(0.01, 'Quantity (KG) must be greater than 0'),
+  unit_price: z.coerce.number().min(0, 'Price / KG cannot be negative'),
 });
 
 const schema = z.object({
@@ -22,6 +19,7 @@ const schema = z.object({
   date: z.string(),
   due_date: z.string(),
   discount: z.coerce.number().min(0).default(0),
+  delivery_charge: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
   items: z.array(itemSchema).min(1, 'At least one item is required'),
 });
@@ -36,7 +34,6 @@ interface Props {
 
 export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) => {
   const qc = useQueryClient();
-  const [productBatchesMap, setProductBatchesMap] = useState<Record<string, ProductBatch[]>>({});
 
   const { data: customersResponse } = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers({ limit: 100 }) });
   const { data: productsResponse } = useQuery({ queryKey: ['products'], queryFn: () => productsService.getProducts() });
@@ -50,8 +47,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
       date: new Date().toISOString().split('T')[0],
       due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       discount: 0,
+      delivery_charge: 0,
       notes: '',
-      items: [{ product_id: '', batch_id: '', quantity: 1, selected_unit: 'Dasti', unit_price: 0 }],
+      items: [{ product_id: '', quantity: 1, unit_price: 0 }],
     }
   });
 
@@ -62,62 +60,16 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
 
   const items = watch('items');
   const discount = watch('discount');
+  const delivery_charge = watch('delivery_charge');
 
   const subtotal = items.reduce((acc, item) => acc + (Number(item.quantity || 0) * Number(item.unit_price || 0)), 0);
-  const total = Math.max(0, subtotal - (Number(discount) || 0));
-
-  const fetchBatchesForProduct = async (productId: string, index: number) => {
-    if (!productId) return;
-    try {
-      let batches = productBatchesMap[productId];
-      if (!batches) {
-        batches = await productsService.getProductBatches(productId);
-        setProductBatchesMap((prev) => ({ ...prev, [productId]: batches }));
-      }
-
-      if (batches && batches.length > 0) {
-        const firstBatch = batches[0];
-        setValue(`items.${index}.batch_id`, firstBatch.id);
-
-        const bConversions = typeof firstBatch.batch_unit_conversions === 'string'
-          ? JSON.parse(firstBatch.batch_unit_conversions)
-          : (firstBatch.batch_unit_conversions || {});
-
-        const availUnits = Object.keys(bConversions);
-        if (availUnits.length > 0) {
-          setValue(`items.${index}.selected_unit`, firstBatch.selected_unit || availUnits[0]);
-        }
-      } else {
-        setValue(`items.${index}.batch_id`, '');
-      }
-    } catch (err) {
-      console.error('Failed to fetch batches for product:', err);
-    }
-  };
+  const deliveryChargeNum = Number(delivery_charge || 0);
+  const total = Math.max(0, subtotal - (Number(discount) || 0)) + deliveryChargeNum;
 
   const handleProductChange = (index: number, productId: string) => {
     const product = products.find(p => p.id === productId);
     if (product) {
-      setValue(`items.${index}.unit_price`, Number(product.sale_price));
-      setValue(`items.${index}.selected_unit`, product.sale_unit || 'Dasti');
-    }
-    fetchBatchesForProduct(productId, index);
-  };
-
-  const handleBatchChange = (index: number, batchId: string, productId: string) => {
-    const batches = productBatchesMap[productId] || [];
-    const foundBatch = batches.find(b => b.id === batchId);
-    if (foundBatch) {
-      const bConversions = typeof foundBatch.batch_unit_conversions === 'string'
-        ? JSON.parse(foundBatch.batch_unit_conversions)
-        : (foundBatch.batch_unit_conversions || {});
-
-      const availUnits = Object.keys(bConversions);
-      const currentUnit = items[index]?.selected_unit;
-
-      if (availUnits.length > 0 && (!currentUnit || !availUnits.includes(currentUnit))) {
-        setValue(`items.${index}.selected_unit`, foundBatch.selected_unit || availUnits[0]);
-      }
+      setValue(`items.${index}.unit_price`, Number(product.sale_price || 0));
     }
   };
 
@@ -125,6 +77,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     mutationFn: (data: FormData) => invoicesService.createInvoice(data as any),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['invoices'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['pnlReport'] });
       onSuccess();
       onClose();
     },
@@ -139,13 +93,25 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
       date: new Date().toISOString().split('T')[0],
       due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       discount: 0,
+      delivery_charge: 0,
       notes: '',
-      items: [{ product_id: '', batch_id: '', quantity: 1, selected_unit: 'Dasti', unit_price: 0 }],
+      items: [{ product_id: '', quantity: 1, unit_price: 0 }],
     });
   }, [isOpen]);
 
   const onSubmit = (data: FormData) => {
-    mutation.mutate(data);
+    const cleanData = {
+      ...data,
+      discount: Number(data.discount || 0),
+      delivery_charge: Number(data.delivery_charge || 0),
+      items: data.items.map((i) => ({
+        product_id: i.product_id,
+        quantity: Number(i.quantity),
+        selected_unit: 'KG',
+        unit_price: Number(i.unit_price),
+      })),
+    };
+    mutation.mutate(cleanData as any);
   };
 
   if (!isOpen) return null;
@@ -169,7 +135,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
             <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
               <Layers className="h-5 w-5" />
             </div>
-            <h2 className="text-lg font-semibold text-slate-800">Create New Sales Invoice</h2>
+            <div>
+              <h2 className="text-lg font-bold text-slate-800">Create New Wholesale Sales Invoice</h2>
+              <p className="text-xs text-slate-500 font-medium">Strict KG Wholesale Billing Model</p>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -182,8 +151,11 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
         <div className="px-6 py-6 overflow-y-auto flex-1">
           <form id="invoice-form" onSubmit={handleSubmit(onSubmit, (errs) => console.log('Validation failed:', errs))} className="space-y-6">
             {mutation.isError && (
-              <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-                {mutation.error instanceof Error ? mutation.error.message : 'Failed to create invoice.'}
+              <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700 font-medium border border-red-200">
+                {(mutation.error as any)?.response?.data?.error || (mutation.error as any)?.response?.data?.message || mutation.error?.message || 'Failed to create invoice.'}
+                {(mutation.error as any)?.response?.data?.detail && (
+                  <p className="text-xs text-red-600 mt-1 font-mono">Detail: {(mutation.error as any).response.data.detail}</p>
+                )}
               </div>
             )}
 
@@ -216,12 +188,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
               <table className="min-w-full divide-y divide-slate-200 text-sm text-left">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/4">Product</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/3">Batch (Required)</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-20">Qty</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-24">Unit</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-28">Price</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-28">Total</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/2">Product</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-36">QTY (KG)</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-36">PRICE / KG</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-40">Total</th>
                     <th className="px-4 py-3 w-10"></th>
                   </tr>
                 </thead>
@@ -229,33 +199,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                   {fields.map((field, index) => {
                     const itemError = errors.items?.[index];
                     const selectedProdId = items[index]?.product_id;
-                    const selectedBatchId = items[index]?.batch_id;
-                    const selectedProd = products.find(p => p.id === selectedProdId);
-
-                    const batches = selectedProdId ? (productBatchesMap[selectedProdId] || []) : [];
-                    const selectedBatch = batches.find(b => b.id === selectedBatchId);
-
-                    const bConversions: Record<string, number> = selectedBatch
-                      ? (typeof selectedBatch.batch_unit_conversions === 'string'
-                          ? JSON.parse(selectedBatch.batch_unit_conversions)
-                          : (selectedBatch.batch_unit_conversions || {}))
-                      : (selectedProd && (selectedProd as any).unit_conversions
-                          ? (typeof (selectedProd as any).unit_conversions === 'string' ? JSON.parse((selectedProd as any).unit_conversions) : (selectedProd as any).unit_conversions)
-                          : { Dasti: 0.5, Bora: 25.0, Peti: 15.0, Pura: 5.0, KG: 1.0 });
-
-                    const availableUnits = Object.keys(bConversions).length > 0
-                      ? Object.keys(bConversions)
-                      : ['Dasti', 'Bora', 'Peti', 'Pura', 'KG'];
-
-                    const selectedUnit = items[index]?.selected_unit || 'Dasti';
-                    const unitMultiplier = bConversions[selectedUnit] !== undefined
-                      ? Number(bConversions[selectedUnit])
-                      : Number(selectedBatch?.actual_weight_per_unit || 0.5);
 
                     const qty = Number(items[index]?.quantity || 0);
                     const price = Number(items[index]?.unit_price || 0);
                     const lineTotal = qty * price;
-                    const calculatedStdWeight = qty * unitMultiplier;
 
                     return (
                       <tr key={field.id} className="hover:bg-slate-50/60 transition-colors">
@@ -268,84 +215,37 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                           >
                             <option value="">Select product...</option>
                             {products.map((p) => (
-                              <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                              <option key={p.id} value={p.id}>{p.size ? `${p.name} - ${p.size}` : p.name} ({p.code})</option>
                             ))}
                           </select>
                           {itemError?.product_id && <p className="text-xs text-red-600 mt-1">{itemError.product_id.message}</p>}
-                        </td>
-
-                        {/* UI Column: BATCH Dropdown */}
-                        <td className="px-4 py-3 align-top">
-                          <select
-                            {...register(`items.${index}.batch_id`, {
-                              onChange: (e) => handleBatchChange(index, e.target.value, selectedProdId)
-                            })}
-                            disabled={!selectedProdId}
-                            className={inputCls(!!itemError?.batch_id)}
-                          >
-                            <option value="">-- Select Batch (Required) --</option>
-                            {batches.map((b) => {
-                              const batchConversions = typeof b.batch_unit_conversions === 'string'
-                                ? JSON.parse(b.batch_unit_conversions)
-                                : (b.batch_unit_conversions || {});
-
-                              const baseUnit = b.selected_unit || 'Bora';
-                              const customWeight = batchConversions[baseUnit] || b.actual_weight_per_unit || 25.0;
-                              const dateStr = b.created_at ? new Date(b.created_at).toLocaleDateString() : 'N/A';
-
-                              return (
-                                <option key={b.id} value={b.id}>
-                                  {dateStr} - Rem: {b.remaining_qty} KG - (1 {baseUnit} = {customWeight} KG)
-                                </option>
-                              );
-                            })}
-                          </select>
-                          {itemError?.batch_id && <p className="text-xs text-red-600 mt-1">{itemError.batch_id.message}</p>}
-                          {!selectedBatchId && selectedProdId && (
-                            <p className="mt-1 text-[11px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                              Please select a batch to enable Qty & Unit.
-                            </p>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3 align-top">
-                          <input
-                            type="number"
-                            step="0.0001"
-                            disabled={!selectedBatchId}
-                            {...register(`items.${index}.quantity`)}
-                            className={inputCls(!!itemError?.quantity)}
-                          />
-                          {selectedBatchId && (
-                            <p className="mt-1 text-[11px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 font-mono">
-                              Weight: {calculatedStdWeight.toFixed(2)} KG
-                            </p>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-3 align-top">
-                          <select
-                            {...register(`items.${index}.selected_unit`)}
-                            disabled={!selectedBatchId}
-                            className={inputCls(!!itemError?.selected_unit)}
-                          >
-                            {availableUnits.map((u) => (
-                              <option key={u} value={u}>{u}</option>
-                            ))}
-                          </select>
                         </td>
 
                         <td className="px-4 py-3 align-top">
                           <input
                             type="number"
                             step="0.01"
-                            disabled={!selectedBatchId}
+                            disabled={!selectedProdId}
+                            placeholder="0.00"
+                            {...register(`items.${index}.quantity`)}
+                            className={inputCls(!!itemError?.quantity)}
+                          />
+                          {itemError?.quantity && <p className="text-xs text-red-600 mt-1">{itemError.quantity.message}</p>}
+                        </td>
+
+                        <td className="px-4 py-3 align-top">
+                          <input
+                            type="number"
+                            step="0.01"
+                            disabled={!selectedProdId}
+                            placeholder="0.00"
                             {...register(`items.${index}.unit_price`)}
                             className={inputCls(!!itemError?.unit_price)}
                           />
+                          {itemError?.unit_price && <p className="text-xs text-red-600 mt-1">{itemError.unit_price.message}</p>}
                         </td>
 
-                        <td className="px-4 py-3 text-sm font-bold text-slate-900 align-top pt-5 font-mono">
+                        <td className="px-4 py-3 text-sm font-bold text-slate-900 align-top pt-3 font-mono">
                           {formatCurrency(lineTotal)}
                         </td>
 
@@ -367,8 +267,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
               <div className="bg-slate-50 px-4 py-3 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => append({ product_id: '', batch_id: '', quantity: 1, selected_unit: 'Dasti', unit_price: 0 })}
-                  className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700"
+                  onClick={() => append({ product_id: '', quantity: 1, unit_price: 0 })}
+                  className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 font-bold"
                 >
                   <Plus className="mr-1 h-4 w-4" /> Add Line Item
                 </button>
@@ -390,6 +290,19 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                       step="0.01"
                       {...register('discount')}
                       className={inputCls(!!errors.discount)}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <span>Delivery / Freight (Rs)</span>
+                  <div className="w-24">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      {...register('delivery_charge')}
+                      className={inputCls(!!errors.delivery_charge)}
+                      placeholder="0"
                     />
                   </div>
                 </div>
@@ -435,3 +348,5 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     </div>
   );
 };
+
+

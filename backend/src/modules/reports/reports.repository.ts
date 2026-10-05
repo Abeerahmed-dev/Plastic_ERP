@@ -42,139 +42,113 @@ export async function getDashboardMetrics() {
 
 /**
  * GET /api/reports/inventory
- * Inventory Ledger with Batch Drill-Down
+ * Flattened Weighted Average Costing Inventory Ledger with Lifetime Turnover & Profit Aggregation
  */
 export async function getInventoryLedgerReport() {
-  const products = await db('products')
-    .where('is_active', true)
-    .select('id', 'name', 'code', 'category', 'opening_stock', 'cost_price', 'unit_conversions', 'purchase_unit', 'default_kg_per_purchase_unit');
+  const products = await db('products as p')
+    .join('categories as c', 'p.category_id', 'c.id')
+    .where('p.is_active', true)
+    .select(
+      'p.id as product_id',
+      'p.name as product_name',
+      'p.code as product_code',
+      'c.name as category',
+      'p.total_stock_kg',
+      'p.rolling_avg_cost_per_kg',
+      'p.cost_price',
+      'c.bag_weight_kg'
+    )
+    .orderBy('p.name', 'asc');
+
+  // 1. Purchase Aggregation Subquery: Sum all-time KG purchased per product
+  const purchaseAgg = await db('purchase_invoice_items')
+    .groupBy('product_id')
+    .select(
+      'product_id',
+      db.raw('SUM(COALESCE(net_kg_processed, net_kg_added, quantity * 25.0)) as total_kg_purchased')
+    );
+
+  // 2. Sales Aggregation Subquery: Sum all-time KG sold, total revenue, and historical COGS per product
+  const salesAgg = await db('sales_invoice_items as sii')
+    .join('products as p', 'sii.product_id', 'p.id')
+    .groupBy('sii.product_id')
+    .select(
+      'sii.product_id',
+      db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity)) as total_kg_sold'),
+      db.raw('SUM(sii.total_price) as total_revenue'),
+      db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity) * COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)) as total_cogs')
+    );
+
+  const purchaseMap = new Map<string, number>();
+  for (const row of purchaseAgg) {
+    purchaseMap.set(row.product_id, Number(row.total_kg_purchased || 0));
+  }
+
+  const salesMap = new Map<string, { kgSold: number; revenue: number; cogs: number }>();
+  for (const row of salesAgg) {
+    salesMap.set(row.product_id, {
+      kgSold: Number(row.total_kg_sold || 0),
+      revenue: Number(row.total_revenue || 0),
+      cogs: Number(row.total_cogs || 0),
+    });
+  }
+
+  const allBatches = await db('inventory_batches')
+    .orderBy('created_at', 'asc');
+
+  const batchMap = new Map<string, any[]>();
+  for (const b of allBatches) {
+    const list = batchMap.get(b.product_id) || [];
+    const orig = Math.round(Number(b.original_qty || 0) * 100) / 100;
+    const rem = Math.round(Number(b.remaining_qty || 0) * 100) / 100;
+    const buyPrice = Math.round(Number(b.batch_buy_price_per_kg || 0) * 100) / 100;
+    const sold = Math.max(0, Math.round((orig - rem) * 100) / 100);
+
+    list.push({
+      batch_id: b.id,
+      batch_number: b.batch_number,
+      date: new Date(b.created_at).toISOString().split('T')[0],
+      buy_price_per_kg: buyPrice,
+      original_qty: orig,
+      remaining_qty: rem,
+      total_kg_sold: sold,
+      status: b.status || (rem > 0 ? 'ACTIVE' : 'DEPLETED'),
+    });
+    batchMap.set(b.product_id, list);
+  }
 
   const report = [];
 
   for (const p of products) {
-    // 1. Fetch all batches for this product from inventory_batches with sales aggregations & supplier info via LEFT JOINs
-    const batchesWithSales = await db('inventory_batches as ib')
-      .leftJoin('sales_invoice_items as sii', 'sii.batch_id', 'ib.id')
-      .leftJoin('purchase_invoice_items as pii', 'ib.purchase_invoice_item_id', 'pii.id')
-      .leftJoin('purchase_invoices as pi', 'pii.purchase_invoice_id', 'pi.id')
-      .leftJoin('suppliers as s', 'pi.supplier_id', 's.id')
-      .where('ib.product_id', p.id)
-      .groupBy(
-        'ib.id',
-        'ib.batch_number',
-        'ib.created_at',
-        'ib.initial_qty',
-        'ib.remaining_qty',
-        'ib.buy_price_per_kg',
-        'ib.selected_unit',
-        'ib.actual_weight_per_unit',
-        'ib.batch_unit_conversions',
-        's.name'
-      )
-      .select(
-        'ib.id as batch_id',
-        'ib.batch_number',
-        'ib.created_at',
-        'ib.initial_qty',
-        'ib.remaining_qty',
-        'ib.buy_price_per_kg',
-        'ib.selected_unit',
-        'ib.actual_weight_per_unit',
-        'ib.batch_unit_conversions',
-        's.name as supplier_name',
-        db.raw('COALESCE(SUM(sii.net_kg_processed), 0) as total_kg_sold'),
-        db.raw('COALESCE(SUM(sii.total_price), 0) as batch_revenue')
-      )
-      .orderBy('ib.created_at', 'asc');
+    const total_kg = Math.round(Number(p.total_stock_kg || 0) * 100) / 100;
+    const avg_cost = Math.round(Number(p.rolling_avg_cost_per_kg || 0) * 100) / 100;
+    const total_asset_value = Math.round((total_kg * avg_cost) * 100) / 100;
 
-    // Default product conversions fallback
-    const defaultConversions = p.unit_conversions
-      ? (typeof p.unit_conversions === 'string' ? JSON.parse(p.unit_conversions) : p.unit_conversions)
-      : { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 };
+    const bagWeight = Number(p.bag_weight_kg || 25.0);
+    const approxBags = bagWeight > 0 ? Math.round((total_kg / bagWeight) * 10) / 10 : 0;
+    const secondarySummary = `(approx ${approxBags} Bags @ ${bagWeight} KG/Bag)`;
 
-    const defaultBoraWt = Number(defaultConversions.Bora || 25.0);
-    const defaultPetiWt = Number(defaultConversions.Peti || 15.0);
-
-    let total_kg = 0;
-    let total_cost_sum = 0;
-    let total_exact_boras = 0;
-    let total_exact_petis = 0;
-
-    const batchList = [];
-
-    if (batchesWithSales.length > 0) {
-      for (const batch of batchesWithSales) {
-        const remQty = Number(batch.remaining_qty || 0);
-        const origQty = Number(batch.initial_qty || remQty);
-        const totalKgSold = Number(batch.total_kg_sold || 0);
-        const batchRevenue = Number(batch.batch_revenue || 0);
-        const buyPrice = Number(batch.buy_price_per_kg || p.cost_price || 0);
-
-        const batchCogs = Math.round(totalKgSold * buyPrice * 100) / 100;
-        const batchGrossProfit = Math.round((batchRevenue - batchCogs) * 100) / 100;
-
-        const bConversions = batch.batch_unit_conversions
-          ? (typeof batch.batch_unit_conversions === 'string' ? JSON.parse(batch.batch_unit_conversions) : batch.batch_unit_conversions)
-          : defaultConversions;
-
-        const boraWt = Number(bConversions.Bora || defaultBoraWt);
-        const petiWt = Number(bConversions.Peti || defaultPetiWt);
-
-        if (remQty > 0) {
-          total_kg += remQty;
-          total_cost_sum += remQty * buyPrice;
-          total_exact_boras += boraWt > 0 ? remQty / boraWt : 0;
-          total_exact_petis += petiWt > 0 ? remQty / petiWt : 0;
-        }
-
-        batchList.push({
-          batch_id: batch.batch_id,
-          batch_number: batch.batch_number,
-          supplier_name: batch.supplier_name || 'Opening Stock / Primary Supplier',
-          date: batch.created_at,
-          buy_price_per_kg: Math.round(buyPrice * 100) / 100,
-          original_qty: Math.round(origQty * 100) / 100,
-          remaining_qty: Math.round(remQty * 100) / 100,
-          total_kg_sold: Math.round(totalKgSold * 100) / 100,
-          batch_revenue: Math.round(batchRevenue * 100) / 100,
-          batch_cogs: batchCogs,
-          batch_gross_profit: batchGrossProfit,
-          selected_unit: batch.selected_unit || 'Bora',
-          actual_weight_per_unit: Number(batch.actual_weight_per_unit || boraWt),
-          batch_unit_conversions: bConversions,
-        });
-      }
-    } else {
-      // Fallback if no batch records exist yet for active product with opening stock
-      const openingStock = Number(p.opening_stock || 0);
-      if (openingStock > 0) {
-        total_kg = openingStock;
-        total_cost_sum = openingStock * Number(p.cost_price || 0);
-        total_exact_boras = openingStock / defaultBoraWt;
-        total_exact_petis = openingStock / defaultPetiWt;
-      }
-    }
-
-    const avg_cost = total_kg > 0 ? total_cost_sum / total_kg : Number(p.cost_price || 0);
-    const total_asset_value = total_kg * avg_cost;
-
-    const roundedBoras = Math.round(total_exact_boras * 10) / 10;
-    const roundedPetis = Math.round(total_exact_petis * 10) / 10;
-    const secondarySummary = `(exact: ${roundedBoras} Boras / ${roundedPetis} Petis)`;
+    const all_time_kg_purchased = Math.round((purchaseMap.get(p.product_id) || 0) * 100) / 100;
+    const salesData = salesMap.get(p.product_id) || { kgSold: 0, revenue: 0, cogs: 0 };
+    const all_time_kg_sold = Math.round(salesData.kgSold * 100) / 100;
+    const all_time_revenue = salesData.revenue;
+    const all_time_cogs = salesData.cogs;
+    const all_time_profit = Math.round((all_time_revenue - all_time_cogs) * 100) / 100;
 
     report.push({
-      product_id: p.id,
-      product_name: p.name,
-      product_code: p.code,
+      product_id: p.product_id,
+      product_name: p.product_name,
+      product_code: p.product_code,
       category: p.category,
-      total_kg: Math.round(total_kg * 100) / 100,
-      avg_cost: Math.round(avg_cost * 100) / 100,
-      total_asset_value: Math.round(total_asset_value * 100) / 100,
-      total_exact_boras: roundedBoras,
-      total_exact_petis: roundedPetis,
+      total_kg,
+      avg_cost,
+      total_asset_value,
+      total_exact_boras: approxBags,
       secondary_units_summary: secondarySummary,
-      default_unit_conversions: defaultConversions,
-      batches: batchList,
+      all_time_kg_purchased,
+      all_time_kg_sold,
+      all_time_profit,
+      batches: batchMap.get(p.product_id) || [],
     });
   }
 
@@ -183,7 +157,6 @@ export async function getInventoryLedgerReport() {
 
 /**
  * GET /api/reports/liquidity
- * Expanded Liquidity (Market Khata) Ledger
  */
 export async function getLiquidityLedgerReport() {
   const cashPayments = await db('customer_payments')
@@ -196,26 +169,104 @@ export async function getLiquidityLedgerReport() {
     .sum('amount as total')
     .first();
 
-  const cash_drawer = Math.max(0, 150000 + Number(cashPayments?.total || 0) - Number(supplierCash?.total || 0));
+  const cash_drawer = Math.max(0, Number(cashPayments?.total || 0) - Number(supplierCash?.total || 0));
 
-  const bankIn = await db('customer_payments')
+  const bankInDirect = await db('customer_payments')
     .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
     .sum('amount as total')
     .first();
 
-  const bankOut = await db('supplier_payments')
+  const bankInClearedCheques = await db('customer_payments')
+    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+    .andWhere('cheque_status', 'CLEARED')
+    .sum('amount as total')
+    .first();
+
+  const bankOutDirect = await db('supplier_payments')
     .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
     .sum('amount as total')
     .first();
 
-  const bank_balances = Math.max(0, 500000 + Number(bankIn?.total || 0) - Number(bankOut?.total || 0));
+  const bankOutClearedCheques = await db('supplier_payments')
+    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+    .andWhere('cheque_status', 'CLEARED')
+    .sum('amount as total')
+    .first();
+
+  const bankInTotal = Number(bankInDirect?.total || 0) + Number(bankInClearedCheques?.total || 0);
+  const bankOutTotal = Number(bankOutDirect?.total || 0) + Number(bankOutClearedCheques?.total || 0);
+
+  // Dynamic Multi-Bank Account Funds Aggregation
+  const bankAccounts = await db('bank_accounts').where('is_active', true);
+  let bank_balances = 0;
+
+  if (bankAccounts.length > 0) {
+    const primaryId = bankAccounts[0].id;
+
+    // Aggregate customer payments per bank account
+    const custByBank = await db('customer_payments')
+      .where((qb) => {
+        qb.whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
+          .orWhere((inner) => {
+            inner.whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+                 .andWhere('cheque_status', 'CLEARED');
+          });
+      })
+      .select('bank_account_id')
+      .sum('amount as total')
+      .groupBy('bank_account_id');
+
+    // Aggregate supplier payments per bank account
+    const suppByBank = await db('supplier_payments')
+      .where((qb) => {
+        qb.whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
+          .orWhere((inner) => {
+            inner.whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+                 .andWhere('cheque_status', 'CLEARED');
+          });
+      })
+      .select('bank_account_id')
+      .sum('amount as total')
+      .groupBy('bank_account_id');
+
+    const cMap = new Map<string | null, number>();
+    for (const c of custByBank) cMap.set(c.bank_account_id || null, Number(c.total || 0));
+
+    const sMap = new Map<string | null, number>();
+    for (const s of suppByBank) sMap.set(s.bank_account_id || null, Number(s.total || 0));
+
+    const unassignedIn = cMap.get(null) || 0;
+    const unassignedOut = sMap.get(null) || 0;
+
+    for (const acc of bankAccounts) {
+      let tIn = cMap.get(acc.id) || 0;
+      let tOut = sMap.get(acc.id) || 0;
+      if (acc.id === primaryId) {
+        tIn += unassignedIn;
+        tOut += unassignedOut;
+      }
+      const accBal = Number(acc.initial_balance || 0) + tIn - tOut;
+      bank_balances += accBal;
+    }
+  } else {
+    bank_balances = Math.max(0, bankInTotal - bankOutTotal);
+  }
 
   const pdcs = await db('customer_payments')
-    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC'])
+    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+    .andWhere('cheque_status', 'PENDING')
     .sum('amount as total')
     .first();
 
-  const post_dated_cheques = Number(pdcs?.total || 125000);
+  const post_dated_cheques = Number(pdcs?.total || 0);
+
+  const issuedPdcs = await db('supplier_payments')
+    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+    .andWhere('cheque_status', 'PENDING')
+    .sum('amount as total')
+    .first();
+
+  const issued_post_dated_cheques = Number(issuedPdcs?.total || 0);
 
   // Customer Market Receivables (Udhaar)
   const customers = await db('customers').select('id');
@@ -254,6 +305,7 @@ export async function getLiquidityLedgerReport() {
     cash_drawer: Math.round(cash_drawer * 100) / 100,
     bank_balances: Math.round(bank_balances * 100) / 100,
     post_dated_cheques: Math.round(post_dated_cheques * 100) / 100,
+    issued_post_dated_cheques: Math.round(issued_post_dated_cheques * 100) / 100,
     market_receivables: Math.round(market_receivables * 100) / 100,
     total_inventory_value: Math.round(total_inventory_value * 100) / 100,
     total_accounts_payable: Math.round(total_accounts_payable * 100) / 100,
@@ -265,7 +317,6 @@ export async function getLiquidityLedgerReport() {
 
 /**
  * GET /api/reports/liquidity/receivables
- * Fast-fetch detailed list of customers owing debt (balance > 0)
  */
 export async function getLiquidityReceivablesDetail() {
   const customers = await db('customers').select('*');
@@ -302,7 +353,6 @@ export async function getLiquidityReceivablesDetail() {
 
 /**
  * GET /api/reports/liquidity/payables
- * Fast-fetch detailed list of suppliers owed money (balance > 0)
  */
 export async function getLiquidityPayablesDetail() {
   const suppliers = await db('suppliers').select('*');
@@ -339,7 +389,6 @@ export async function getLiquidityPayablesDetail() {
 
 /**
  * GET /api/reports/liquidity/unsold-stock
- * Fast-fetch detailed list of warehouse product stock sitting unsold
  */
 export async function getLiquidityUnsoldStockDetail() {
   const inventory = await getInventoryLedgerReport();
@@ -353,7 +402,6 @@ export async function getLiquidityUnsoldStockDetail() {
       remaining_kg: item.total_kg,
       avg_cost: item.avg_cost,
       total_asset_value: item.total_asset_value,
-      active_batches_count: item.batches.length,
       secondary_units_summary: item.secondary_units_summary,
     }))
     .sort((a, b) => b.total_asset_value - a.total_asset_value);
@@ -361,7 +409,7 @@ export async function getLiquidityUnsoldStockDetail() {
 
 /**
  * GET /api/reports/sales-margin?timeFilter=...&productId=...
- * Dynamic Sales & Margin Report (Batch COGS + Period Cash vs Udhaar Split)
+ * Dynamic Sales & Margin Report (WAC COGS)
  */
 export async function getSalesMarginReport(productId?: string, timeFilter?: string) {
   const now = new Date();
@@ -380,7 +428,6 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
 
   let query = db('sales_invoice_items as sii')
     .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
-    .leftJoin('inventory_batches as ib', 'sii.batch_id', 'ib.id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
     .select(
       'si.id as invoice_id',
@@ -391,7 +438,8 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
       'sii.unit_price',
       'sii.total_price',
       'sii.net_kg_processed',
-      'ib.buy_price_per_kg as batch_buy_price',
+      'sii.applied_cogs_per_kg',
+      'p.rolling_avg_cost_per_kg',
       'p.cost_price as product_cost_price'
     );
 
@@ -416,8 +464,8 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
     total_sales_value += lineVal;
 
     const kg = Number(r.net_kg_processed || r.quantity || 0);
-    const buyPrice = Number(r.batch_buy_price || r.product_cost_price || 0);
-    total_cogs += kg * buyPrice;
+    const appliedCogs = Number(r.applied_cogs_per_kg || r.rolling_avg_cost_per_kg || r.product_cost_price || 0);
+    total_cogs += kg * appliedCogs;
 
     if (!processedInvoices.has(r.invoice_id)) {
       processedInvoices.add(r.invoice_id);
@@ -450,10 +498,6 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
   };
 }
 
-/**
- * GET /api/reports/profit?productId=...&timeFilter=...
- * Loss-Accurate Profit Matrix with Time-Series Filtering
- */
 export async function getProfitMatrixReport(productId?: string, timeFilter?: string) {
   return getSalesMarginReport(productId, timeFilter);
 }
@@ -495,3 +539,756 @@ export async function getCashierTallyReport(userId: string) {
     transaction_count: totalCount,
   };
 }
+
+export async function getPnLReport(startDate?: string, endDate?: string) {
+  try {
+    let salesQuery = db('sales_invoices as si')
+      .whereNot('si.status', 'CANCELLED')
+      .select(db.raw('SUM(CAST(si.total_amount AS NUMERIC)) as total'));
+
+    let cogsQuery = db('sales_invoice_items as sii')
+      .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
+      .leftJoin('products as p', 'sii.product_id', 'p.id')
+      .whereNot('si.status', 'CANCELLED')
+      .select(db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'));
+
+    let expensesQuery = db('expenses as e')
+      .select(db.raw('SUM(CAST(e.amount AS NUMERIC)) as total'));
+
+    if (startDate) {
+      const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
+      salesQuery = salesQuery.where(function () {
+        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [startDateOnly]);
+      });
+      cogsQuery = cogsQuery.where(function () {
+        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [startDateOnly]);
+      });
+      expensesQuery = expensesQuery.where(function () {
+        this.where('e.created_at', '>=', startDate).orWhereRaw('e.expense_date::text >= ?', [startDateOnly]);
+      });
+    }
+
+    if (endDate) {
+      const endDateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+      salesQuery = salesQuery.where(function () {
+        this.where('si.created_at', '<=', endDate).orWhereRaw('si.date <= ?', [endDateOnly]);
+      });
+      cogsQuery = cogsQuery.where(function () {
+        this.where('si.created_at', '<=', endDate).orWhereRaw('si.date <= ?', [endDateOnly]);
+      });
+      expensesQuery = expensesQuery.where(function () {
+        this.where('e.created_at', '<=', endDate).orWhereRaw('e.expense_date::text <= ?', [endDateOnly]);
+      });
+    }
+
+    console.log('[DEBUG Knex] Sales Query SQL:', salesQuery.toSQL().toNative());
+    console.log('[DEBUG Knex] Expenses Query SQL:', expensesQuery.toSQL().toNative());
+
+    const [salesRes, cogsRes, expRes] = await Promise.all([
+      salesQuery.first(),
+      cogsQuery.first(),
+      expensesQuery.first(),
+    ]);
+
+    console.log('[DEBUG Knex] Sales Res:', salesRes);
+    console.log('[DEBUG Knex] Expenses Res:', expRes);
+
+    const total_sales = Math.round(Number((salesRes as any)?.total || 0) * 100) / 100;
+    const total_cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
+    const total_expenses = Math.round(Number((expRes as any)?.total || 0) * 100) / 100;
+    const gross_profit = Math.round((total_sales - total_cogs) * 100) / 100;
+    const net_profit = Math.round((gross_profit - total_expenses) * 100) / 100;
+    const net_profit_margin_percent = total_sales > 0 ? Math.round((net_profit / total_sales) * 10000) / 10000 : 0;
+
+    return {
+      total_sales,
+      total_cogs,
+      gross_profit,
+      total_expenses,
+      net_profit,
+      net_profit_margin_percent,
+    };
+  } catch (err: any) {
+    console.error("P&L API CRASH in getPnLReport:", err?.message || err, err?.stack);
+    throw err;
+  }
+}
+
+export async function getCashLedgerReport(startDate?: string, endDate?: string) {
+  let query = db('customer_payments as cp')
+    .join('customers as c', 'cp.customer_id', 'c.id')
+    .leftJoin('sales_invoices as si', 'cp.invoice_id', 'si.id')
+    .leftJoin('sales_invoice_items as sii', 'si.id', 'sii.invoice_id')
+    .leftJoin('products as p', 'sii.product_id', 'p.id')
+    .whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER'])
+    .select(
+      'cp.id',
+      'cp.payment_date as date',
+      'cp.created_at',
+      db.raw("'CASH SALE' as entry_type"),
+      db.raw("CONCAT('Cash Payment from ', c.name, COALESCE(CONCAT(' (Inv #', si.invoice_number, ')'), '')) as description"),
+      'cp.amount as amount',
+      'cp.amount as cash_in',
+      db.raw(`
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'product_name', p.name,
+              'qty', sii.quantity,
+              'net_kg', COALESCE(sii.net_kg_processed, sii.quantity),
+              'price', sii.unit_price,
+              'total', sii.total_price
+            )
+          ) FILTER (WHERE p.id IS NOT NULL),
+          '[]'
+        ) as order_details
+      `)
+    )
+    .groupBy(
+      'cp.id',
+      'cp.payment_date',
+      'cp.created_at',
+      'c.name',
+      'si.invoice_number',
+      'cp.amount'
+    )
+    .orderBy('cp.created_at', 'desc');
+
+  if (startDate) {
+    const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
+    query = query.where(function () {
+      this.where('cp.created_at', '>=', startDate).orWhereRaw('cp.payment_date::text >= ?', [startDateOnly]);
+    });
+  }
+
+  if (endDate) {
+    const endDateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+    query = query.where(function () {
+      this.where('cp.created_at', '<=', endDate).orWhereRaw('cp.payment_date::text <= ?', [endDateOnly]);
+    });
+  }
+
+  const rows = await query;
+
+  return rows.map((item) => {
+    const rawOrderDetails = typeof item.order_details === 'string'
+      ? JSON.parse(item.order_details)
+      : (Array.isArray(item.order_details) ? item.order_details : []);
+
+    return {
+      id: item.id,
+      date: item.date,
+      created_at: item.created_at,
+      entry_type: item.entry_type || 'CASH SALE',
+      description: item.description,
+      amount: Number(item.amount || item.cash_in || 0),
+      cash_in: Number(item.cash_in || item.amount || 0),
+      order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
+    };
+  });
+}
+
+export async function getPdcReport() {
+  const customerPdcs = await db('customer_payments as cp')
+    .join('customers as c', 'cp.customer_id', 'c.id')
+    .leftJoin('sales_invoices as si', 'cp.invoice_id', 'si.id')
+    .whereIn('cp.payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+    .andWhere('cp.cheque_status', 'PENDING')
+    .select(
+      'cp.id',
+      'cp.payment_number',
+      'cp.payment_date',
+      'cp.amount',
+      'cp.cheque_number',
+      'cp.cheque_bank_name',
+      'cp.cheque_due_date',
+      'cp.cheque_status',
+      'c.id as customer_id',
+      'c.name as customer_name',
+      'c.code as customer_code',
+      'si.invoice_number'
+    )
+    .orderBy('cp.cheque_due_date', 'asc');
+
+  return customerPdcs.map((item) => ({
+    id: item.id,
+    payment_number: item.payment_number,
+    payment_date: item.payment_date,
+    amount: Number(item.amount || 0),
+    cheque_number: item.cheque_number || 'N/A',
+    cheque_bank_name: item.cheque_bank_name || 'N/A',
+    cheque_due_date: item.cheque_due_date || item.payment_date,
+    cheque_status: item.cheque_status || 'PENDING',
+    customer_id: item.customer_id,
+    customer_name: item.customer_name,
+    customer_code: item.customer_code,
+    invoice_number: item.invoice_number || null,
+  }));
+}
+
+export async function getIssuedPdcReport() {
+  const supplierPdcs = await db('supplier_payments as sp')
+    .join('suppliers as s', 'sp.supplier_id', 's.id')
+    .leftJoin('purchase_invoices as pi', 'sp.purchase_invoice_id', 'pi.id')
+    .whereIn('sp.payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
+    .andWhere('sp.cheque_status', 'PENDING')
+    .select(
+      'sp.id',
+      'sp.payment_number',
+      'sp.payment_date',
+      'sp.amount',
+      'sp.cheque_number',
+      'sp.cheque_bank_name',
+      'sp.cheque_due_date',
+      'sp.cheque_status',
+      's.id as supplier_id',
+      's.name as supplier_name',
+      's.code as supplier_code',
+      'pi.invoice_number'
+    )
+    .orderBy('sp.cheque_due_date', 'asc');
+
+  return supplierPdcs.map((item) => ({
+    id: item.id,
+    payment_number: item.payment_number,
+    payment_date: item.payment_date,
+    amount: Number(item.amount || 0),
+    cheque_number: item.cheque_number || 'N/A',
+    cheque_bank_name: item.cheque_bank_name || 'N/A',
+    cheque_due_date: item.cheque_due_date || item.payment_date,
+    cheque_status: item.cheque_status || 'PENDING',
+    supplier_id: item.supplier_id,
+    supplier_name: item.supplier_name,
+    supplier_code: item.supplier_code,
+    invoice_number: item.invoice_number || null,
+  }));
+}
+
+export async function getIncomeStatementReport(startDate?: string, endDate?: string) {
+  try {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const today = now.toISOString().split('T')[0];
+
+    const sDate = startDate || firstDay;
+    const eDate = endDate || today;
+
+    // 1. Gross Sales & Delivery Revenue Query
+    let salesQuery = db('sales_invoices as si')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+      })
+      .select(
+        db.raw('SUM(CAST(COALESCE(si.total_amount, 0) AS NUMERIC) - CAST(COALESCE(si.delivery_charge, 0) AS NUMERIC)) as gross_sales'),
+        db.raw('SUM(CAST(COALESCE(si.delivery_charge, 0) AS NUMERIC)) as delivery_revenue')
+      );
+
+    // 2. Sales Returns Query
+    let returnsQuery = db('sales_invoices as si')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.where('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN')
+          .orWhere('si.total_amount', '<', 0);
+      })
+      .select(db.raw('SUM(ABS(CAST(COALESCE(si.total_amount, 0) AS NUMERIC))) as total_returns'));
+
+    // 3. COGS Query
+    let cogsQuery = db('sales_invoice_items as sii')
+      .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
+      .leftJoin('products as p', 'sii.product_id', 'p.id')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+      })
+      .select(
+        db.raw(
+          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+        )
+      );
+
+    // 4. Operating Expenses Query
+    let expensesQuery = db('expenses as e').select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total_expenses'));
+
+    // 5. Expenses Breakdown Query
+    let expensesBreakdownQuery = db('expenses as e')
+      .select('category', db.raw('SUM(CAST(COALESCE(amount, 0) AS NUMERIC)) as total'))
+      .groupBy('category')
+      .orderBy('total', 'desc');
+
+    const sDateOnly = sDate.includes('T') ? sDate.split('T')[0] : sDate;
+    const eDateOnly = eDate.includes('T') ? eDate.split('T')[0] : eDate;
+
+    salesQuery = salesQuery.where(function () {
+      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
+    }).where(function () {
+      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+    });
+
+    returnsQuery = returnsQuery.where(function () {
+      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
+    }).where(function () {
+      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+    });
+
+    cogsQuery = cogsQuery.where(function () {
+      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
+    }).where(function () {
+      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+    });
+
+    expensesQuery = expensesQuery.where(function () {
+      this.where('e.created_at', '>=', sDate).orWhereRaw('e.expense_date::text >= ?', [sDateOnly]);
+    }).where(function () {
+      this.where('e.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
+    });
+
+    expensesBreakdownQuery = expensesBreakdownQuery.where(function () {
+      this.where('e.created_at', '>=', sDate).orWhereRaw('e.expense_date::text >= ?', [sDateOnly]);
+    }).where(function () {
+      this.where('e.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
+    });
+
+    const [salesRes, returnsRes, cogsRes, expRes, breakdownRes] = await Promise.all([
+      salesQuery.first(),
+      returnsQuery.first(),
+      cogsQuery.first(),
+      expensesQuery.first(),
+      expensesBreakdownQuery,
+    ]);
+
+    const gross_sales = Math.round(Number((salesRes as any)?.gross_sales || 0) * 100) / 100;
+    const delivery_revenue = Math.round(Number((salesRes as any)?.delivery_revenue || 0) * 100) / 100;
+    const sales_returns = Math.round(Number((returnsRes as any)?.total_returns || 0) * 100) / 100;
+    const net_revenue = Math.round((gross_sales + delivery_revenue - sales_returns) * 100) / 100;
+
+    const cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
+    const gross_profit = Math.round((net_revenue - cogs) * 100) / 100;
+    const gross_margin_pct = net_revenue > 0 ? Math.round(((gross_profit / net_revenue) * 100) * 100) / 100 : 0;
+
+    const operating_expenses = Math.round(Number((expRes as any)?.total_expenses || 0) * 100) / 100;
+    const net_profit = Math.round((gross_profit - operating_expenses) * 100) / 100;
+    const net_margin_pct = net_revenue > 0 ? Math.round(((net_profit / net_revenue) * 100) * 100) / 100 : 0;
+
+    const expenses_breakdown = (breakdownRes || []).map((row: any) => ({
+      category: row.category || 'Other',
+      amount: Math.round(Number(row.total || 0) * 100) / 100,
+    }));
+
+    return {
+      startDate: sDateOnly,
+      endDate: eDateOnly,
+      gross_sales,
+      delivery_revenue,
+      sales_returns,
+      net_revenue,
+      cogs,
+      gross_profit,
+      gross_margin_pct,
+      operating_expenses,
+      expenses_breakdown,
+      net_profit,
+      net_margin_pct,
+    };
+  } catch (err: any) {
+    console.error('Income Statement API Crash:', err?.message || err, err?.stack);
+    throw err;
+  }
+}
+
+export async function getIncomeStatementReturnsDetail(startDate?: string, endDate?: string) {
+  try {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const today = now.toISOString().split('T')[0];
+
+    const sDate = startDate || firstDay;
+    const eDate = endDate || today;
+
+    const sDateOnly = sDate.includes('T') ? sDate.split('T')[0] : sDate;
+    const eDateOnly = eDate.includes('T') ? eDate.split('T')[0] : eDate;
+
+    let query = db('sales_invoices as si')
+      .innerJoin('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
+      .leftJoin('customers as c', 'si.customer_id', 'c.id')
+      .leftJoin('products as p', 'sii.product_id', 'p.id')
+      .leftJoin('sales_invoices as psi', 'si.parent_invoice_id', 'psi.id')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.where('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN')
+          .orWhere('si.total_amount', '<', 0);
+      })
+      .select(
+        'si.id as credit_note_id',
+        'si.invoice_number as credit_note_number',
+        'si.parent_invoice_id',
+        'psi.invoice_number as original_invoice_number',
+        'si.created_at',
+        'si.date',
+        'c.name as customer_name',
+        'p.name as product_name',
+        db.raw('ABS(CAST(COALESCE(sii.net_kg_processed, sii.quantity, 0) AS NUMERIC)) as returned_kg'),
+        db.raw('ABS(CAST(COALESCE(sii.total_price, si.total_amount, 0) AS NUMERIC)) as refund_amount')
+      )
+      .orderBy('si.created_at', 'desc');
+
+    query = query.where(function () {
+      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
+    }).where(function () {
+      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+    });
+
+    const rows = await query;
+
+    return rows.map((r: any) => {
+      let dateStr = '';
+      if (r.date) {
+        dateStr = String(r.date).split('T')[0];
+      } else if (r.created_at) {
+        dateStr = new Date(r.created_at).toISOString().split('T')[0];
+      }
+
+      return {
+        date: dateStr,
+        credit_note_id: r.credit_note_number || (r.credit_note_id ? `CN-${r.credit_note_id.slice(0, 8)}` : 'CN-N/A'),
+        original_invoice_id: r.original_invoice_number || (r.parent_invoice_id ? `INV-${r.parent_invoice_id.slice(0, 8)}` : 'Direct Return'),
+        customer_name: r.customer_name || 'Walk-in / Cash Customer',
+        product_name: r.product_name || 'Returned Goods',
+        returned_kg: Math.round(Number(r.returned_kg || 0) * 100) / 100,
+        refund_amount: Math.round(Number(r.refund_amount || 0) * 100) / 100,
+      };
+    });
+  } catch (err: any) {
+    console.error('Income Statement Returns Detail Crash:', err?.message || err, err?.stack);
+    throw err;
+  }
+}
+
+export async function getMarginAnalyticsReport(startDate?: string, endDate?: string) {
+  try {
+    const sDateOnly = startDate ? (startDate.includes('T') ? startDate.split('T')[0] : startDate) : undefined;
+    const eDateOnly = endDate ? (endDate.includes('T') ? endDate.split('T')[0] : endDate) : undefined;
+
+    // 1. Margin by Product
+    let pQuery = db('sales_invoice_items as sii')
+      .join('sales_invoices as si', 'sii.invoice_id', 'si.id')
+      .join('products as p', 'sii.product_id', 'p.id')
+      .leftJoin('categories as c', 'p.category_id', 'c.id')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+      })
+      .groupBy('p.id', 'p.name', 'c.name', 'p.rolling_avg_cost_per_kg', 'p.cost_price')
+      .select(
+        'p.id as product_id',
+        'p.name as product_name',
+        db.raw("COALESCE(c.name, 'General') as category_name"),
+        db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_kg_sold'),
+        db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
+        db.raw(
+          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+        )
+      );
+
+    // 2. Margin by Customer
+    let cQuery = db('sales_invoices as si')
+      .join('customers as cust', 'si.customer_id', 'cust.id')
+      .join('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
+      .leftJoin('products as p', 'sii.product_id', 'p.id')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+      })
+      .groupBy('cust.id', 'cust.name')
+      .select(
+        'cust.id as customer_id',
+        'cust.name as customer_name',
+        db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_volume_kg'),
+        db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
+        db.raw(
+          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+        )
+      );
+
+    // 3. Daily Operational Velocity (Sales vs COGS) Trend Data Query
+    let tQuery = db('sales_invoices as si')
+      .join('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
+      .leftJoin('products as p', 'sii.product_id', 'p.id')
+      .whereNot('si.status', 'CANCELLED')
+      .where(function () {
+        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+      })
+      .groupByRaw('DATE(si.created_at)')
+      .select(
+        db.raw('DATE(si.created_at) as date'),
+        db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as daily_revenue'),
+        db.raw(
+          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as daily_cogs'
+        )
+      )
+      .orderByRaw('DATE(si.created_at) ASC');
+
+    if (startDate && sDateOnly) {
+      const sd: string = sDateOnly;
+      pQuery = pQuery.where(function () {
+        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [sd]);
+      });
+      cQuery = cQuery.where(function () {
+        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [sd]);
+      });
+      tQuery = tQuery.where(function () {
+        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [sd]);
+      });
+    }
+
+    if (endDate && eDateOnly) {
+      const ed: string = eDateOnly;
+      pQuery = pQuery.where(function () {
+        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
+      });
+      cQuery = cQuery.where(function () {
+        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
+      });
+      tQuery = tQuery.where(function () {
+        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
+      });
+    }
+
+    const [productRows, customerRows, trendRows] = await Promise.all([pQuery, cQuery, tQuery]);
+
+    const products = productRows.map((r: any) => {
+      const kg = Math.round(Number(r.total_kg_sold || 0) * 100) / 100;
+      const rev = Math.round(Number(r.total_revenue || 0) * 100) / 100;
+      const cogs = Math.round(Number(r.total_cogs || 0) * 100) / 100;
+      const profit = Math.round((rev - cogs) * 100) / 100;
+
+      const avg_sell_price = kg > 0 ? Math.round((rev / kg) * 100) / 100 : 0;
+      const avg_wac_cogs = kg > 0 ? Math.round((cogs / kg) * 100) / 100 : 0;
+      const gross_margin_pct = avg_sell_price > 0 ? Math.round((((avg_sell_price - avg_wac_cogs) / avg_sell_price) * 100) * 10) / 10 : 0;
+
+      return {
+        product_id: r.product_id,
+        product_name: r.product_name,
+        category_name: r.category_name,
+        total_kg_sold: kg,
+        total_revenue: rev,
+        total_cogs: cogs,
+        total_profit: profit,
+        avg_sell_price,
+        avg_wac_cogs,
+        gross_margin_pct,
+      };
+    }).sort((a: any, b: any) => b.gross_margin_pct - a.gross_margin_pct);
+
+    const customers = customerRows.map((r: any) => {
+      const kg = Math.round(Number(r.total_volume_kg || 0) * 100) / 100;
+      const rev = Math.round(Number(r.total_revenue || 0) * 100) / 100;
+      const cogs = Math.round(Number(r.total_cogs || 0) * 100) / 100;
+      const profit = Math.round((rev - cogs) * 100) / 100;
+      const gross_margin_pct = rev > 0 ? Math.round(((profit / rev) * 100) * 10) / 10 : 0;
+
+      return {
+        customer_id: r.customer_id,
+        customer_name: r.customer_name,
+        total_volume_kg: kg,
+        total_revenue: rev,
+        total_cogs: cogs,
+        total_profit: profit,
+        gross_margin_pct,
+      };
+    }).sort((a: any, b: any) => b.total_revenue - a.total_revenue);
+
+    const trend_data = trendRows.map((r: any) => {
+      const rev = Math.round(Number(r.daily_revenue || 0) * 100) / 100;
+      const cogs = Math.round(Number(r.daily_cogs || 0) * 100) / 100;
+      const profit = Math.round((rev - cogs) * 100) / 100;
+      const margin_pct = rev > 0 ? Math.round((profit / rev) * 10000) / 100 : 0;
+      let dateStr = '';
+      if (r.date) {
+        try {
+          dateStr = new Date(r.date).toISOString().split('T')[0];
+        } catch {
+          dateStr = String(r.date);
+        }
+      }
+      return {
+        date: dateStr || String(r.date || ''),
+        daily_revenue: rev,
+        daily_cogs: cogs,
+        daily_profit: profit,
+        margin_pct,
+      };
+    }).sort((a: any, b: any) => (a.date > b.date ? 1 : -1));
+
+    return {
+      startDate: sDateOnly,
+      endDate: eDateOnly,
+      products,
+      customers,
+      trend_data,
+    };
+  } catch (err: any) {
+    console.error('Margin Analytics API Crash:', err?.message || err, err?.stack);
+    throw err;
+  }
+}
+
+export async function getInventoryValuationReport() {
+  try {
+    const rows = await db('products as p')
+      .leftJoin('categories as c', 'p.category_id', 'c.id')
+      .where('p.is_active', true)
+      .select(
+        'p.id',
+        'p.name as product_name',
+        'p.code',
+        'c.name as category',
+        'p.total_stock_kg',
+        'p.rolling_avg_cost_per_kg',
+        'p.cost_price'
+      )
+      .orderBy('p.name', 'asc');
+
+    // Fetch inventory batches / FIFO price buckets
+    let batchesRaw: any[] = [];
+    const hasBatchesTable = await db.schema.hasTable('inventory_batches');
+    if (hasBatchesTable) {
+      batchesRaw = await db('inventory_batches as ib')
+        .leftJoin('purchase_invoices as pi', 'ib.purchase_invoice_id', 'pi.id')
+        .select(
+          'ib.id as bucket_id',
+          'ib.product_id',
+          'ib.batch_number',
+          'ib.batch_buy_price_per_kg as buy_price_per_kg',
+          'ib.original_qty as original_stock',
+          'ib.remaining_qty as remaining_stock',
+          'ib.status',
+          'ib.created_at',
+          'pi.date as invoice_date'
+        )
+        .orderBy('ib.created_at', 'asc');
+    }
+
+    const batchMap = new Map<string, any[]>();
+    for (const b of batchesRaw) {
+      const list = batchMap.get(b.product_id) || [];
+      const orig = Math.round(Number(b.original_stock || 0) * 100) / 100;
+      const rem = Math.round(Number(b.remaining_stock || 0) * 100) / 100;
+      const buyPrice = Math.round(Number(b.buy_price_per_kg || 0) * 100) / 100;
+      const dateStr = b.invoice_date
+        ? String(b.invoice_date).split('T')[0]
+        : b.created_at
+        ? new Date(b.created_at).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+      list.push({
+        bucket_id: b.bucket_id,
+        batch_number: b.batch_number || `LOT-${b.bucket_id.slice(0, 6)}`,
+        created_date: dateStr,
+        buy_price_per_kg: buyPrice,
+        original_stock: orig,
+        remaining_stock: rem,
+        status: b.status || (rem > 0 ? 'ACTIVE' : 'DEPLETED'),
+      });
+      batchMap.set(b.product_id, list);
+    }
+
+    // Fetch Lifetime Sales per product
+    const salesAgg = await db('sales_invoice_items as sii')
+      .join('sales_invoices as si', 'sii.invoice_id', 'si.id')
+      .whereRaw('si.status != ?', ['CANCELLED'])
+      .groupBy('sii.product_id')
+      .select(
+        'sii.product_id',
+        db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as lifetime_kg_sold'),
+        db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as lifetime_revenue'),
+        db.raw(
+          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, 0) AS NUMERIC)) as lifetime_cogs'
+        )
+      );
+
+    const salesMap = new Map<string, { kgSold: number; revenue: number; cogs: number }>();
+    for (const s of salesAgg) {
+      salesMap.set(s.product_id, {
+        kgSold: Math.round(Number(s.lifetime_kg_sold || 0) * 100) / 100,
+        revenue: Math.round(Number(s.lifetime_revenue || 0) * 100) / 100,
+        cogs: Math.round(Number(s.lifetime_cogs || 0) * 100) / 100,
+      });
+    }
+
+    // Fetch Lifetime Purchases per product
+    const purchasesAgg = await db('purchase_invoice_items as pii')
+      .join('purchase_invoices as pi', 'pii.purchase_invoice_id', 'pi.id')
+      .whereRaw('pi.status != ?', ['CANCELLED'])
+      .groupBy('pii.product_id')
+      .select(
+        'pii.product_id',
+        db.raw('SUM(CAST(COALESCE(pii.net_kg_added, pii.actual_weight_kg, pii.quantity) AS NUMERIC)) as lifetime_kg_acquired')
+      );
+
+    const purchasesMap = new Map<string, number>();
+    for (const p of purchasesAgg) {
+      purchasesMap.set(p.product_id, Math.round(Number(p.lifetime_kg_acquired || 0) * 100) / 100);
+    }
+
+    let total_warehouse_capital = 0;
+
+    const products = rows.map((r: any) => {
+      const stock_on_hand = Math.round(Number(r.total_stock_kg || 0) * 100) / 100;
+      const current_wac = Math.round(Number(r.rolling_avg_cost_per_kg || r.cost_price || 0) * 100) / 100;
+      const asset_value = Math.round(stock_on_hand * current_wac * 100) / 100;
+
+      total_warehouse_capital += asset_value;
+
+      let buckets = batchMap.get(r.id) || [];
+      if (buckets.length === 0 && stock_on_hand > 0) {
+        buckets = [
+          {
+            bucket_id: `INITIAL-${r.id.slice(0, 8)}`,
+            batch_number: 'LOT-INITIAL',
+            created_date: new Date().toISOString().split('T')[0],
+            buy_price_per_kg: current_wac,
+            original_stock: stock_on_hand,
+            remaining_stock: stock_on_hand,
+            status: 'ACTIVE',
+          },
+        ];
+      }
+
+      const salesData = salesMap.get(r.id) || { kgSold: 0, revenue: 0, cogs: 0 };
+      const acquiredFromPurchases = purchasesMap.get(r.id) || 0;
+      const lifetime_kg_acquired = acquiredFromPurchases > 0 ? acquiredFromPurchases : Math.round((stock_on_hand + salesData.kgSold) * 100) / 100;
+      const lifetime_kg_sold = salesData.kgSold;
+
+      const profit = salesData.revenue - salesData.cogs;
+      const all_time_gross_margin = salesData.revenue > 0 ? Math.round((profit / salesData.revenue) * 10000) / 100 : 0;
+
+      return {
+        id: r.id,
+        product_name: r.product_name || 'Unnamed Product',
+        code: r.code || '',
+        category: r.category || 'General',
+        current_stock_kg: stock_on_hand,
+        stock_on_hand,
+        current_wac,
+        asset_value,
+        total_asset_value: asset_value,
+        buckets,
+        lifetime_kg_sold,
+        lifetime_kg_acquired,
+        all_time_gross_margin,
+      };
+    });
+
+    return {
+      total_warehouse_capital: Math.round(total_warehouse_capital * 100) / 100,
+      products,
+    };
+  } catch (err: any) {
+    console.error('Inventory Valuation Report Crash:', err?.message || err, err?.stack);
+    throw err;
+  }
+}
+

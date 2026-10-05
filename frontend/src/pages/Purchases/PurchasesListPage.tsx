@@ -13,8 +13,11 @@ function formatRs(n: number | string) {
 }
 
 export default function PurchasesListPage() {
-  const { hasPermission } = useAuthStore();
-  const canWrite = hasPermission('purchases:write');
+  const { user, hasPermission } = useAuthStore();
+  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
+  const isCashier = userRole === 'CASHIER';
+  const canWrite = isCashier || isOwner || hasPermission('purchases:write');
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -22,6 +25,31 @@ export default function PurchasesListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+
+  const renderCreatorBadge = (inv: any) => {
+    const role = (inv.created_by_role || inv.creator?.role || 'ADMIN').toUpperCase();
+    const name = inv.created_by_name || inv.creator?.name || 'User';
+
+    if (role === 'CASHIER') {
+      return (
+        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200" title={`Created by Cashier: ${name}`}>
+          Cashier
+        </span>
+      );
+    }
+    if (role === 'OWNER') {
+      return (
+        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200" title={`Created by Owner: ${name}`}>
+          Owner
+        </span>
+      );
+    }
+    return (
+      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200" title={`Created by Admin: ${name}`}>
+        Admin
+      </span>
+    );
+  };
 
   const handleSearch = (v: string) => {
     setSearch(v);
@@ -131,7 +159,7 @@ export default function PurchasesListPage() {
                   <th className="px-6 py-4 font-semibold">Invoice #</th>
                   <th className="px-6 py-4 font-semibold">Date</th>
                   <th className="px-6 py-4 font-semibold">Supplier</th>
-                  <th className="px-6 py-4 font-semibold text-right">Total Amount</th>
+                  {!isCashier && <th className="px-6 py-4 font-semibold text-right">Total Amount</th>}
                   <th className="px-6 py-4 font-semibold text-center">Status</th>
                 </tr>
               </thead>
@@ -139,26 +167,31 @@ export default function PurchasesListPage() {
                 {invoices.map((inv) => (
                   <tr key={inv.id} className="hover:bg-slate-50 transition">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <button
-                        onClick={() => handleOpenInvoice(inv.id)}
-                        className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
-                        title="Click to view purchase invoice details"
-                      >
-                        <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 group-hover:scale-105 transition-all shadow-xs">
-                          <FileText className="h-4 w-4" />
-                        </div>
-                        <div className="ml-3">
-                          <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 group-hover:underline font-mono">
-                            {inv.invoice_number}
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => handleOpenInvoice(inv.id)}
+                          className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                          title="Click to view purchase invoice details"
+                        >
+                          <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 group-hover:scale-105 transition-all shadow-xs">
+                            <FileText className="h-4 w-4" />
                           </div>
-                        </div>
-                      </button>
+                          <div className="ml-3">
+                            <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 group-hover:underline font-mono">
+                              {inv.invoice_number}
+                            </div>
+                          </div>
+                        </button>
+                        {isOwner && renderCreatorBadge(inv)}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-slate-600">{new Date(inv.date).toLocaleDateString()}</td>
                     <td className="px-6 py-4">
                       <div className="font-medium text-slate-900">{inv.supplier_name || 'Unknown'}</div>
                     </td>
-                    <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
+                    {!isCashier && (
+                      <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
+                    )}
                     <td className="px-6 py-4 text-center">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
                         inv.status === 'PAID' ? 'bg-green-100 text-green-700' :

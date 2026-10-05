@@ -1,5 +1,5 @@
 import api from './api';
-import { Product, CreateProductData, UpdateProductData, UnitOfMeasure } from '../types/product.types';
+import { Product, CreateProductData, UpdateProductData } from '../types/product.types';
 import { ApiSuccess } from '../types/api.types';
 
 export interface ProductBatch {
@@ -52,8 +52,7 @@ export const productsService = {
     await api.delete(`/products/${id}`);
   },
 
-  getUoms: async (): Promise<UnitOfMeasure[]> => {
-    const response = await api.get<ApiSuccess<UnitOfMeasure[]>>('/uom');
-    return response.data.data;
+  getUoms: async (): Promise<any[]> => {
+    return [];
   },
 };

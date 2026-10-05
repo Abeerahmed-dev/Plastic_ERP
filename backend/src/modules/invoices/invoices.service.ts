@@ -1,5 +1,5 @@
 import * as invoicesRepo from './invoices.repository';
-import { CreateInvoiceInput } from './invoices.schemas';
+import { CreateInvoiceInput, CreateSalesReturnInput } from './invoices.schemas';
 import { NotFoundError } from '../../shared/errors';
 
 export async function createInvoice(input: CreateInvoiceInput, userId?: string) {
@@ -17,3 +17,12 @@ export async function getInvoice(id: string) {
   if (!invoice) throw new NotFoundError('Invoice not found');
   return invoice;
 }
+
+export async function getInvoiceReturnSummary(id: string) {
+  return await invoicesRepo.getInvoiceReturnSummary(id);
+}
+
+export async function processSalesReturn(id: string, input: CreateSalesReturnInput, userId?: string) {
+  return await invoicesRepo.processSalesReturn(id, input, userId);
+}
+

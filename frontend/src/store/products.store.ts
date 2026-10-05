@@ -8,6 +8,7 @@ interface ProductsState {
   error: string | null;
   fetchProducts: () => Promise<void>;
   getProductConversionRate: (productId: string) => number;
+  getUnitConversions: (productId: string) => Record<string, number>;
   getProductById: (productId: string) => Product | undefined;
 }
 
@@ -28,16 +29,15 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
 
   getProductConversionRate: (productId: string): number => {
     const product = get().products.find((p) => p.id === productId);
-    if (!product) return 25.0; // fallback standard rate (KG per Bora)
-    const rate = Number(product.default_kg_per_purchase_unit);
+    if (!product) return 25.0; // fallback standard rate (KG per Bag)
+    const rate = Number(product.bag_weight_kg);
     return isNaN(rate) || rate <= 0 ? 25.0 : rate;
   },
 
   getUnitConversions: (productId: string): Record<string, number> => {
-    const defaultConversions = { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 };
     const product = get().products.find((p) => p.id === productId);
-    if (!product || !product.unit_conversions) return defaultConversions;
-    return product.unit_conversions;
+    const bagWt = product && product.bag_weight_kg ? Number(product.bag_weight_kg) : 25.0;
+    return { Bag: bagWt, KG: 1.0 };
   },
 
   getProductById: (productId: string): Product | undefined => {

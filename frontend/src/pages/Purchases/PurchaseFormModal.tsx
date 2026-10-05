@@ -9,10 +9,10 @@ import { productsService } from '../../services/products.service';
 
 const itemSchema = z.object({
   product_id: z.string().min(1, 'Product is required'),
-  quantity: z.coerce.number().min(0.0001, 'Min quantity 0'),
-  selected_unit: z.string().optional().default('Bora'),
+  quantity: z.coerce.number().min(0.0001, 'Min quantity 0.0001'),
   unit_price: z.coerce.number().min(0, 'Min price 0'),
   actual_weight_per_unit: z.coerce.number().min(0).optional().nullable(),
+  actual_kanta_wt: z.coerce.number().min(0).optional().nullable(),
   actual_weight_kg: z.coerce.number().min(0).optional().nullable(),
 });
 
@@ -38,7 +38,7 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
   // Fetch dependencies
   const { data: suppliersResponse } = useQuery({ 
     queryKey: ['suppliers'], 
-    queryFn: () => getSuppliers({ limit: 100 }) // fetching up to 100 suppliers for dropdown
+    queryFn: () => getSuppliers({ limit: 100 })
   });
   const suppliers = suppliersResponse?.data || [];
 
@@ -83,6 +83,7 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
     mutationFn: (data: FormData) => purchasesService.createInvoice(data as any),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
       onSuccess();
       onClose();
     },
@@ -99,13 +100,13 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-3xl bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-300">
+      <div className="w-full max-w-4xl bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-300">
         
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div>
             <h2 className="text-lg font-bold text-slate-900">New Purchase Invoice</h2>
-            <p className="text-sm text-slate-500 mt-0.5">Record a bill from a supplier</p>
+            <p className="text-sm text-slate-500 mt-0.5">Record incoming bags from supplier (Implicit Bag unit)</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition">
             <X className="h-5 w-5" />
@@ -149,7 +150,7 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
 
             <div className="border border-slate-200 rounded-xl overflow-hidden">
               <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-                <h3 className="font-semibold text-slate-800 text-sm">Line Items</h3>
+                <h3 className="font-semibold text-slate-800 text-sm">Line Items (All purchases in Bags)</h3>
                 <button
                   type="button"
                   onClick={() => append({ product_id: '', quantity: 1, unit_price: 0 })}
@@ -166,10 +167,9 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                 <table className="w-full text-sm text-left">
                   <thead className="bg-slate-50/50 text-slate-500 border-b border-slate-200">
                     <tr>
-                      <th className="px-4 py-2 font-medium w-1/4">Product</th>
-                      <th className="px-4 py-2 font-medium w-24">Qty</th>
-                      <th className="px-4 py-2 font-medium w-28">Unit</th>
-                      <th className="px-4 py-2 font-medium w-36">Actual Kanta Wt / Unit (KG)</th>
+                      <th className="px-4 py-2 font-medium w-1/3">Product</th>
+                      <th className="px-4 py-2 font-medium w-28">Qty (Bags)</th>
+                      <th className="px-4 py-2 font-medium w-48">Actual Kanta Wt / Unit (KG)</th>
                       <th className="px-4 py-2 font-medium w-28">Unit Price</th>
                       <th className="px-4 py-2 font-medium w-28">Total</th>
                       <th className="px-4 py-2 w-12"></th>
@@ -181,17 +181,12 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                       const selectedProdId = watchItems[index]?.product_id;
                       const selectedProd = products.find(p => p.id === selectedProdId);
 
-                      const unitConversions: Record<string, number> = (selectedProd && (selectedProd as any).unit_conversions)
-                        ? (typeof (selectedProd as any).unit_conversions === 'string' ? JSON.parse((selectedProd as any).unit_conversions) : (selectedProd as any).unit_conversions)
-                        : { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 };
-
-                      const selectedUnit = watchItems[index]?.selected_unit || 'Bora';
-                      const defaultMultiplier = unitConversions[selectedUnit] !== undefined ? Number(unitConversions[selectedUnit]) : (selectedProd?.default_kg_per_purchase_unit ? Number(selectedProd.default_kg_per_purchase_unit) : 25.0);
+                      const bagWeightKg = selectedProd && selectedProd.bag_weight_kg ? Number(selectedProd.bag_weight_kg) : 25.0;
 
                       const qty = Number(watchItems[index]?.quantity) || 0;
                       const price = Number(watchItems[index]?.unit_price) || 0;
                       const lineTotal = qty * price;
-                      const calculatedStdWeight = qty * defaultMultiplier;
+                      const calculatedStdWeight = qty * bagWeightKg;
                       
                       return (
                         <tr key={field.id}>
@@ -204,7 +199,9 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                             >
                               <option value="">Select product...</option>
                               {products.map((p) => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
+                                <option key={p.id} value={p.id}>
+                                  {p.size ? `${p.name} - ${p.size}` : p.name} ({p.category || p.category_name} — {Number(p.bag_weight_kg || 25).toFixed(2)} KG/Bag)
+                                </option>
                               ))}
                             </select>
                             {itemError?.product_id && <p className="text-xs text-red-600 mt-1">{itemError.product_id.message}</p>}
@@ -218,28 +215,19 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                             />
                             {selectedProdId && (
                               <p className="mt-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 p-1 rounded border border-emerald-100">
-                                Calculated Standard Weight: {calculatedStdWeight.toFixed(2)} KG
+                                Total: {calculatedStdWeight.toFixed(2)} KG
                               </p>
                             )}
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            <select
-                              {...register(`items.${index}.selected_unit`)}
-                              className={inputCls(!!itemError?.selected_unit)}
-                            >
-                              {Object.keys(unitConversions).map((u) => (
-                                <option key={u} value={u}>{u}</option>
-                              ))}
-                            </select>
                           </td>
                           <td className="px-4 py-3 align-top">
                             <input
                               type="number"
                               step="0.01"
-                              placeholder={`Std: ${defaultMultiplier} KG`}
+                              placeholder={`Std: ${bagWeightKg} KG`}
                               {...register(`items.${index}.actual_weight_per_unit`)}
                               className={inputCls(!!itemError?.actual_weight_per_unit)}
                             />
+                            <p className="mt-1 text-[11px] text-slate-400">Optional batch weight override</p>
                           </td>
                           <td className="px-4 py-3 align-top">
                             <input

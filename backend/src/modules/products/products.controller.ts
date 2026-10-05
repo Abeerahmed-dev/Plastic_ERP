@@ -8,6 +8,24 @@ import {
 import * as productsService from './products.service';
 import { ValidationError } from '../../shared/errors';
 
+function sanitizeForCashier(item: any) {
+  return {
+    id: item.id,
+    name: item.name,
+    product_name: item.name,
+    code: item.code,
+    product_code: item.code,
+    category: item.category || item.category_name,
+    category_name: item.category_name || item.category,
+    size: item.size || null,
+    total_stock_kg: Number(item.total_stock_kg || item.current_stock || 0),
+    current_stock: Number(item.total_stock_kg || item.current_stock || 0),
+    fixed_retail_price_per_kg: Number(item.fixed_retail_price_per_kg || item.sale_price || 0),
+    sale_price: Number(item.fixed_retail_price_per_kg || item.sale_price || 0),
+    bag_weight_kg: Number(item.bag_weight_kg || 25),
+  };
+}
+
 export async function listProductsController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const parsed = productQuerySchema.safeParse(req.query);
@@ -15,7 +33,11 @@ export async function listProductsController(req: Request, res: Response, next: 
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
     }
     const { data, meta } = await productsService.listProducts(parsed.data);
-    res.status(200).json(ok(data, meta));
+
+    const isCashier = req.user?.roleName?.toUpperCase() === 'CASHIER';
+    const sanitizedData = isCashier ? data.map(sanitizeForCashier) : data;
+
+    res.status(200).json(ok(sanitizedData, meta));
   } catch (err) { next(err); }
 }
 
@@ -23,7 +45,11 @@ export async function listPOSAvailableProductsController(req: Request, res: Resp
   try {
     const search = req.query.search as string | undefined;
     const data = await productsService.listPOSAvailableProducts(search);
-    res.status(200).json(ok(data));
+
+    const isCashier = req.user?.roleName?.toUpperCase() === 'CASHIER';
+    const sanitizedData = isCashier ? data.map(sanitizeForCashier) : data;
+
+    res.status(200).json(ok(sanitizedData));
   } catch (err) { next(err); }
 }
 
@@ -40,7 +66,8 @@ export async function createProductController(req: Request, res: Response, next:
     if (!parsed.success) {
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
     }
-    const product = await productsService.addProduct(parsed.data, req.user!.id);
+    const userId = req.user?.id || null;
+    const product = await productsService.addProduct(parsed.data, userId as string);
     res.status(201).json(ok(product));
   } catch (err) { next(err); }
 }

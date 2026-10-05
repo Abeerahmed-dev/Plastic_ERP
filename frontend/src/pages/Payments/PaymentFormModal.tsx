@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -6,16 +6,31 @@ import { X, Loader2 } from 'lucide-react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { paymentsService } from '../../services/payments.service';
 import { getCustomers } from '../../services/customers.service';
+import { getSuppliers } from '../../services/suppliers.service';
 import { invoicesService } from '../../services/invoices.service';
+import { bankAccountsService } from '../../services/bank-accounts.service';
 import { useAuthStore } from '../../store/auth.store';
 
 const paymentSchema = z.object({
   customer_id: z.string().uuid('Please select a customer'),
+  supplier_id: z.string().optional().or(z.literal('')),
   invoice_id: z.string().uuid().optional().or(z.literal('')),
   payment_date: z.string().min(1, 'Date is required'),
   amount: z.coerce.number().min(0.01, 'Amount must be greater than 0'),
-  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'BANK', 'PDC']),
+  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'BANK', 'PDC', 'DIRECT_TO_SUPPLIER']),
+  bank_account_id: z.string().optional().or(z.literal('')),
   notes: z.string().optional(),
+  cheque_number: z.string().optional(),
+  cheque_bank_name: z.string().optional(),
+  cheque_due_date: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.payment_method === 'DIRECT_TO_SUPPLIER' && (!data.supplier_id || data.supplier_id.trim() === '')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['supplier_id'],
+      message: 'Supplier selection is required for Direct to Supplier settlement',
+    });
+  }
 });
 
 type PaymentFormData = z.infer<typeof paymentSchema>;
@@ -29,24 +44,51 @@ interface PaymentFormModalProps {
 export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModalProps) => {
   const { user } = useAuthStore();
   const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+  const [serverError, setServerError] = useState<string | null>(null);
+
   const { data: customersResponse } = useQuery({
     queryKey: ['customers', { page: 1, limit: 100 }],
     queryFn: () => getCustomers({ page: 1, limit: 100 }),
     enabled: isOpen,
   });
 
+  const { data: suppliersResponse } = useQuery({
+    queryKey: ['suppliers', { page: 1, limit: 100 }],
+    queryFn: () => getSuppliers({ page: 1, limit: 100 }),
+    enabled: isOpen,
+  });
+
   const { data: invoices = [] } = useQuery({
     queryKey: ['invoices'],
-    queryFn: invoicesService.getInvoices,
+    queryFn: () => invoicesService.getInvoices(),
+    enabled: isOpen,
+  });
+
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank-accounts'],
+    queryFn: () => bankAccountsService.getBankAccounts(),
     enabled: isOpen,
   });
 
   const createMutation = useMutation({
     mutationFn: (data: any) => paymentsService.createPayment({
       ...data,
-      invoice_id: data.invoice_id || null, // Convert empty string back to null
+      invoice_id: data.invoice_id || null,
+      supplier_id: data.supplier_id || null,
+      bank_account_id: data.bank_account_id || null,
+      cheque_number: data.cheque_number || null,
+      cheque_bank_name: data.cheque_bank_name || null,
+      cheque_due_date: data.cheque_due_date || null,
     }),
-    onSuccess,
+    onSuccess: () => {
+      setServerError(null);
+      onSuccess();
+    },
+    onError: (err: any) => {
+      console.error('Payment creation failed:', err);
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Failed to save payment';
+      setServerError(msg);
+    },
   });
 
   const {
@@ -60,20 +102,27 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
     resolver: zodResolver(paymentSchema),
     defaultValues: {
       customer_id: '',
+      supplier_id: '',
       invoice_id: '',
       payment_date: new Date().toISOString().split('T')[0],
       amount: 0,
       payment_method: 'CASH',
+      bank_account_id: '',
       notes: '',
+      cheque_number: '',
+      cheque_bank_name: '',
+      cheque_due_date: new Date().toISOString().split('T')[0],
     },
   });
 
   const selectedCustomerId = watch('customer_id');
   const selectedInvoiceId = watch('invoice_id');
+  const selectedPaymentMethod = watch('payment_method');
 
   // Filter invoices to only show UNPAID or PARTIAL invoices for the selected customer
-  const availableInvoices = invoices.filter(
-    (inv) => inv.customer_id === selectedCustomerId && ['UNPAID', 'PARTIAL'].includes(inv.status)
+  const invoicesList = Array.isArray(invoices) ? invoices : [];
+  const availableInvoices = invoicesList.filter(
+    (inv) => inv && inv.customer_id === selectedCustomerId && ['UNPAID', 'PARTIAL'].includes(inv.status)
   );
 
   const selectedInvoice = availableInvoices.find((inv) => inv.id === selectedInvoiceId);
@@ -93,19 +142,30 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
 
   useEffect(() => {
     if (isOpen) {
+      setServerError(null);
       reset({
         customer_id: '',
+        supplier_id: '',
         invoice_id: '',
         payment_date: new Date().toISOString().split('T')[0],
         amount: 0,
         payment_method: 'CASH',
+        bank_account_id: '',
         notes: '',
+        cheque_number: '',
+        cheque_bank_name: '',
+        cheque_due_date: new Date().toISOString().split('T')[0],
       });
     }
   }, [isOpen, reset]);
 
   const onSubmit = (data: PaymentFormData) => {
+    setServerError(null);
     createMutation.mutate(data);
+  };
+
+  const onInvalid = (errors: any) => {
+    console.warn('Form validation failed:', errors);
   };
 
   if (!isOpen) return null;
@@ -135,22 +195,41 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
         </div>
 
         <div className="px-6 py-6 overflow-y-auto max-h-[70vh]">
-          <form id="payment-form" onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          {serverError && (
+            <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center justify-between">
+              <span>{serverError}</span>
+              <button type="button" onClick={() => setServerError(null)} className="text-red-500 hover:text-red-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          <form id="payment-form" onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Customer</label>
-                <select {...register('customer_id')} className={inputCls(!!errors.customer_id)}>
+                <label htmlFor="customer_id" className="mb-1.5 block text-sm font-medium text-slate-700">Customer</label>
+                <select id="customer_id" {...register('customer_id')} className={inputCls(!!errors.customer_id)}>
                   <option value="">Select a customer...</option>
-                  {customersResponse?.data.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
-                  ))}
+                  {Array.isArray(customersResponse?.data) && (
+                    <>
+                      <optgroup label="Credit Accounts">
+                        {customersResponse.data.filter((c) => c.customer_type !== 'CASH').map((c) => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.code || 'Credit'})</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Cash Customers">
+                        {customersResponse.data.filter((c) => c.customer_type === 'CASH').map((c) => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.code || 'Cash'})</option>
+                        ))}
+                      </optgroup>
+                    </>
+                  )}
                 </select>
                 {errors.customer_id && <p className="mt-1 text-xs text-red-600">{errors.customer_id.message}</p>}
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Link to Invoice (Optional)</label>
-                <select {...register('invoice_id')} className={inputCls(!!errors.invoice_id)} disabled={!selectedCustomerId}>
+                <label htmlFor="invoice_id" className="mb-1.5 block text-sm font-medium text-slate-700">Link to Invoice (Optional)</label>
+                <select id="invoice_id" {...register('invoice_id')} className={inputCls(!!errors.invoice_id)} disabled={!selectedCustomerId}>
                   <option value="">General Account Payment</option>
                   {availableInvoices.map((inv) => (
                     <option key={inv.id} value={inv.id}>
@@ -162,21 +241,23 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Payment Date</label>
-                <input type="date" {...register('payment_date')} className={inputCls(!!errors.payment_date)} />
+                <label htmlFor="payment_date" className="mb-1.5 block text-sm font-medium text-slate-700">Payment Date</label>
+                <input id="payment_date" type="date" {...register('payment_date')} className={inputCls(!!errors.payment_date)} />
                 {errors.payment_date && <p className="mt-1 text-xs text-red-600">{errors.payment_date.message}</p>}
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Destination Bucket</label>
+                <label htmlFor="payment_method" className="mb-1.5 block text-sm font-medium text-slate-700">Destination Bucket / Method</label>
                 <select
+                  id="payment_method"
                   {...register('payment_method')}
                   disabled={isCashier}
                   className={inputCls(!!errors.payment_method) + (isCashier ? ' bg-slate-100 font-semibold text-slate-700 cursor-not-allowed' : '')}
                 >
                   <option value="CASH">Cash in Drawer (Galla)</option>
                   {!isCashier && <option value="BANK">Bank Account</option>}
-                  {!isCashier && <option value="PDC">PDC (Post-Dated Cheque)</option>}
+                  {!isCashier && <option value="CHEQUE">Post-Dated Cheque (PDC)</option>}
+                  {!isCashier && <option value="DIRECT_TO_SUPPLIER">Direct to Supplier (Tripartite)</option>}
                 </select>
                 {isCashier && (
                   <p className="mt-1 text-[11px] text-slate-500 font-medium">
@@ -186,15 +267,89 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
                 {errors.payment_method && <p className="mt-1 text-xs text-red-600">{errors.payment_method.message}</p>}
               </div>
 
+              {selectedPaymentMethod === 'DIRECT_TO_SUPPLIER' && (
+                <div className="md:col-span-2">
+                  <label htmlFor="supplier_id" className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Select Target Supplier <span className="text-red-500">*</span>
+                  </label>
+                  <select id="supplier_id" {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
+                    <option value="">Select Target Supplier...</option>
+                    {(suppliersResponse?.data || []).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code}) — Balance: Rs. {(Number(s?.outstanding_payable ?? s?.outstanding_balance) || 0).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.supplier_id && <p className="mt-1 text-xs text-red-600">{errors.supplier_id.message}</p>}
+                </div>
+              )}
+
+              {(selectedPaymentMethod === 'BANK' || selectedPaymentMethod === 'BANK_TRANSFER' || selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') && (
+                <div className="md:col-span-2">
+                  <label htmlFor="bank_account_id" className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Select Target Bank Account <span className="text-red-500">*</span>
+                  </label>
+                  <select id="bank_account_id" {...register('bank_account_id')} className={inputCls(!!errors.bank_account_id)}>
+                    <option value="">Select Target Bank Account...</option>
+                    {(bankAccounts || []).map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.bank_name} — {acc.account_title} ({acc.account_number}) — Bal: Rs. {(Number(acc?.current_balance) || 0).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.bank_account_id && <p className="mt-1 text-xs text-red-600">{errors.bank_account_id.message}</p>}
+                </div>
+              )}
+
+              {(selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') && (
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3 md:col-span-2">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Post-Dated Cheque (PDC) Details
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label htmlFor="cheque_number" className="mb-1 block text-xs font-medium text-slate-700">Cheque Number *</label>
+                      <input
+                        id="cheque_number"
+                        type="text"
+                        {...register('cheque_number')}
+                        placeholder="e.g. CHQ-99401"
+                        className={inputCls(!!errors.cheque_number)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="cheque_bank_name" className="mb-1 block text-xs font-medium text-slate-700">Bank Name *</label>
+                      <input
+                        id="cheque_bank_name"
+                        type="text"
+                        {...register('cheque_bank_name')}
+                        placeholder="e.g. Meezan Bank"
+                        className={inputCls(!!errors.cheque_bank_name)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="cheque_due_date" className="mb-1 block text-xs font-medium text-slate-700">Cheque Due Date *</label>
+                      <input
+                        id="cheque_due_date"
+                        type="date"
+                        {...register('cheque_due_date')}
+                        className={inputCls(!!errors.cheque_due_date)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm font-medium text-slate-700">Amount Received</label>
+                  <label htmlFor="amount" className="block text-sm font-medium text-slate-700">Amount Received</label>
                 </div>
                 <div className="relative w-full">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <span className="text-slate-500 sm:text-sm">Rs.</span>
                   </div>
                   <input
+                    id="amount"
                     type="number"
                     step="0.01"
                     {...register('amount')}
@@ -221,8 +376,8 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Notes / Reference</label>
-              <textarea {...register('notes')} rows={2} className={inputCls(false)} placeholder="Cheque number, transaction ID..."></textarea>
+              <label htmlFor="notes" className="mb-1.5 block text-sm font-medium text-slate-700">Notes / Reference</label>
+              <textarea id="notes" {...register('notes')} rows={2} className={inputCls(false)} placeholder="Cheque number, transaction ID..."></textarea>
             </div>
           </form>
         </div>

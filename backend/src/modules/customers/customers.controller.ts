@@ -40,7 +40,13 @@ export async function createCustomerController(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const data = createCustomerSchema.parse(req.body);
+    const isCashier = (req.user?.roleName || '').toUpperCase() === 'CASHIER';
+    const payload = { ...req.body };
+    if (isCashier) {
+      payload.credit_limit = 0;
+      payload.opening_balance = 0;
+    }
+    const data = createCustomerSchema.parse(payload);
     const customer = await customersService.addCustomer(data, req.user!.id);
     res.status(201).json(ok(customer));
   } catch (err) {

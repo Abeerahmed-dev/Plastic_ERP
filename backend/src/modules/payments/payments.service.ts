@@ -7,6 +7,10 @@ export async function createPayment(input: CreatePaymentInput, userId?: string) 
   return { id: paymentId, payment_number: paymentNumber };
 }
 
-export async function getPayments() {
-  return await paymentsRepo.findAllPayments();
+export async function getPayments(query?: { search?: string; customer_id?: string; invoice_id?: string }) {
+  return await paymentsRepo.findAllPayments(query);
+}
+
+export async function clearCheque(paymentId: string) {
+  return await paymentsRepo.clearCheque(paymentId);
 }

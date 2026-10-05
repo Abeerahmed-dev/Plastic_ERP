@@ -3,11 +3,10 @@ import axios from 'axios';
 import { useProductsStore } from '../../store/products.store';
 
 export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
-  const { products, fetchProducts, getUnitConversions } = useProductsStore();
+  const { products, fetchProducts } = useProductsStore();
 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [selectedUnit, setSelectedUnit] = useState('Bora');
   const [actualWeightPerUnit, setActualWeightPerUnit] = useState('');
   const [unitPrice, setUnitPrice] = useState(0);
   const [supplierId, setSupplierId] = useState('');
@@ -20,11 +19,8 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
     fetchProducts();
   }, [fetchProducts]);
 
-  const unitConversions = selectedProductId
-    ? getUnitConversions(selectedProductId)
-    : { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 };
-
-  const availableUnits = Object.keys(unitConversions);
+  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const stdBagWeight = selectedProduct && selectedProduct.bag_weight_kg ? Number(selectedProduct.bag_weight_kg) : 25.0;
 
   const handleProductChange = (e) => {
     const pId = e.target.value;
@@ -32,17 +28,11 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
     const prod = products.find((p) => p.id === pId);
     if (prod) {
       setUnitPrice(Number(prod.cost_price || 0));
-      const conversions = prod.unit_conversions || { Bora: 25.0, Peti: 15.0, Dasti: 0.5, Pura: 5.0, KG: 1.0 };
-      const keys = Object.keys(conversions);
-      if (keys.length > 0 && !keys.includes(selectedUnit)) {
-        setSelectedUnit(keys[0]);
-      }
     }
   };
 
   const numQuantity = Number(quantity) || 0;
-  const currentMultiplier = unitConversions[selectedUnit] !== undefined ? Number(unitConversions[selectedUnit]) : 25.0;
-  const calculatedStandardWeight = numQuantity * currentMultiplier;
+  const calculatedStandardWeight = numQuantity * stdBagWeight;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -66,7 +56,7 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
         {
           product_id: selectedProductId,
           quantity: numQuantity,
-          selected_unit: selectedUnit,
+          selected_unit: 'Bag',
           unit_price: Number(unitPrice) || 0,
           actual_weight_per_unit: actualWeightPerUnit !== '' ? Number(actualWeightPerUnit) : null,
         },
@@ -91,7 +81,7 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} className="p-6 bg-white rounded-2xl shadow-lg border border-slate-100 max-w-xl mx-auto space-y-5">
-      <h2 className="text-xl font-bold text-slate-800">Purchase Item (Dynamic Unit Conversion)</h2>
+      <h2 className="text-xl font-bold text-slate-800">Purchase Item (Category Bag Weight)</h2>
 
       {errorMessage && (
         <div className="p-3 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200">
@@ -113,75 +103,55 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
           <option value="">-- Choose Product --</option>
           {products.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} ({p.code})
+              {p.name} ({p.code}) — {Number(p.bag_weight_kg || 25).toFixed(2)} KG/Bag
             </option>
           ))}
         </select>
       </div>
 
-      {/* Quantity & Unit Selection Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Quantity Input */}
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-            Quantity
-          </label>
-          <input
-            type="number"
-            step="0.0001"
-            min="0.0001"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          />
-          {/* Read-Only Reactive Display String */}
+      {/* Quantity (Bags) */}
+      <div>
+        <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+          Quantity (Bags)
+        </label>
+        <input
+          type="number"
+          step="0.0001"
+          min="0.0001"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          required
+        />
+        {selectedProductId && (
           <p className="mt-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 p-2 rounded-lg border border-emerald-100">
             Calculated Standard Weight: {calculatedStandardWeight.toFixed(2)} KG
           </p>
-        </div>
-
-        {/* Dynamic Unit Dropdown */}
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-            Purchase Unit
-          </label>
-          <select
-            value={selectedUnit}
-            onChange={(e) => setSelectedUnit(e.target.value)}
-            className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {availableUnits.map((u) => (
-              <option key={u} value={u}>
-                {u} ({unitConversions[u]} KG)
-              </option>
-            ))}
-          </select>
-        </div>
+        )}
       </div>
 
       {/* Override Input */}
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-          Actual Kanta Wt of 1 {selectedUnit} (KG) - Optional
+          Actual Kanta Wt of 1 Bag (KG) - Optional
         </label>
         <input
           type="number"
           step="0.01"
-          placeholder={`Standard is ${currentMultiplier} KG`}
+          placeholder={`Std: ${stdBagWeight} KG`}
           value={actualWeightPerUnit}
           onChange={(e) => setActualWeightPerUnit(e.target.value)}
           className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <p className="mt-1.5 text-xs text-slate-400">
-          Leave blank to use standard rate ({currentMultiplier} KG/unit)
+          Leave blank to use standard rate (Std: {stdBagWeight} KG)
         </p>
       </div>
 
       {/* Unit Price */}
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-          Unit Price (Per {selectedUnit})
+          Unit Price (Per Bag)
         </label>
         <input
           type="number"

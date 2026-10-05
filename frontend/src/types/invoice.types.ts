@@ -15,6 +15,9 @@ export interface Invoice {
   customer_name?: string;
   customer_code?: string;
   invoice_number: string;
+  invoice_type?: 'SALE' | 'CREDIT_NOTE';
+  parent_invoice_id?: string | null;
+  return_reason?: string | null;
   date: string;
   due_date: string | null;
   subtotal: string | number;
@@ -26,6 +29,7 @@ export interface Invoice {
   created_at: string;
   updated_at: string;
   items?: InvoiceItem[];
+  credit_notes?: Invoice[];
 }
 
 export interface CreateInvoiceItemData {
