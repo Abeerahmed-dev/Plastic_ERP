@@ -22,6 +22,7 @@ export interface Product {
   fixed_retail_price_per_kg?: string | number;
   opening_stock: string | number;
   current_stock?: number;
+  total_stock_kg?: number;
   is_active: boolean;
   notes: string | null;
   created_at: string;

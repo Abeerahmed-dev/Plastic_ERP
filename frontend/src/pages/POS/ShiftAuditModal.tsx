@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X, DollarSign, Calendar, ChevronDown, ChevronUp, Clock, FileText, User, ShoppingBag } from 'lucide-react';
-import { posService, ShiftAuditInvoice } from '../../services/pos.service';
+import { posService } from '../../services/pos.service';
 
 interface ShiftAuditModalProps {
   isOpen: boolean;
@@ -11,7 +11,7 @@ interface ShiftAuditModalProps {
 export const ShiftAuditModal: React.FC<ShiftAuditModalProps> = ({ isOpen, onClose }) => {
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
 
-  const { data: invoices = [], isLoading, refetch } = useQuery({
+  const { data: invoices = [], isLoading } = useQuery({
     queryKey: ['shiftAudit'],
     queryFn: () => posService.getShiftAudit(),
     enabled: isOpen,

@@ -1,14 +1,301 @@
 import { useState } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Users, Box, FileText, Truck, Tag, Menu, X, HandCoins, ShoppingCart, LayoutDashboard, PieChart, Sliders, Receipt, Boxes } from 'lucide-react';
+import {
+  LogOut, Users, Box, FileText, Truck, Tag, HandCoins,
+  ShoppingCart, LayoutDashboard, PieChart, Receipt, Boxes,
+  ChevronDown, ChevronRight, TrendingUp, Menu, X,
+} from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
 import { authService } from '../../services/auth.service';
+import type { AuthUser } from '../../types/auth.types';
+import sabirLogo from '../../assets/sabirlogo.png';
 
+/* ─── Types ─── */
+type NavItem = {
+  to?: string;
+  label: string;
+  icon: React.ElementType;
+  permission?: string | null;
+  children?: NavItem[];
+};
+
+/* ─── Nav structure ─── */
+const navSections: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: 'Overview',
+    items: [
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: null },
+      { to: '/pos', label: 'Walk-in POS', icon: ShoppingCart, permission: 'sales:write' },
+    ],
+  },
+  {
+    heading: 'Sales',
+    items: [
+      { to: '/invoices', label: 'Sales Invoices', icon: FileText, permission: 'sales:read' },
+      { to: '/payments', label: 'Cust. Payments', icon: HandCoins, permission: 'payments:read' },
+      { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read' },
+    ],
+  },
+  {
+    heading: 'Purchases',
+    items: [
+      { to: '/purchases', label: 'Purchase Invoices', icon: Truck, permission: 'purchases:read' },
+      { to: '/supplier-payments', label: 'Supp. Payments', icon: HandCoins, permission: 'payments:read' },
+      { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },
+    ],
+  },
+  {
+    heading: 'Inventory',
+    items: [
+      { to: '/products', label: 'Products', icon: Box, permission: 'products:read' },
+      { to: '/categories', label: 'Categories', icon: Tag, permission: 'products:read' },
+    ],
+  },
+  {
+    heading: 'Finance',
+    items: [
+      { to: '/expenses', label: 'Expenses', icon: Receipt, permission: null },
+      {
+        label: 'Reports',
+        icon: PieChart,
+        permission: null,
+        children: [
+          { to: '/reports/income-statement', label: 'Income Statement', icon: TrendingUp, permission: null },
+          { to: '/reports/margin-analytics', label: 'Margin Analytics', icon: TrendingUp, permission: null },
+          { to: '/reports/inventory-valuation', label: 'Inventory Valuation', icon: Boxes, permission: null },
+          { to: '/reports', label: 'Financial Reports', icon: PieChart, permission: null },
+        ],
+      },
+    ],
+  },
+  {
+    heading: 'Management',
+    items: [
+      { to: '/users', label: 'Employees', icon: Users, permission: 'users:read' },
+    ],
+  },
+];
+
+/* ─── Leaf link ─── */
+function SidebarLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
+  const location = useLocation();
+  if (!item.to) return null;
+
+  const isActive =
+    item.to === '/dashboard'
+      ? location.pathname === '/dashboard' || location.pathname === '/'
+      : location.pathname.startsWith(item.to);
+
+  return (
+    <Link
+      to={item.to}
+      onClick={onClick}
+      className={`group flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-150 ${
+        isActive
+          ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+          : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
+      }`}
+    >
+      <item.icon
+        className={`h-4 w-4 shrink-0 transition-colors ${
+          isActive ? 'text-slate-950' : 'text-slate-400 group-hover:text-amber-400'
+        }`}
+      />
+      {item.label}
+    </Link>
+  );
+}
+
+/* ─── Collapsible group ─── */
+function SidebarGroup({ item, onLinkClick }: { item: NavItem; onLinkClick?: () => void }) {
+  const location = useLocation();
+  const childActive = item.children?.some(
+    (c) => c.to && location.pathname.startsWith(c.to)
+  ) ?? false;
+  const [open, setOpen] = useState(childActive);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-all duration-150 ${
+          childActive
+            ? 'bg-slate-800 text-amber-400 border border-amber-500/30'
+            : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
+        }`}
+      >
+        <item.icon className={`h-4 w-4 shrink-0 ${childActive ? 'text-amber-400' : 'text-slate-400'}`} />
+        <span className="flex-1 text-left">{item.label}</span>
+        {open
+          ? <ChevronDown className={`h-3.5 w-3.5 ${childActive ? 'text-amber-400' : 'text-slate-400'}`} />
+          : <ChevronRight className={`h-3.5 w-3.5 ${childActive ? 'text-amber-400' : 'text-slate-400'}`} />
+        }
+      </button>
+
+      {open && (
+        <div className="ml-4 mt-1 pl-3 border-l border-amber-500/30 flex flex-col gap-1">
+          {item.children?.map((child) => (
+            <SidebarLink key={child.to} item={child} onClick={onLinkClick} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Sidebar body (reused for desktop + mobile drawer) ─── */
+type SidebarContentProps = {
+  user: AuthUser | null;
+  hasPermission: (permission: string) => boolean;
+  onLinkClick?: () => void;
+  handleLogout: () => void;
+};
+
+function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: SidebarContentProps) {
+  const isCashierRole = (user?.role || '').toUpperCase() === 'CASHIER';
+
+  return (
+    <div className="flex flex-col h-full bg-slate-900 text-slate-100">
+      {/* Logo */}
+      <div className="h-16 flex items-center gap-3 px-4 border-b border-slate-800 shrink-0 bg-slate-900">
+        <img
+          src={sabirLogo}
+          alt="Sabir Plastic"
+          className="h-10 w-auto object-contain shrink-0 drop-shadow"
+        />
+        <div>
+          <p className="font-bold text-white text-sm leading-tight tracking-tight">Sabir Plastic</p>
+          <p className="text-[11px] text-amber-400 font-medium leading-tight">ERP System</p>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+        {navSections.map((section) => {
+          const visibleItems = section.items.filter((item) => {
+            if (isCashierRole) {
+              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers'];
+              if (item.to && hidden.some((h) => item.to!.startsWith(h))) return false;
+              if (!item.to && item.label === 'Reports') return false;
+            }
+            if (item.permission && !hasPermission(item.permission)) return false;
+            return true;
+          });
+
+          if (visibleItems.length === 0) return null;
+
+          return (
+            <div key={section.heading}>
+              <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                {section.heading}
+              </p>
+              <div className="flex flex-col gap-1">
+                {visibleItems.map((item) =>
+                  item.children ? (
+                    <SidebarGroup key={item.label} item={item} onLinkClick={onLinkClick} />
+                  ) : (
+                    <SidebarLink key={item.to} item={item} onClick={onLinkClick} />
+                  )
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* User + logout */}
+      <div className="border-t border-slate-800 px-3 py-4 shrink-0 bg-slate-900">
+        <div className="flex items-center gap-3 px-2 mb-2">
+          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shrink-0 shadow-sm">
+            <span className="text-slate-950 font-black text-xs">
+              {user?.name?.charAt(0).toUpperCase()}
+            </span>
+          </div>
+          <div className="overflow-hidden">
+            <p className="text-sm font-semibold text-slate-200 truncate">{user?.name}</p>
+            <p className="text-xs text-amber-400 font-semibold capitalize truncate">
+              {user?.role}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-rose-400 hover:bg-rose-950/30 hover:text-rose-300 transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Route Title Mapping Helper ─── */
+const getPageTitle = (pathname: string): { title: string; subtitle?: string } => {
+  if (pathname === '/dashboard' || pathname === '/') {
+    return { title: 'Dashboard', subtitle: 'Overview & Business Analytics' };
+  }
+  if (pathname.startsWith('/pos')) {
+    return { title: 'Walk-in POS Billing', subtitle: 'Point of Sale Terminal' };
+  }
+  if (pathname.startsWith('/invoices') || pathname.startsWith('/sales')) {
+    return { title: 'Sales Invoices', subtitle: 'Customer Invoices & Billing' };
+  }
+  if (pathname.startsWith('/payments')) {
+    return { title: 'Customer Payments', subtitle: 'Receipts & Accounts Receivable' };
+  }
+  if (pathname.startsWith('/customers')) {
+    return { title: 'Customers', subtitle: 'Customer Directory & Accounts' };
+  }
+  if (pathname.startsWith('/purchases')) {
+    return { title: 'Purchase Invoices', subtitle: 'Supplier Purchases & Bills' };
+  }
+  if (pathname.startsWith('/supplier-payments')) {
+    return { title: 'Supplier Payments', subtitle: 'Accounts Payable & Disbursals' };
+  }
+  if (pathname.startsWith('/suppliers')) {
+    return { title: 'Suppliers', subtitle: 'Vendor Management' };
+  }
+  if (pathname.startsWith('/products')) {
+    return { title: 'Products', subtitle: 'Inventory Catalog & Pricing' };
+  }
+  if (pathname.startsWith('/categories') || pathname.startsWith('/uom')) {
+    return { title: 'Categories', subtitle: 'Product Classifications' };
+  }
+  if (pathname.startsWith('/expenses')) {
+    return { title: 'Operating Expenses', subtitle: 'Overheads & Expense Ledger' };
+  }
+  if (pathname.startsWith('/reports/income-statement') || pathname.startsWith('/reports/pnl')) {
+    return { title: 'Income Statement (P&L)', subtitle: 'Profit & Loss Statement' };
+  }
+  if (pathname.startsWith('/reports/margin-analytics') || pathname.startsWith('/reports/sales-margin')) {
+    return { title: 'Margin Analytics', subtitle: 'Sales & Profit Margin Analytics' };
+  }
+  if (pathname.startsWith('/reports/inventory-valuation')) {
+    return { title: 'Inventory Valuation', subtitle: 'WAC Valuation & FIFO Batches' };
+  }
+  if (pathname.startsWith('/reports')) {
+    return { title: 'Financial Reports', subtitle: 'Financial & Inventory Intelligence' };
+  }
+  if (pathname.startsWith('/users')) {
+    return { title: 'Employees', subtitle: 'User Accounts & Roles' };
+  }
+  if (pathname.startsWith('/stock')) {
+    return { title: 'Cashier Stock', subtitle: 'Available Inventory' };
+  }
+
+  return { title: 'ERP MANAGEMENT SYSTEM' };
+};
+
+/* ─── Main Layout ─── */
 export const MainLayout = () => {
   const { user, clearAuth, hasPermission } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
+  const currentPage = getPageTitle(location.pathname);
 
   const handleLogout = async () => {
     try {
@@ -21,220 +308,179 @@ export const MainLayout = () => {
     }
   };
 
-  const navLinks = [
-    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: null },
-    { to: '/onboarding', label: 'Day Zero Setup', icon: Sliders, permission: null },
-    { to: '/pos', label: 'Walk-in POS', icon: ShoppingCart, permission: 'sales:write' },
-    { to: '/reports/income-statement', label: 'Income Statement', icon: PieChart, permission: null },
-    { to: '/reports/margin-analytics', label: 'Margin Analytics', icon: PieChart, permission: null },
-    { to: '/reports/inventory-valuation', label: 'Inventory Valuation', icon: Boxes, permission: null },
-    { to: '/expenses', label: 'Expenses', icon: Receipt, permission: null },
-    { to: '/reports', label: 'Financial Reports', icon: PieChart, permission: null },
-    { to: '/users', label: 'Employees', icon: Users, permission: 'users:read' },
-    { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read' },
-    { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },
-    { to: '/products', label: 'Products', icon: Box, permission: 'products:read' },
-    { to: '/categories', label: 'Categories', icon: Tag, permission: 'products:read' },
-    { to: '/invoices', label: 'Sales Invoices', icon: FileText, permission: 'sales:read' },
-    { to: '/payments', label: 'Cust. Payments', icon: HandCoins, permission: 'payments:read' },
-    { to: '/purchases', label: 'Purchases', icon: Truck, permission: 'purchases:read' },
-    { to: '/supplier-payments', label: 'Supp. Payments', icon: HandCoins, permission: 'payments:read' },
-  ];
-
-  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Global Navbar */}
-      <nav className="bg-white shadow-sm border-b border-slate-200 shrink-0">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex items-center gap-4">
-              {!isCashier && (
-                <button
-                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                  className="p-2 -ml-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                >
-                  <Menu className="h-6 w-6" />
-                </button>
-              )}
-
-              <div className="flex-shrink-0 flex items-center gap-2">
-                <div className="h-8 w-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg shadow-md flex items-center justify-center transform rotate-3">
-                  <span className="text-white font-bold text-sm tracking-tighter -rotate-3">SP</span>
+  /* ─── Cashier: horizontal top-nav ─── */
+  if (isCashier) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        <nav className="bg-slate-900 shadow-md border-b border-slate-800 shrink-0">
+          <div className="w-full px-4 sm:px-6">
+            <div className="flex items-center justify-between h-16 gap-4">
+              {/* Brand Logo & Title */}
+              <div className="flex items-center gap-3 shrink-0">
+                <img
+                  src={sabirLogo}
+                  alt="Sabir Plastic"
+                  className="h-9 w-auto object-contain shrink-0 drop-shadow"
+                />
+                <div className="hidden sm:flex flex-col">
+                  <span className="font-bold text-sm text-white tracking-tight leading-none">
+                    Sabir Plastic
+                  </span>
+                  <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
+                    Cashier Terminal
+                  </span>
                 </div>
-                <span className="font-bold text-xl text-slate-900 tracking-tight hidden sm:block">
-                  {isCashier ? 'Sabir Plastic — Cashier Terminal' : 'Sabir Plastic'}
-                </span>
               </div>
 
-              {/* Cashier Top Nav Links */}
-              {isCashier ? (
-                <div className="flex items-center gap-1.5 ml-4 border-l border-slate-200 pl-4 overflow-x-auto">
-                  <Link
-                    to="/pos"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname === '/pos' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <ShoppingCart className="w-3.5 h-3.5" />
-                    POS Billing
-                  </Link>
-                  <Link
-                    to="/expenses"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname.startsWith('/expenses') ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Receipt className="w-3.5 h-3.5" />
-                    Expenses
-                  </Link>
-                  <Link
-                    to="/invoices"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales') ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    Sales Invoices
-                  </Link>
-                  <Link
-                    to="/purchases"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname.startsWith('/purchases') ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Truck className="w-3.5 h-3.5" />
-                    Purchase Invoices
-                  </Link>
-                  <Link
-                    to="/products"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname.startsWith('/products') ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Box className="w-3.5 h-3.5" />
-                    Products
-                  </Link>
-                  <Link
-                    to="/categories"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname.startsWith('/categories') ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Tag className="w-3.5 h-3.5" />
-                    Categories
-                  </Link>
-                  <Link
-                    to="/stock"
-                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 ${
-                      location.pathname === '/stock' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Box className="w-3.5 h-3.5" />
-                    Current Stock
-                  </Link>
-                </div>
-              ) : (
-                <div className="hidden md:flex items-center gap-1 ml-4 border-l border-slate-200 pl-4">
-                  <Link to="/dashboard" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname === '/dashboard' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Dashboard</Link>
-                  <Link to="/reports/income-statement" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/reports/income-statement') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Income Statement</Link>
-                  <Link to="/reports/margin-analytics" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/reports/margin-analytics') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Margin Analytics</Link>
-                  <Link to="/reports/inventory-valuation" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/reports/inventory-valuation') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Inventory Valuation</Link>
-                  <Link to="/expenses" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/expenses') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Expenses</Link>
-                  {user?.role !== 'CASHIER' && user?.roleName !== 'Cashier' && (
-                    <>
-                      <Link to="/reports" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname === '/reports' ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Financial Reports</Link>
-                      <Link to="/purchases" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/purchases') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Purchases</Link>
-                      <Link to="/invoices" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/invoices') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>Sales Invoices</Link>
-                    </>
-                  )}
-                  <Link to="/pos" className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors ${location.pathname.startsWith('/pos') ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>POS</Link>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="flex flex-col items-end">
-                <span className="text-sm font-medium text-slate-900">{user?.name}</span>
-                <span className="text-xs font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full capitalize">
-                  {user?.roleName || user?.role}
-                </span>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors block"
-                title="Logout"
-              >
-                <LogOut className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Mobile Drawer */}
-      {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-[100] flex">
-          <div
-            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm"
-            onClick={() => setIsMobileMenuOpen(false)}
-          ></div>
-
-          <div className="relative w-64 max-w-sm bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-left duration-200">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <span className="font-bold text-slate-800">Menu</span>
-              <button
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="p-4 flex flex-col gap-2 overflow-y-auto">
-              {navLinks.map(({ to, label, icon: Icon, permission }) => {
-                const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
-                if (isCashier && ['/reports', '/purchases', '/onboarding', '/users', '/supplier-payments'].includes(to)) {
-                  return null;
-                }
-                if (permission && !hasPermission(permission)) return null;
-
-                const isActive = location.pathname.startsWith(to) || (to === '/dashboard' && location.pathname === '/');
-
-                return (
-                  <Link
-                    key={to}
-                    to={to}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors ${isActive
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+              {/* Navigation Links */}
+              <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                {[
+                  { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
+                  { to: '/expenses', label: 'Expenses', icon: Receipt },
+                  { to: '/invoices', label: 'Sales Invoices', icon: FileText },
+                  { to: '/purchases', label: 'Purchases', icon: Truck },
+                  { to: '/products', label: 'Products', icon: Box },
+                  { to: '/categories', label: 'Categories', icon: Tag },
+                ].map(({ to, label, icon: Icon }) => {
+                  const isActive = to === '/pos' ? location.pathname === '/pos' : location.pathname.startsWith(to);
+                  return (
+                    <Link
+                      key={to}
+                      to={to}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                        isActive
+                          ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+                          : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
                       }`}
-                  >
-                    <Icon className={`h-5 w-5 ${isActive ? 'text-blue-700' : 'text-slate-400'}`} />
-                    {label}
-                  </Link>
-                );
-              })}
-            </div>
+                    >
+                      <Icon className="w-3.5 h-3.5 shrink-0" />
+                      <span>{label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
 
-            <div className="mt-auto border-t border-slate-100 p-4">
-              <button
-                onClick={handleLogout}
-                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 transition"
-              >
-                <LogOut className="h-5 w-5" />
-                Logout
-              </button>
+              {/* User Profile & Logout */}
+              <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
+                <div className="hidden md:flex flex-col items-end">
+                  <span className="text-xs font-semibold text-slate-200 leading-none">{user?.name}</span>
+                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-none mt-1">
+                    {user?.role}
+                  </span>
+                </div>
+                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-sm shrink-0">
+                  {user?.name?.charAt(0).toUpperCase()}
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                  title="Sign out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
+        </nav>
+
+        <div className="flex-1 overflow-auto">
+          <Outlet />
+        </div>
+      </div>
+    );
+  }
+
+  /* ─── Owner / Admin: fixed sidebar layout ─── */
+  return (
+    <div className="min-h-screen bg-slate-50 flex">
+      {/* Desktop fixed sidebar */}
+      <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md">
+        <SidebarContent
+          user={user}
+          hasPermission={hasPermission}
+          handleLogout={handleLogout}
+        />
+      </aside>
+
+      {/* Mobile sidebar overlay */}
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          <div
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+          <aside className="relative w-60 bg-slate-900 shadow-2xl flex flex-col h-full z-10 border-r border-slate-800">
+            <button
+              onClick={() => setMobileSidebarOpen(false)}
+              className="absolute top-4 right-3 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <SidebarContent
+              user={user}
+              hasPermission={hasPermission}
+              onLinkClick={() => setMobileSidebarOpen(false)}
+              handleLogout={handleLogout}
+            />
+          </aside>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto">
-        <Outlet />
+      {/* Right: slim topbar + page content */}
+      <div className="flex flex-col flex-1 lg:ml-60 min-h-screen">
+        {/* Top bar */}
+        <header className="sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 gap-3 shrink-0 shadow-sm">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setMobileSidebarOpen(true)}
+            className="lg:hidden p-2 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center gap-2 mr-1">
+            <img
+              src={sabirLogo}
+              alt="Sabir Plastic"
+              className="h-7 w-auto object-contain shrink-0"
+            />
+          </div>
+
+          {/* Dynamic Page Heading */}
+          <div className="flex flex-col justify-center">
+            <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-none">
+              {currentPage.title}
+            </h1>
+            {currentPage.subtitle && (
+              <p className="hidden md:block text-[11px] text-slate-400 font-medium mt-1 leading-none">
+                {currentPage.subtitle}
+              </p>
+            )}
+          </div>
+
+          <div className="flex-1" />
+
+          {/* User info chip */}
+          <div className="flex items-center gap-2.5">
+            <div className="hidden sm:flex flex-col items-end">
+              <span className="text-sm font-semibold text-slate-200">{user?.name}</span>
+              <span className="text-xs text-amber-400 font-semibold uppercase tracking-wider">
+                {user?.role}
+              </span>
+            </div>
+            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-xs">
+              <span className="text-slate-950 font-black text-xs">
+                {user?.name?.charAt(0).toUpperCase()}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
       </div>
     </div>
   );

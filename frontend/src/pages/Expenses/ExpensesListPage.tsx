@@ -22,7 +22,7 @@ const CATEGORIES = [
 export default function ExpensesListPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
-  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const userRole = (user?.role || '').toUpperCase();
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -135,7 +135,7 @@ export default function ExpensesListPage() {
             className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 active:bg-red-800 transition"
           >
             <Plus className="h-4 w-4" />
-            + Log Expense
+             Expense
           </button>
         </div>
 

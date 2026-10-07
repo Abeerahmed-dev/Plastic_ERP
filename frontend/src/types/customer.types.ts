@@ -2,6 +2,7 @@ export interface Customer {
   id: string;
   code: string;
   name: string;
+  customer_type?: 'CASH' | 'CREDIT' | string;
   phone: string | null;
   email: string | null;
   address: string | null;
@@ -19,6 +20,7 @@ export interface Customer {
 
 export interface CreateCustomerData {
   name: string;
+  customer_type?: 'CASH' | 'CREDIT' | string;
   phone?: string;
   email?: string;
   address?: string;
@@ -39,5 +41,6 @@ export interface CustomerFilters {
   search?: string;
   city?: string;
   region?: string;
+  customer_type?: string;
   is_active?: boolean;
 }

@@ -1,4 +1,5 @@
 import { forwardRef } from 'react';
+import sabirLogo from '../../assets/sabirlogo.png';
 
 interface ReceiptProps {
   invoice: any;
@@ -12,8 +13,9 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
 
     return (
       <div ref={ref} className="hidden print:block w-[80mm] bg-white text-black p-4 font-mono text-sm leading-tight">
-        <div className="text-center mb-4">
-          <h1 className="font-bold text-lg mb-1">SABIR PLASTIC</h1>
+        <div className="text-center mb-3 flex flex-col items-center justify-center">
+          <img src={sabirLogo} alt="Sabir Plastic" className="h-12 w-auto object-contain mb-1" />
+          <h1 className="font-bold text-lg mb-0.5">SABIR PLASTIC</h1>
           <p className="text-xs text-gray-600">Walk-in POS Receipt</p>
         </div>
 
@@ -60,9 +62,26 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
           </p>
         </div>
 
-        <div className="text-center text-xs mt-6 pt-4 border-t border-dashed border-gray-400">
-          <p>Thank you for shopping with us!</p>
-          <p>Software by Antigravity</p>
+        {/* Signature Lines */}
+        <div className="flex justify-between items-end pt-5 pb-2 text-[10px]">
+          <div className="text-center">
+            <div className="w-20 border-b border-dashed border-gray-400 mb-1"></div>
+            <p className="text-gray-600">Receiver Sign</p>
+          </div>
+          <div className="text-center">
+            <div className="w-24 border-b border-gray-700 mb-1"></div>
+            <p className="font-bold text-gray-800">Authorized Sign</p>
+          </div>
+        </div>
+
+        <div className="text-center text-xs mt-4 pt-3 border-t border-dashed border-gray-400 space-y-1">
+          <p className="font-bold">Thank you for your business!</p>
+          <p className="text-[11px] leading-tight" dir="rtl">
+            نوٹ: مال نہ ملنے کی صورت میں 15 دن میں رابطہ کریں اس کے بعد کمپنی ذمہ دار نہیں ہوگی۔ شکریہ
+          </p>
+          <p className="text-[10px] text-gray-600 leading-tight">
+            Note: Maal na milne ki soorat 15 din me rabta karen is k baad company zimedar nh hogi. Shukria
+          </p>
         </div>
       </div>
     );

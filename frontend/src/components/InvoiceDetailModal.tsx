@@ -1,12 +1,16 @@
-import React from 'react';
-import { X, Printer, FileText, Calendar, User, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
+import { productsService } from '../services/products.service';
+import sabirLogo from '../assets/sabirlogo.png';
 
 export interface InvoiceDetailItem {
   id?: string;
   product_id: string;
   product_name: string;
   product_code?: string;
+  product_size?: string | null;
+  size?: string | null;
   batch_number?: string;
   batch_weight_per_unit?: number;
   batch_selected_unit?: string;
@@ -54,7 +58,14 @@ interface InvoiceDetailModalProps {
 
 export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn }: InvoiceDetailModalProps) {
   const { user } = useAuthStore();
-  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+  const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
+
+  const { data: allProducts = [] } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => productsService.getProducts(),
+    staleTime: 5 * 60 * 1000,
+    enabled: isOpen,
+  });
 
   if (!isOpen || !invoice) return null;
 
@@ -132,31 +143,47 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto print:p-0 print:bg-white print:fixed print:inset-0">
       <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] print:max-h-none print:shadow-none print:rounded-none print:w-full">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 print:bg-white print:border-b-2 print:border-slate-900">
-          <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-xl print:hidden ${isCreditNote ? 'bg-red-100 text-red-700' : 'bg-purple-50 text-purple-600'}`}>
-              <FileText className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-slate-900 font-mono tracking-tight flex items-center gap-2">
-                {isCreditNote ? 'Credit Note Invoice' : (type === 'purchase' ? 'Purchase Invoice' : 'Sales Invoice')} #{invoice.invoice_number}
-              </h2>
-              <p className="text-xs text-slate-500 font-medium print:hidden">
-                {isCreditNote ? `Return Reason: ${invoice.return_reason || 'N/A'}` : 'Detailed line-item & batch breakdown'}
-              </p>
-            </div>
+        {/* Modal Window Top Controls (hidden on print) */}
+        <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50 print:hidden">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              {type === 'purchase' ? 'Purchase Invoice' : (isCreditNote ? 'Credit Note' : 'Sales Invoice')}
+            </span>
+            <span className="font-mono font-bold text-slate-900">#{invoice.invoice_number}</span>
           </div>
 
           <div className="flex items-center gap-3">
             {getStatusBadge()}
             <button
               onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition print:hidden"
+              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition"
               title="Close"
             >
               <X className="w-5 h-5" />
             </button>
+          </div>
+        </div>
+
+        {/* Top Center Logo Header Banner (visible on screen and on print) */}
+        <div className="text-center pt-5 pb-4 px-6 flex flex-col items-center justify-center border-b border-slate-200 bg-white">
+          <img
+            src={sabirLogo}
+            alt="Sabir Plastic"
+            className="h-16 w-auto object-contain mb-2 drop-shadow-sm"
+          />
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight leading-tight uppercase">
+            SABIR PLASTIC
+          </h1>
+          <p className="text-xs font-bold text-amber-600 tracking-wider uppercase mt-0.5">
+            {type === 'purchase' ? 'Purchase Invoice / Bill' : (isCreditNote ? 'Credit Note Invoice' : 'Official Sales Invoice')}
+          </p>
+          <div className="mt-2 flex items-center justify-center gap-2.5">
+            <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+              Invoice #{invoice.invoice_number}
+            </span>
+            <div className="hidden print:inline-block">
+              {getStatusBadge()}
+            </div>
           </div>
         </div>
 
@@ -199,7 +226,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                 <tr>
                   <th className="py-2.5 px-3">#</th>
                   <th className="py-2.5 px-3">Product</th>
-                  <th className="py-2.5 px-3">Batch Info</th>
+                  <th className="py-2.5 px-3">Size</th>
                   <th className="py-2.5 px-3 text-right">Original Qty</th>
                   {creditNotes.length > 0 && <th className="py-2.5 px-3 text-right text-red-600">Returned</th>}
                   {creditNotes.length > 0 && <th className="py-2.5 px-3 text-right text-purple-700 font-bold">Net Qty</th>}
@@ -218,7 +245,6 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                 ) : (
                   invoice.items.map((item, idx) => {
                     const unitName = item.selected_unit || 'Dasti';
-                    const batchNo = item.batch_number || 'DEFAULT';
 
                     const returnedQty = creditNotes.reduce((acc, cn) => {
                       const matching = (cn.items || []).filter((i) => i.product_id === item.product_id);
@@ -227,6 +253,10 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
                     const origQty = Number(item.quantity || 0);
                     const netQty = Math.max(0, origQty - returnedQty);
+                    const productSize =
+                      item.product_size ||
+                      item.size ||
+                      allProducts.find((p) => p.id === item.product_id)?.size;
 
                     return (
                       <tr key={item.id || idx} className={isCreditNote ? 'bg-red-50/50' : 'hover:bg-slate-50'}>
@@ -235,12 +265,13 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                           {item.product_name}
                           {item.product_code && <span className="ml-1 text-[10px] text-slate-400 font-mono">({item.product_code})</span>}
                         </td>
-                        <td className="py-2.5 px-3 font-mono text-purple-700">
-                          {batchNo}
-                          {item.batch_weight_per_unit && (
-                            <span className="block text-[10px] text-slate-500 font-normal">
-                              1 {unitName} = {item.batch_weight_per_unit} KG
+                        <td className="py-2.5 px-3 font-medium text-slate-700">
+                          {productSize ? (
+                            <span className="inline-block px-2 py-0.5 rounded bg-slate-100 font-mono text-xs text-slate-800 font-semibold border border-slate-200">
+                              {productSize}
                             </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">—</span>
                           )}
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-medium text-slate-800">
@@ -368,6 +399,36 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   </div>
                 )
               )}
+            </div>
+          </div>
+
+          {/* Signatures Section */}
+          <div className="pt-10 pb-2 flex justify-between items-end px-2 print:pt-14">
+            <div className="text-center">
+              <div className="w-40 sm:w-48 border-b border-dashed border-slate-400 mb-1.5"></div>
+              <p className="text-xs font-semibold text-slate-600">Receiver's Signature</p>
+            </div>
+
+            <div className="text-center">
+              <div className="w-44 sm:w-52 border-b-2 border-slate-800 mb-1.5"></div>
+              <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                Authorized Signature
+              </p>
+            </div>
+          </div>
+
+          {/* Invoice Terms & Urdu Note Footer */}
+          <div className="pt-6 mt-4 border-t-2 border-slate-200 text-center space-y-2">
+            <p className="text-sm sm:text-base font-bold text-slate-900 tracking-wider uppercase">
+              Thank you for your business!
+            </p>
+            <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl py-3 px-4 max-w-xl mx-auto space-y-1">
+              <p className="text-xs sm:text-sm font-bold text-slate-900 leading-relaxed font-sans" dir="rtl">
+                نوٹ: مال نہ ملنے کی صورت میں 15 دن میں رابطہ کریں، اس کے بعد کمپنی ذمہ دار نہیں ہوگی۔ شکریہ!
+              </p>
+              <p className="text-[11px] text-slate-600 font-medium">
+                Note: Maal na milne ki soorat 15 din me rabta karen is k baad company zimedar nh hogi. Shukria
+              </p>
             </div>
           </div>
         </div>

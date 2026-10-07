@@ -268,7 +268,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                 <button
                   type="button"
                   onClick={() => append({ product_id: '', quantity: 1, unit_price: 0 })}
-                  className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 font-bold"
+                  className="inline-flex items-center text-sm font-bold text-blue-600 hover:text-blue-700"
                 >
                   <Plus className="mr-1 h-4 w-4" /> Add Line Item
                 </button>

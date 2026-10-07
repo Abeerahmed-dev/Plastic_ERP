@@ -1,4 +1,4 @@
-import React, { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Boxes,

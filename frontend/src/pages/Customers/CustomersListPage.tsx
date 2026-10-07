@@ -14,7 +14,7 @@ function formatRs(n: number | string) {
 
 export default function CustomersListPage() {
   const { user, hasPermission } = useAuthStore();
-  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const userRole = (user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
   const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:write');
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:delete'));

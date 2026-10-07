@@ -8,6 +8,7 @@ import { Lock, Mail, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { authService } from '../services/auth.service';
 import { useAuthStore } from '../store/auth.store';
 import type { LoginRequest } from '../types/auth.types';
+import sabirLogo from '../assets/sabirlogo.png';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -58,12 +59,14 @@ export const Login = () => {
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <div className="h-16 w-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl shadow-xl flex items-center justify-center transform rotate-3">
-            <span className="text-white font-bold text-3xl tracking-tighter -rotate-3">SP</span>
-          </div>
+          <img
+            src={sabirLogo}
+            alt="Sabir Plastic"
+            className="h-20 w-auto object-contain drop-shadow-md"
+          />
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900 tracking-tight">
-          Sabir Plastic ERP
+          Sabir Plastic Store
         </h2>
         <p className="mt-2 text-center text-sm text-slate-500">
           Sign in to access your dashboard

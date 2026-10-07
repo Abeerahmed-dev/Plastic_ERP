@@ -14,6 +14,7 @@ export interface POSCheckoutData {
   discount?: number;
   amount_paid?: number;
   payment_method?: string;
+  bank_account_id?: string;
 }
 
 export interface ShiftAuditItem {
