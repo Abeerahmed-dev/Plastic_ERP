@@ -100,7 +100,7 @@ export const UserFormModal = ({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-lg font-semibold text-slate-800">
-            {initialData ? 'Edit Employee' : 'Add New Employee'}
+            {initialData ? 'Edit Access' : 'Add New Access'}
           </h2>
           <button
             onClick={onClose}
@@ -201,7 +201,7 @@ export const UserFormModal = ({
                 Saving...
               </>
             ) : (
-              'Save Employee'
+              'Save Access'
             )}
           </button>
         </div>

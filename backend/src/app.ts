@@ -20,6 +20,7 @@ import { posRouter } from './modules/pos/pos.router';
 import { reportsRouter } from './modules/reports/reports.router';
 import { onboardingRouter } from './modules/onboarding/onboarding.router';
 import bankAccountsRouter from './modules/bank-accounts/bank-accounts.router';
+import { employeesRouter } from './modules/employees/employees.router';
 import devRouter from './modules/dev/dev.router';
 import { fail, ok } from './shared/apiResponse';
 
@@ -72,6 +73,8 @@ export function createApp(): Application {
   app.use('/api/bank-accounts', bankAccountsRouter);
   app.use('/api/v1/banks', bankAccountsRouter);
   app.use('/api/banks', bankAccountsRouter);
+  app.use('/api/v1/employees', employeesRouter);
+  app.use('/api/employees', employeesRouter);
   app.use('/api/v1/onboarding', onboardingRouter);
   app.use('/api/dev', devRouter);
   app.use('/api/v1/dev', devRouter);

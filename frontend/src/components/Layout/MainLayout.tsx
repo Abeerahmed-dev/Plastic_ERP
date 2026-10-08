@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LogOut, Users, Box, FileText, Truck, Tag, HandCoins,
   ShoppingCart, LayoutDashboard, PieChart, Receipt, Boxes,
-  ChevronDown, ChevronRight, TrendingUp, Menu, X,
+  ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
 import { authService } from '../../services/auth.service';
@@ -71,7 +71,8 @@ const navSections: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'Management',
     items: [
-      { to: '/users', label: 'Employees', icon: Users, permission: 'users:read' },
+      { to: '/employees', label: 'Store Staff', icon: Users, permission: null },
+      { to: '/settings', label: 'Settings', icon: Settings, permission: null },
     ],
   },
 ];
@@ -174,7 +175,7 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
         {navSections.map((section) => {
           const visibleItems = section.items.filter((item) => {
             if (isCashierRole) {
-              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers'];
+              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers', '/settings', '/expenses', '/employees'];
               if (item.to && hidden.some((h) => item.to!.startsWith(h))) return false;
               if (!item.to && item.label === 'Reports') return false;
             }
@@ -277,8 +278,11 @@ const getPageTitle = (pathname: string): { title: string; subtitle?: string } =>
   if (pathname.startsWith('/reports')) {
     return { title: 'Financial Reports', subtitle: 'Financial & Inventory Intelligence' };
   }
-  if (pathname.startsWith('/users')) {
-    return { title: 'Employees', subtitle: 'User Accounts & Roles' };
+  if (pathname.startsWith('/employees')) {
+    return { title: 'Store Employees', subtitle: 'Workers Directory, Timings & Payroll' };
+  }
+  if (pathname.startsWith('/settings')) {
+    return { title: 'Settings', subtitle: 'System & Business Configuration' };
   }
   if (pathname.startsWith('/stock')) {
     return { title: 'Cashier Stock', subtitle: 'Available Inventory' };
@@ -336,7 +340,6 @@ export const MainLayout = () => {
               <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {[
                   { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
-                  { to: '/expenses', label: 'Expenses', icon: Receipt },
                   { to: '/invoices', label: 'Sales Invoices', icon: FileText },
                   { to: '/purchases', label: 'Purchases', icon: Truck },
                   { to: '/products', label: 'Products', icon: Box },
