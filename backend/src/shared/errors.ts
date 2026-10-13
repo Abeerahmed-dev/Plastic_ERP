@@ -51,3 +51,14 @@ export class ConflictError extends AppError {
     this.name = 'ConflictError';
   }
 }
+
+export class InsufficientStockError extends AppError {
+  public readonly remainingStock: number;
+
+  constructor(remainingStock: number, message?: string) {
+    const msg = message || `Transaction failed: Another user just purchased this stock. Remaining: ${remainingStock}`;
+    super(msg, 400);
+    this.name = 'InsufficientStockError';
+    this.remainingStock = remainingStock;
+  }
+}

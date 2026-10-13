@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { getSuppliers, deactivateSupplier } from '../../services/suppliers.service';
 import { Supplier } from '../../types/supplier.types';
 import { useAuthStore } from '../../store/auth.store';
 import SupplierFormModal from './SupplierFormModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
-const LIMIT = 20;
+const LIMIT = 100;
 
 function formatRs(n: number | string) {
   return `Rs. ${Number(n).toLocaleString('en-PK', { minimumFractionDigits: 0 })}`;
@@ -21,34 +23,12 @@ export default function SuppliersListPage() {
   const qc = useQueryClient();
 
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [city, setCity] = useState('');
-  const [debouncedCity, setDebouncedCity] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Supplier | undefined>();
 
-  const handleSearch = (v: string) => {
-    setSearch(v);
-    clearTimeout((window as { _searchTimer?: ReturnType<typeof setTimeout> })._searchTimer);
-    (window as { _searchTimer?: ReturnType<typeof setTimeout> })._searchTimer = setTimeout(() => {
-      setDebouncedSearch(v);
-      setPage(1);
-    }, 350);
-  };
-
-  const handleCity = (v: string) => {
-    setCity(v);
-    clearTimeout((window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer);
-    (window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer = setTimeout(() => {
-      setDebouncedCity(v);
-      setPage(1);
-    }, 350);
-  };
-
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['suppliers', page, debouncedSearch, debouncedCity],
-    queryFn: () => getSuppliers({ page, limit: LIMIT, search: debouncedSearch || undefined, city: debouncedCity || undefined }),
+    queryKey: ['suppliers', page],
+    queryFn: () => getSuppliers({ page, limit: LIMIT }),
   });
 
   const deactivateMutation = useMutation({
@@ -58,6 +38,38 @@ export default function SuppliersListPage() {
 
   const suppliers = data?.data ?? [];
   const meta = data?.meta;
+
+  const normalizedSuppliers = useMemo(() => {
+    return suppliers.map((s) => ({
+      ...s,
+      city: s.city || null,
+      name: s.name || '',
+      invoice_number: null,
+    }));
+  }, [suppliers]);
+
+  // Phase 1: Cascading filters hook
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    resetFilters,
+  } = useCascadingFilters(normalizedSuppliers);
+
+  // Phase 3: Strict multi-condition filter before rendering
+  const filteredTableRows = useMemo(() => {
+    return normalizedSuppliers.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+      return matchesCity && matchesName && matchesInvoice;
+    });
+  }, [normalizedSuppliers, selectedCity, selectedName, selectedInvoice]);
 
   const openCreate = () => { setEditTarget(undefined); setModalOpen(true); };
   const openEdit = (s: Supplier) => { setEditTarget(s); setModalOpen(true); };
@@ -85,25 +97,20 @@ export default function SuppliersListPage() {
             )}
           </div>
         </div>
-        {/* Search & City Filters */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search by name, phone, or code…"
-              className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
-          <div className="relative w-48">
-            <input
-              value={city}
-              onChange={(e) => handleCity(e.target.value)}
-              placeholder="Filter by city…"
-              className="w-full rounded-lg border border-gray-300 py-2 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
+        {/* Cascading Filter Bar */}
+        <div className="mt-4">
+          <CascadingFilterBar
+            selectedCity={selectedCity}
+            selectedName={selectedName}
+            onCityChange={setSelectedCity}
+            onNameChange={setSelectedName}
+            availableCities={availableCities}
+            availableNames={availableNames}
+            onReset={resetFilters}
+            showInvoice={false}
+            nameLabel="Supplier Name"
+            namePlaceholder="Filter by supplier name…"
+          />
         </div>
       </div>
 
@@ -134,15 +141,16 @@ export default function SuppliersListPage() {
               {isError && (
                 <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
               )}
-              {!isLoading && !isError && suppliers.length === 0 && (
+              {!isLoading && !isError && filteredTableRows.length === 0 && (
                 <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">
-                  {debouncedSearch ? `No suppliers matching "${debouncedSearch}"` : 'No suppliers yet.'}
+                  {selectedCity || selectedName
+                    ? 'No suppliers match the active cascading filters. Try resetting filters.'
+                    : 'No suppliers yet.'}
                 </td></tr>
               )}
-              {suppliers.map((s, idx) => {
-                const masterBalance = Number(s.outstanding_payable || 0);
-                const displayOutstanding = Math.max(0, masterBalance);
-                const displayAdvance = Math.abs(Math.min(0, masterBalance));
+              {filteredTableRows.map((s, idx) => {
+                const displayOutstanding = Number(s.outstanding_payable || 0);
+                const displayAdvance = Number((s as any).advance_payable || 0);
 
                 return (
                   <tr key={s.id} className={`border-b border-gray-50 hover:bg-blue-50/40 transition ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
@@ -161,7 +169,7 @@ export default function SuppliersListPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <span className={`font-semibold ${displayAdvance > 0 ? 'text-emerald-600 font-bold' : 'text-gray-400'}`}>
+                          <span className={`font-semibold ${displayAdvance > 0 ? 'text-teal-600 font-bold' : 'text-gray-400'}`}>
                             {formatRs(displayAdvance)}
                           </span>
                         </td>

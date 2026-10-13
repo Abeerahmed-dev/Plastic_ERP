@@ -24,6 +24,8 @@ export interface SupplierPaymentSummary {
   invoice_total_amount: number;
   total_paid_against_invoice: number;
   invoice_status: string;
+  dynamic_status?: string;
+  line_items?: any[];
   payment_history: PaymentHistoryItem[];
 }
 

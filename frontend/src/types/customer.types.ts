@@ -10,7 +10,14 @@ export interface Customer {
   region: string | null;
   credit_limit: number;
   opening_balance: number;
+  outstanding?: number;
   outstanding_balance: number;
+  advance?: number;
+  advance_credit?: number;
+  net_balance?: number;
+  total_billed?: number;
+  total_returned?: number;
+  total_paid?: number;
   net_lifetime_volume_kg?: number;
   is_active: boolean;
   notes: string | null;
@@ -28,10 +35,11 @@ export interface CreateCustomerData {
   region?: 'Sindh' | 'Punjab' | 'KPK' | 'Balochistan' | 'Other';
   credit_limit?: number;
   opening_balance?: number;
+  opening_advance?: number;
   notes?: string;
 }
 
-export type UpdateCustomerData = Partial<Omit<CreateCustomerData, 'opening_balance'>> & {
+export type UpdateCustomerData = Partial<Omit<CreateCustomerData, 'opening_balance' | 'opening_advance'>> & {
   is_active?: boolean;
 };
 

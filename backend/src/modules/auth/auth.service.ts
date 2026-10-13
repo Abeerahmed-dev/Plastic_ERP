@@ -68,7 +68,7 @@ function buildAccessToken(user: {
 export async function login(email: string, password: string): Promise<LoginResult> {
   const user = await findUserByEmail(email);
 
-  if (!user || !user.is_active) {
+  if (!user || !user.is_active || !user.password_hash || !user.email || !user.role_id || !user.role_name) {
     throw new UnauthorizedError('Invalid email or password');
   }
 
@@ -77,7 +77,16 @@ export async function login(email: string, password: string): Promise<LoginResul
     throw new UnauthorizedError('Invalid email or password');
   }
 
-  const accessToken = buildAccessToken(user);
+  const validUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role_id: user.role_id,
+    role_name: user.role_name,
+    permissions: user.permissions,
+  };
+
+  const accessToken = buildAccessToken(validUser);
 
   // Refresh token = random UUID; store its hash
   const rawRefreshToken = crypto.randomUUID();
@@ -90,11 +99,11 @@ export async function login(email: string, password: string): Promise<LoginResul
     access_token: accessToken,
     refresh_token: rawRefreshToken,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role_name,
-      permissions: user.permissions,
+      id: validUser.id,
+      name: validUser.name,
+      email: validUser.email,
+      role: validUser.role_name,
+      permissions: validUser.permissions,
     },
   };
 }
@@ -112,11 +121,20 @@ export async function refresh(rawRefreshToken: string): Promise<{ access_token: 
   }
 
   const user = await findUserById(stored.user_id);
-  if (!user || !user.is_active) {
+  if (!user || !user.is_active || !user.email || !user.role_id || !user.role_name) {
     throw new UnauthorizedError('User not found or inactive');
   }
 
-  const accessToken = buildAccessToken(user);
+  const validUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role_id: user.role_id,
+    role_name: user.role_name,
+    permissions: user.permissions,
+  };
+
+  const accessToken = buildAccessToken(validUser);
   return { access_token: accessToken };
 }
 
@@ -147,8 +165,8 @@ export async function getMe(userId: string): Promise<MeResult> {
   return {
     id: user.id,
     name: user.name,
-    email: user.email,
-    role: user.role_name,
+    email: user.email || '',
+    role: user.role_name || '',
     permissions: user.permissions,
   };
 }

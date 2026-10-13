@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck } from 'lucide-react';
+import { Plus, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck } from 'lucide-react';
 import { purchasesService } from '../../services/purchases.service';
 import { useAuthStore } from '../../store/auth.store';
 import PurchaseFormModal from './PurchaseFormModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
-const LIMIT = 20;
+const LIMIT = 100;
 
 function formatRs(n: number | string) {
   return `Rs. ${Number(n).toLocaleString('en-PK', { minimumFractionDigits: 0 })}`;
@@ -20,10 +22,8 @@ export default function PurchasesListPage() {
   const canWrite = isCashier || isOwner || hasPermission('purchases:write');
 
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
+  const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   const renderCreatorBadge = (inv: any) => {
@@ -51,28 +51,52 @@ export default function PurchasesListPage() {
     );
   };
 
-  const handleSearch = (v: string) => {
-    setSearch(v);
-    clearTimeout((window as any)._searchTimer);
-    (window as any)._searchTimer = setTimeout(() => {
-      setDebouncedSearch(v);
-      setPage(1);
-    }, 400);
-  };
-
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['purchases', page, debouncedSearch],
-    queryFn: () => purchasesService.getInvoices({ page, limit: LIMIT, search: debouncedSearch }),
+    queryKey: ['purchases', page],
+    queryFn: () => purchasesService.getInvoices({ page, limit: LIMIT }),
     staleTime: 30000,
   });
 
   const invoices = data?.data || [];
   const meta = data?.meta;
 
+  const normalizedInvoices = useMemo(() => {
+    return invoices.map((inv: any) => ({
+      ...inv,
+      city: inv.city || inv.supplier_city || null,
+      name: inv.supplier_name || inv.name || '',
+      invoice_number: inv.invoice_number || '',
+    }));
+  }, [invoices]);
+
+  // Phase 1: Cascading filters hook
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    availableInvoices,
+    resetFilters,
+  } = useCascadingFilters(normalizedInvoices);
+
+  // Phase 3: Strict multi-condition filter before rendering
+  const filteredTableRows = useMemo(() => {
+    return normalizedInvoices.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+      return matchesCity && matchesName && matchesInvoice;
+    });
+  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice]);
+
   const handleOpenInvoice = async (id: string) => {
     try {
       const detail = await purchasesService.getInvoice(id);
-      setSelectedInvoice(detail as any);
+      setDetailModalInvoice(detail as any);
       setIsDetailModalOpen(true);
     } catch (err) {
       console.error('Failed to fetch purchase invoice details:', err);
@@ -103,25 +127,25 @@ export default function PurchasesListPage() {
         )}
       </div>
 
-      {/* Search & Actions Bar */}
-      <div className="mb-6 flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <div className="relative max-w-md w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search by invoice number or supplier..."
-            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm placeholder-slate-400 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 transition shadow-sm"
-          />
-        </div>
-        <button
-          onClick={() => refetch()}
-          className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-sm"
-          title="Refresh List"
-        >
-          <RefreshCw className="h-5 w-5" />
-        </button>
+      {/* Cascading Filter Bar */}
+      <div className="mb-6">
+        <CascadingFilterBar
+          selectedCity={selectedCity}
+          selectedName={selectedName}
+          selectedInvoice={selectedInvoice}
+          onCityChange={setSelectedCity}
+          onNameChange={setSelectedName}
+          onInvoiceChange={setSelectedInvoice}
+          availableCities={availableCities}
+          availableNames={availableNames}
+          availableInvoices={availableInvoices}
+          onReset={resetFilters}
+          showInvoice={true}
+          nameLabel="Supplier"
+          namePlaceholder="Filter by supplier…"
+          invoiceLabel="Purchase Invoice #"
+          invoicePlaceholder="Filter by purchase invoice #…"
+        />
       </div>
 
       {/* Content */}
@@ -137,11 +161,15 @@ export default function PurchasesListPage() {
             Try again
           </button>
         </div>
-      ) : invoices.length === 0 ? (
+      ) : filteredTableRows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 rounded-2xl bg-white border border-slate-200 text-center">
           <FileText className="h-12 w-12 text-slate-300 mb-3" />
-          <span className="text-slate-500 font-medium">No purchase invoices found</span>
-          {canWrite && (
+          <span className="text-slate-500 font-medium">
+            {selectedCity || selectedName || selectedInvoice
+              ? 'No purchase invoices match the active cascading filters. Try resetting filters.'
+              : 'No purchase invoices found'}
+          </span>
+          {canWrite && !selectedCity && !selectedName && !selectedInvoice && (
             <button
               onClick={() => setModalOpen(true)}
               className="mt-3 text-sm text-purple-600 hover:text-purple-700 font-semibold"
@@ -164,7 +192,7 @@ export default function PurchasesListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {invoices.map((inv) => (
+                {filteredTableRows.map((inv) => (
                   <tr key={inv.id} className="hover:bg-slate-50 transition">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
@@ -247,7 +275,7 @@ export default function PurchasesListPage() {
       <InvoiceDetailModal
         isOpen={isDetailModalOpen}
         onClose={() => setIsDetailModalOpen(false)}
-        invoice={selectedInvoice}
+        invoice={detailModalInvoice}
         type="purchase"
       />
     </div>

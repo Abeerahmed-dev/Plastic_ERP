@@ -3,13 +3,14 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Loader2 } from 'lucide-react';
+import { X, Loader2, ArrowDownLeft } from 'lucide-react';
 import { createCustomer, updateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 
 import { useAuthStore } from '../../store/auth.store';
 
 import { CustomerLedger } from './CustomerLedger';
+import { CustomerRefundModal } from './CustomerRefundModal';
 
 const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
 
@@ -23,6 +24,7 @@ const schema = z.object({
   region: z.enum(REGIONS).optional(),
   credit_limit: z.coerce.number().min(0).default(0),
   opening_balance: z.coerce.number().min(0).default(0),
+  opening_advance: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
 });
 
@@ -40,17 +42,20 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
   const qc = useQueryClient();
   const [serverError, setServerError] = useState('');
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'LEDGER'>('DETAILS');
+  const [refundOpen, setRefundOpen] = useState(false);
+  const advanceCredit = Number(customer?.advance_credit || customer?.advance || 0);
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: customer
       ? {
           name: customer.name,
-          customer_type: customer.customer_type ?? 'CREDIT',
+          customer_type: (customer.customer_type === 'CASH' ? 'CASH' : 'CREDIT') as 'CASH' | 'CREDIT',
           phone: customer.phone ?? '',
           email: customer.email ?? '',
           address: customer.address ?? '',
@@ -61,8 +66,14 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
         }
       : {
           customer_type: 'CREDIT',
+          credit_limit: 0,
+          opening_balance: 0,
+          opening_advance: 0,
         },
   });
+
+  const openingBalance = Number(watch('opening_balance') || 0);
+  const openingAdvance = Number(watch('opening_advance') || 0);
 
   const mutation = useMutation({
     mutationFn: (data: FormData) =>
@@ -119,9 +130,22 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
               </div>
             )}
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-3">
+            {isEdit && advanceCredit > 0 && (
+              <button
+                type="button"
+                onClick={() => setRefundOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 text-xs font-bold transition shadow-2xs cursor-pointer"
+                title="Issue Cash Refund"
+              >
+                <ArrowDownLeft className="w-3.5 h-3.5 text-red-600" />
+                Issue Cash Refund (PKR {advanceCredit.toLocaleString()})
+              </button>
+            )}
+            <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto flex-1">
@@ -189,22 +213,52 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
                 </div>
               </div>
 
-              {/* Credit Limit + Opening Balance */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Credit Limit (Rs.)</label>
-                  <input type="number" {...register('credit_limit')} placeholder="0" className={inputCls(!!errors.credit_limit)} />
-                </div>
-                {!isEdit && (
+              {/* Credit Limit */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">Credit Limit (Rs.)</label>
+                <input type="number" {...register('credit_limit')} placeholder="0" className={inputCls(!!errors.credit_limit)} />
+              </div>
+
+              {/* Day-Zero Dual Financial Inputs */}
+              {!isEdit && (
+                <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200">
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-gray-700">
                       Opening Balance (Rs.)
                       <span className="ml-1 text-xs font-normal text-gray-400">set once</span>
                     </label>
-                    <input type="number" {...register('opening_balance')} placeholder="0" className={inputCls(!!errors.opening_balance)} />
+                    <input
+                      type="number"
+                      step="any"
+                      {...register('opening_balance')}
+                      placeholder="0"
+                      disabled={openingAdvance > 0}
+                      className={`${inputCls(!!errors.opening_balance)} ${
+                        openingAdvance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                      }`}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">Customer owes you (Udhaar)</p>
                   </div>
-                )}
-              </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                      Opening Advance (Rs.)
+                      <span className="ml-1 text-xs font-normal text-gray-400">set once</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      {...register('opening_advance')}
+                      placeholder="0"
+                      disabled={openingBalance > 0}
+                      className={`${inputCls(!!errors.opening_advance)} ${
+                        openingBalance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                      }`}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">Customer overpaid you (Wallet Liability)</p>
+                  </div>
+                </div>
+              )}
 
               {/* Notes */}
               <div>
@@ -234,6 +288,18 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
           )}
         </div>
       </div>
+
+      <CustomerRefundModal
+        isOpen={refundOpen}
+        customer={customer}
+        onClose={() => setRefundOpen(false)}
+        onSuccess={() => {
+          qc.invalidateQueries({ queryKey: ['customers'] });
+          if (customer?.id) {
+            qc.invalidateQueries({ queryKey: ['customers', customer.id, 'ledger'] });
+          }
+        }}
+      />
     </div>
   );
 }

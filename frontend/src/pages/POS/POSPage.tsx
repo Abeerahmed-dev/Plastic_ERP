@@ -9,11 +9,12 @@ import { useAuthStore } from '../../store/auth.store';
 import { ReceiptPrinter } from './ReceiptPrinter';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ShiftAuditModal } from './ShiftAuditModal';
+import { toast, handleApiError } from '../../utils/toast';
 
 interface CartItem {
   product_id: string;
   productName: string;
-  quantity: number;
+  quantity: number | string;
   selected_unit: string;
   unit_price: number;
   fixed_retail_price_per_kg: number;
@@ -29,10 +30,10 @@ export default function POSPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [discount, setDiscount] = useState<number>(0);
+  const [discountType, setDiscountType] = useState<'FIXED' | 'PERCENTAGE'>('FIXED');
+  const [discountValue, setDiscountValue] = useState<string>('0');
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
-  const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
-  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('');
+  const paymentMethod = 'CASH'; // Hardcoded retail cash-and-carry
 
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isShiftAuditOpen, setIsShiftAuditOpen] = useState(false);
@@ -63,12 +64,13 @@ export default function POSPage() {
     queryFn: () => getCustomers({ limit: 100 }),
   });
   const customers = customersData?.data || [];
-
-  // Query Active Bank Accounts
-  const { data: bankAccounts = [] } = useQuery({
-    queryKey: ['bank-accounts'],
-    queryFn: () => import('../../services/bank-accounts.service').then(m => m.bankAccountsService.getBankAccounts()),
-  });
+  const posCustomers = customers.filter(
+    (c: any) =>
+      c.type === 'Cash Customer' ||
+      c.customer_type === 'CASH' ||
+      c.customer_type === 'Cash Customer' ||
+      c.is_walk_in === true,
+  );
 
   // Query Today's Cash Tally for Cashier Shift Metric
   const { data: todayCashTallyData } = useQuery({
@@ -83,21 +85,55 @@ export default function POSPage() {
   });
 
   const addToCart = (product: any) => {
+    const available_stock = Number(product.total_stock_kg ?? product.current_stock ?? 0);
+    if (available_stock <= 0) {
+      toast.warning(`Only ${available_stock} KG available.`);
+      return;
+    }
+
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
         const existing = prev[existingIndex];
-        if (existing.quantity >= product.current_stock) return prev;
+        const unitMultiplier = (existing.selected_unit.toLowerCase() === 'bag' || existing.selected_unit.toLowerCase() === 'bora')
+          ? existing.bag_weight_kg
+          : 1.0;
+        const currentQty = parseFloat(String(existing.quantity)) || 0;
+        const requestedKg = (currentQty + 1) * unitMultiplier;
+
+        if (requestedKg > available_stock) {
+          toast.warning(`Only ${available_stock} KG available.`);
+          return prev;
+        }
+
         return prev.map((item, idx) =>
-          idx === existingIndex ? { ...item, quantity: item.quantity + 1 } : item,
+          idx === existingIndex ? { ...item, quantity: currentQty + 1 } : item,
         );
       }
 
       const bagWeight = Number(product.bag_weight_kg || 25.0);
       const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
-      const initialUnitPrice = isCashier ? fixedRetailKg : Number(product.sale_price || 0);
+      const initialUnitPrice = fixedRetailKg;
 
       const productName = product.size ? `${product.name} - ${product.size}` : product.name;
+
+      if (1 > available_stock) {
+        toast.warning(`Only ${available_stock} KG available.`);
+        return [
+          ...prev,
+          {
+            product_id: product.id,
+            productName,
+            quantity: available_stock,
+            selected_unit: 'KG',
+            unit_price: initialUnitPrice,
+            fixed_retail_price_per_kg: fixedRetailKg,
+            current_stock: available_stock,
+            bag_weight_kg: bagWeight,
+            rolling_avg_cost_per_kg: Number(product.rolling_avg_cost_per_kg || product.cost_price || 0),
+          },
+        ];
+      }
 
       return [
         ...prev,
@@ -108,7 +144,7 @@ export default function POSPage() {
           selected_unit: 'KG',
           unit_price: initialUnitPrice,
           fixed_retail_price_per_kg: fixedRetailKg,
-          current_stock: Number(product.current_stock || 0),
+          current_stock: available_stock,
           bag_weight_kg: bagWeight,
           rolling_avg_cost_per_kg: Number(product.rolling_avg_cost_per_kg || product.cost_price || 0),
         },
@@ -122,8 +158,8 @@ export default function POSPage() {
         if (item.product_id !== productId) return item;
         const updated = { ...item, ...updates };
 
-        // If unit changes, re-calculate fixed price for Cashier
-        if (updates.selected_unit && isCashier) {
+        // If unit changes, re-calculate fixed price
+        if (updates.selected_unit) {
           const unitMultiplier =
             updates.selected_unit.toLowerCase() === 'bag' || updates.selected_unit.toLowerCase() === 'bora'
               ? item.bag_weight_kg
@@ -145,9 +181,24 @@ export default function POSPage() {
   const hasCreditBalance = customerBalance < 0;
   const availableCredit = hasCreditBalance ? Math.abs(customerBalance) : 0;
 
-  const subtotal = cart.reduce((acc, item) => acc + item.quantity * item.unit_price, 0);
-  const effectiveDiscount = isCashier ? 0 : discount;
-  const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
+  // Safe quantity parsing for subtotal
+  const subtotal = cart.reduce((acc, item) => {
+    const safeQty = parseFloat(String(item.quantity)) || 0;
+    return acc + safeQty * item.unit_price;
+  }, 0);
+
+  // Dual-mode discount engine (Percentage % vs Fixed Rs.)
+  let calculatedDiscount = 0;
+  if (discountType === 'PERCENTAGE') {
+    calculatedDiscount = subtotal * ((parseFloat(discountValue) || 0) / 100);
+  } else {
+    calculatedDiscount = parseFloat(discountValue) || 0;
+  }
+  calculatedDiscount = Math.round(calculatedDiscount * 100) / 100;
+
+  const effectiveDiscount = isCashier ? 0 : calculatedDiscount;
+  const grandTotal = Math.max(0, subtotal - effectiveDiscount);
+  const netBeforeCredit = grandTotal;
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
   const effectiveAmountPaid = amountPaid === '' ? total : Number(amountPaid);
@@ -163,7 +214,7 @@ export default function POSPage() {
 
   const isCartValid =
     cart.length > 0 &&
-    cart.every((item) => item.quantity > 0) &&
+    cart.every((item) => (parseFloat(String(item.quantity)) || 0) > 0) &&
     !hasPriceFloorViolation;
 
   const checkoutMutation = useMutation({
@@ -172,23 +223,28 @@ export default function POSPage() {
         customer_id: selectedCustomerId || undefined,
         items: cart.map((i) => ({
           product_id: i.product_id,
-          quantity: i.quantity,
+          quantity: parseFloat(String(i.quantity)) || 0,
           selected_unit: i.selected_unit,
           unit_price: i.unit_price,
         })),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
-        payment_method: isCashier ? 'CASH' : paymentMethod,
-        bank_account_id: selectedBankAccountId || undefined,
+        payment_method: paymentMethod,
+        bank_account_id: undefined,
       }),
     onSuccess: (invoice) => {
       const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
-      setLastInvoice({ invoice, items: [...cart], cashierName: user?.name || 'Cashier', customerName: selectedCustomerName });
+      setLastInvoice({
+        invoice,
+        items: cart.map(i => ({ ...i, quantity: parseFloat(String(i.quantity)) || 0 })),
+        cashierName: user?.name || 'Cashier',
+        customerName: selectedCustomerName
+      });
       setCart([]);
-      setDiscount(0);
+      setDiscountValue('0');
+      setDiscountType('FIXED');
       setAmountPaid('');
       setSelectedCustomerId('');
-      setSelectedBankAccountId('');
       setShouldPrint(true);
 
       queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -201,7 +257,7 @@ export default function POSPage() {
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
     },
     onError: (err: any) => {
-      alert(err?.response?.data?.error || err.message || 'Checkout failed');
+      handleApiError(err);
     },
   });
 
@@ -290,20 +346,15 @@ export default function POSPage() {
               className="flex-1 py-2.5 px-3.5 rounded-lg border border-slate-300 bg-white text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
             >
               <option value="">Walk-In Customer (Default)</option>
-              <optgroup label="Cash Customers">
-                {customers.filter((c) => c.customer_type === 'CASH').map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.code || c.phone || 'Cash Customer'})
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Credit Accounts (Udhaar)">
-                {customers.filter((c) => c.customer_type === 'CREDIT').map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.code || c.phone || 'Credit Account'})
-                  </option>
-                ))}
-              </optgroup>
+              {posCustomers.length > 0 && (
+                <optgroup label="Cash Customers">
+                  {posCustomers.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.code || c.phone || 'Cash Customer'})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
 
             <button
@@ -414,7 +465,8 @@ export default function POSPage() {
                 ? item.bag_weight_kg
                 : 1.0;
 
-              const netKg = item.quantity * unitMultiplier;
+              const safeQty = parseFloat(String(item.quantity)) || 0;
+              const netKg = safeQty * unitMultiplier;
 
               const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
               const floorPricePerUnit = floorPricePerKg * unitMultiplier;
@@ -457,7 +509,21 @@ export default function POSPage() {
                     <div className="flex items-center gap-1.5">
                       <select
                         value={item.selected_unit}
-                        onChange={(e) => updateCartItem(item.product_id, { selected_unit: e.target.value })}
+                        onChange={(e) => {
+                          const newUnit = e.target.value;
+                          const newMultiplier = (newUnit.toLowerCase() === 'bag' || newUnit.toLowerCase() === 'bora')
+                            ? item.bag_weight_kg
+                            : 1.0;
+                          const currentQty = parseFloat(String(item.quantity)) || 0;
+                          const available_stock = Number(item.current_stock ?? 0);
+                          if (currentQty * newMultiplier > available_stock) {
+                            toast.warning(`Only ${available_stock} KG available.`);
+                            const maxUnits = newMultiplier > 1 ? Math.floor((available_stock / newMultiplier) * 100) / 100 : available_stock;
+                            updateCartItem(item.product_id, { selected_unit: newUnit, quantity: maxUnits });
+                            return;
+                          }
+                          updateCartItem(item.product_id, { selected_unit: newUnit });
+                        }}
                         className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700 focus:outline-none"
                       >
                         <option value="KG">KG</option>
@@ -466,13 +532,34 @@ export default function POSPage() {
 
                       <input
                         type="number"
-                        min={1}
+                        min={0}
                         value={item.quantity}
-                        onChange={(e) =>
-                          updateCartItem(item.product_id, {
-                            quantity: Math.max(1, parseInt(e.target.value) || 1),
-                          })
-                        }
+                        onChange={(e) => {
+                          const rawVal = e.target.value;
+                          if (rawVal === '') {
+                            updateCartItem(item.product_id, { quantity: '' });
+                            return;
+                          }
+                          const enteredQty = parseFloat(rawVal);
+                          if (isNaN(enteredQty)) {
+                            updateCartItem(item.product_id, { quantity: 0 });
+                            return;
+                          }
+                          const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
+                            ? item.bag_weight_kg
+                            : 1.0;
+                          const requestedKg = enteredQty * unitMultiplier;
+                          const available_stock = Number(item.current_stock ?? 0);
+
+                          if (requestedKg > available_stock) {
+                            toast.warning(`Only ${available_stock} KG available.`);
+                            const maxInUnits = unitMultiplier > 1 ? Math.floor((available_stock / unitMultiplier) * 100) / 100 : available_stock;
+                            updateCartItem(item.product_id, { quantity: maxInUnits });
+                            return;
+                          }
+
+                          updateCartItem(item.product_id, { quantity: rawVal });
+                        }}
                         className="w-14 text-center text-xs font-bold border border-slate-300 rounded-lg py-1 px-1 bg-white focus:outline-none"
                       />
                     </div>
@@ -480,32 +567,19 @@ export default function POSPage() {
                     <div className="flex items-center gap-2">
                       <div className="text-right">
                         <span className="text-[10px] text-slate-400 font-mono block">
-                          Price/{item.selected_unit} {isCashier && '(Fixed)'}
+                          Price/{item.selected_unit}
                         </span>
                         <input
                           type="number"
-                          step="0.5"
-                          disabled={isCashier}
-                          readOnly={isCashier}
+                          readOnly
                           value={item.unit_price}
-                          onChange={(e) =>
-                            updateCartItem(item.product_id, {
-                              unit_price: Math.max(0, parseFloat(e.target.value) || 0),
-                            })
-                          }
-                          className={`w-20 text-right text-xs font-bold rounded-lg py-1 px-1.5 transition-all outline-none ${
-                            isCashier
-                              ? 'bg-slate-100 text-slate-500 cursor-not-allowed border border-slate-200 font-mono'
-                              : isBelowFloor
-                              ? 'border-2 border-red-500 bg-red-100 text-red-900'
-                              : 'border-slate-300 bg-white text-slate-900 focus:ring-1 focus:ring-blue-500'
-                          }`}
+                          className="w-20 text-right text-xs font-bold rounded-lg py-1 px-1.5 bg-slate-50 text-slate-500 cursor-not-allowed border-0 ring-0 focus:ring-0 focus:outline-none"
                         />
                       </div>
 
                       <div className="text-right min-w-[70px]">
                         <span className="text-xs font-black text-slate-900 block font-mono">
-                          Rs. {(item.quantity * item.unit_price).toLocaleString()}
+                          Rs. {(safeQty * item.unit_price).toLocaleString()}
                         </span>
                       </div>
                     </div>
@@ -524,21 +598,60 @@ export default function POSPage() {
           </div>
 
           <div className="flex justify-between items-center text-xs text-slate-600 font-medium">
-            <span className="flex items-center gap-1">
-              Discount {isCashier && <Lock className="w-3 h-3 text-slate-400" />}
-            </span>
-            <input
-              type="number"
-              min={0}
-              disabled={isCashier}
-              readOnly={isCashier}
-              value={isCashier ? 0 : (discount || '')}
-              onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
-              className={`w-24 text-right text-xs font-bold rounded-lg py-1 px-2 ${
-                isCashier ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-white border border-slate-300'
-              }`}
-              placeholder="0"
-            />
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1">
+                Discount {isCashier && <Lock className="w-3 h-3 text-slate-400" />}
+              </span>
+              {!isCashier && (
+                <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType('FIXED')}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      discountType === 'FIXED'
+                        ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Rs.
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscountType('PERCENTAGE')}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      discountType === 'PERCENTAGE'
+                        ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    %
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {discountType === 'PERCENTAGE' && !isCashier && calculatedDiscount > 0 && (
+                <span className="text-[11px] font-mono text-slate-500">
+                  (-Rs. {calculatedDiscount.toLocaleString()})
+                </span>
+              )}
+              <input
+                type="number"
+                min={0}
+                max={discountType === 'PERCENTAGE' ? 100 : undefined}
+                disabled={isCashier}
+                readOnly={isCashier}
+                value={isCashier ? 0 : discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                className={`w-24 text-right text-xs font-bold rounded-lg py-1 px-2 ${
+                  isCashier
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                    : 'bg-white border border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500'
+                }`}
+                placeholder="0"
+              />
+            </div>
           </div>
 
           {hasCreditBalance && availableCredit > 0 && (
@@ -564,31 +677,22 @@ export default function POSPage() {
           <div className="mt-1">
             <div className="flex justify-between items-center mb-1">
               <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                Amount Paid
+                Amount Paid (Cash Tendered)
               </label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAmountPaid(0)}
-                  className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition"
-                >
-                  Rs. 0 (Credit)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAmountPaid(total)}
-                  className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition"
-                >
-                  Full (Rs. {total.toLocaleString()})
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setAmountPaid(total)}
+                className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition"
+              >
+                Exact Cash (Rs. {total.toLocaleString()})
+              </button>
             </div>
             <input
               type="number"
               min={0}
               value={amountPaid === '' ? '' : amountPaid}
               onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-              placeholder={`Default: Rs. ${total.toLocaleString()}`}
+              placeholder={`Exact: Rs. ${total.toLocaleString()}`}
               className="w-full text-right font-black text-base rounded-xl py-2 px-3 border border-slate-300 bg-white focus:ring-2 focus:ring-blue-500 font-mono"
             />
             {isCashier && Number(amountPaid) > total + 0.01 && (
@@ -598,46 +702,11 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Payment Method Hard-Lock Dropdown */}
-          <div>
-            <label className="text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-              Payment Method {isCashier && <Lock className="w-3 h-3 text-amber-600" />}
-            </label>
-            <select
-              disabled={isCashier}
-              value={isCashier ? 'CASH' : paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              className={`w-full text-xs font-bold rounded-xl py-2 px-3 border ${
-                isCashier
-                  ? 'bg-slate-100 text-slate-600 cursor-not-allowed border-slate-300 font-mono'
-                  : 'bg-white border-slate-300 focus:ring-2 focus:ring-blue-500'
-              }`}
-            >
-              <option value="CASH">Cash in Drawer (CASH)</option>
-              <option value="BANK">Bank Transfer</option>
-              <option value="CHEQUE">Cheque</option>
-            </select>
+          {/* Read-Only Payment Routing Badge */}
+          <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold shadow-2xs">
+            <DollarSign className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Payment Routing: Strict Cash in Drawer</span>
           </div>
-
-          {!isCashier && (paymentMethod === 'BANK' || paymentMethod === 'CHEQUE') && (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Select Bank Account
-              </label>
-              <select
-                value={selectedBankAccountId}
-                onChange={(e) => setSelectedBankAccountId(e.target.value)}
-                className="w-full text-xs font-bold rounded-xl py-2 px-3 border border-slate-300 bg-white focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select Bank Account...</option>
-                {bankAccounts.map((acc: any) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.bank_name} — {acc.account_title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           <button
             onClick={() => checkoutMutation.mutate()}

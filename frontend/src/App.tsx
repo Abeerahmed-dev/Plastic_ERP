@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -26,8 +27,15 @@ function App() {
   const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
 
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
+    <>
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        duration={4000}
+      />
+      <Routes>
+        <Route path="/login" element={<Login />} />
 
       {/* Protected Routes */}
       <Route element={<ProtectedRoute />}>
@@ -59,6 +67,7 @@ function App() {
       <Route path="/" element={<Navigate to={isCashier ? '/pos' : '/dashboard'} replace />} />
       <Route path="*" element={<Navigate to={isCashier ? '/pos' : '/dashboard'} replace />} />
     </Routes>
+    </>
   );
 }
 

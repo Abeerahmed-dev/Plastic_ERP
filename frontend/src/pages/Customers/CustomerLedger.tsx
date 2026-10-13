@@ -85,8 +85,8 @@ export const CustomerLedger = ({ customerId }: CustomerLedgerProps) => {
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-slate-700">
                   {entry.debit > 0 ? formatCurrency(entry.debit) : '-'}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-slate-700">
-                  {entry.credit > 0 ? formatCurrency(entry.credit) : '-'}
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-slate-700 font-mono">
+                  {entry.credit > 0 ? (entry.type === 'CREDIT_NOTE' ? `(${formatCurrency(entry.credit)})` : formatCurrency(entry.credit)) : '-'}
                 </td>
                 <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-bold ${
                   entry.balance < 0 ? 'text-red-600' : 'text-slate-900'

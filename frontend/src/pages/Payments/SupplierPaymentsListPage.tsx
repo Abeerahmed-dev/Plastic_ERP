@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, HandCoins, ChevronDown, ChevronRight, CheckCircle2, Clock, Receipt } from 'lucide-react';
-import { supplierPaymentsService, SupplierPaymentSummary } from '../../services/supplier-payments.service';
+import { Plus, HandCoins, ChevronDown, ChevronRight, CheckCircle2, Clock, Receipt } from 'lucide-react';
+import { supplierPaymentsService } from '../../services/supplier-payments.service';
 import { useAuthStore } from '../../store/auth.store';
 import { SupplierPaymentFormModal } from './SupplierPaymentFormModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
 export default function SupplierPaymentsListPage() {
   const { user, hasPermission } = useAuthStore();
-  const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
@@ -21,6 +22,8 @@ export default function SupplierPaymentsListPage() {
 
   const payments = paymentsRes?.data || [];
 
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+
   const toggleRow = (purchaseId: string) => {
     setExpandedRows((prev) => ({
       ...prev,
@@ -28,17 +31,70 @@ export default function SupplierPaymentsListPage() {
     }));
   };
 
-  const filteredPayments = payments.filter((p: SupplierPaymentSummary) => {
-    const term = searchTerm.toLowerCase();
-    const matchesInvoice = p.purchase_invoice_number?.toLowerCase().includes(term);
-    const matchesSupplier = p.supplier_name?.toLowerCase().includes(term);
-    const matchesHistory = p.payment_history?.some(
-      (item) =>
-        (item.payment_no || item.payment_number || '').toLowerCase().includes(term) ||
-        (item.notes || '').toLowerCase().includes(term)
-    );
-    return matchesInvoice || matchesSupplier || matchesHistory;
-  });
+  const normalizedPayments = useMemo(() => {
+    return payments.map((p: any) => {
+      const totalPaid = Number(p.total_paid_against_invoice || 0);
+      const totalInvoice = Number(p.invoice_total_amount || 0);
+      const isAccountDeposit = p.invoice_type === 'ACCOUNT_PAYMENT' || !p.purchase_invoice_id;
+      const isDead = !isAccountDeposit && totalInvoice === 0;
+      const isOverpaid = !isAccountDeposit && totalInvoice > 0 && totalPaid > totalInvoice;
+      const isFullyPaid = !isAccountDeposit && !isOverpaid && (p.invoice_status === 'PAID' || (totalInvoice > 0 && totalPaid >= totalInvoice));
+      const isPartiallyPaid = !isAccountDeposit && !isFullyPaid && !isOverpaid && totalPaid > 0;
+
+      let dynamic_status = 'Unpaid';
+      if (isAccountDeposit) {
+        dynamic_status = 'Wallet Deposit';
+      } else if (isDead) {
+        dynamic_status = 'Dead';
+      } else if (isOverpaid) {
+        dynamic_status = 'Overpaid';
+      } else if (isFullyPaid) {
+        dynamic_status = 'Fully Paid';
+      } else if (isPartiallyPaid) {
+        dynamic_status = 'Partially Paid';
+      } else {
+        dynamic_status = 'Unpaid';
+      }
+
+      return {
+        ...p,
+        city: p.city || p.supplier_city || null,
+        name: p.supplier_name || p.name || '',
+        invoice_number: p.purchase_invoice_number || p.invoice_number || '',
+        dynamic_status,
+      };
+    });
+  }, [payments]);
+
+  // Phase 1: Cascading filters hook
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    availableInvoices,
+    resetFilters,
+  } = useCascadingFilters(normalizedPayments);
+
+  // Phase 2 & 3: Strict multi-condition filter including dynamic status
+  const filteredTableRows = useMemo(() => {
+    return normalizedPayments.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+      const matchesStatus =
+        statusFilter === 'All'
+          ? true
+          : statusFilter === 'Dead'
+          ? row.dynamic_status === 'Dead' || row.dynamic_status === 'Dead / Fully Returned'
+          : row.dynamic_status === statusFilter;
+      return matchesCity && matchesName && matchesInvoice && matchesStatus;
+    });
+  }, [normalizedPayments, selectedCity, selectedName, selectedInvoice, statusFilter]);
 
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
@@ -68,35 +124,52 @@ export default function SupplierPaymentsListPage() {
         )}
       </div>
 
+      {/* Cascading Filter Bar with Status Filtering */}
+      <div className="mb-6">
+        <CascadingFilterBar
+          selectedCity={selectedCity}
+          selectedName={selectedName}
+          selectedInvoice={selectedInvoice}
+          selectedStatus={statusFilter}
+          onCityChange={setSelectedCity}
+          onNameChange={setSelectedName}
+          onInvoiceChange={setSelectedInvoice}
+          onStatusChange={setStatusFilter}
+          availableCities={availableCities}
+          availableNames={availableNames}
+          availableInvoices={availableInvoices}
+          statusOptions={['All', 'Unpaid', 'Partially Paid', 'Fully Paid', 'Overpaid', 'Wallet Deposit', 'Dead']}
+          onReset={() => {
+            resetFilters();
+            setStatusFilter('All');
+          }}
+          showInvoice={true}
+          showStatus={true}
+          nameLabel="Supplier"
+          namePlaceholder="Filter by supplier…"
+          invoiceLabel="Purchase Invoice #"
+          invoicePlaceholder="Filter by purchase invoice #…"
+        />
+      </div>
+
       {/* Main Table Container */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-4 border-b border-slate-200">
-          <div className="relative max-w-sm">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <Search className="h-5 w-5 text-slate-400" />
-            </div>
-            <input
-              type="text"
-              className="block w-full rounded-xl border-0 py-2.5 pl-10 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 transition-all"
-              placeholder="Search by invoice #, supplier, or payment #..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
-
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="flex h-32 items-center justify-center text-slate-500 text-sm font-medium">
               Loading aggregated supplier payments...
             </div>
-          ) : filteredPayments.length === 0 ? (
+          ) : filteredTableRows.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center px-4">
               <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">
                 <HandCoins className="h-6 w-6 text-slate-400" />
               </div>
               <h3 className="text-sm font-medium text-slate-900">No payment records found</h3>
-              <p className="mt-1 text-sm text-slate-500">Get started by recording a new supplier payment.</p>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedCity || selectedName || selectedInvoice
+                  ? 'No records match the active cascading filters. Try resetting filters.'
+                  : 'Get started by recording a new supplier payment.'}
+              </p>
             </div>
           ) : (
             <table className="min-w-full divide-y divide-slate-200">
@@ -111,12 +184,13 @@ export default function SupplierPaymentsListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredPayments.flatMap((row) => {
+                {filteredTableRows.flatMap((row) => {
                   const isExpanded = !!expandedRows[row.purchase_id];
                   const totalPaid = Number(row.total_paid_against_invoice || 0);
                   const totalInvoice = Number(row.invoice_total_amount || 0);
-                  const isFullyPaid = row.invoice_status === 'PAID' || (totalInvoice > 0 && totalPaid >= totalInvoice);
-                  const isPartiallyPaid = !isFullyPaid && totalPaid > 0;
+                  const isAccountDeposit = (row as any).invoice_type === 'ACCOUNT_PAYMENT' || !row.purchase_invoice_id;
+                  const isFullyPaid = !isAccountDeposit && (row.invoice_status === 'PAID' || (totalInvoice > 0 && totalPaid >= totalInvoice));
+                  const isPartiallyPaid = !isAccountDeposit && !isFullyPaid && totalPaid > 0;
 
                   return [
                     /* ─── Parent Row (Invoice Summary) ─── */
@@ -141,7 +215,16 @@ export default function SupplierPaymentsListPage() {
                         </button>
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm font-bold text-blue-600">
-                        {row.purchase_invoice_number}
+                        {isAccountDeposit ? (
+                          <span className="inline-flex items-center gap-1.5 font-bold text-slate-700">
+                            Account Payment
+                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              ACCOUNT DEPOSIT
+                            </span>
+                          </span>
+                        ) : (
+                          row.purchase_invoice_number
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4">
                         <div className="font-semibold text-slate-900">{row.supplier_name}</div>
@@ -150,13 +233,18 @@ export default function SupplierPaymentsListPage() {
                         )}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-right font-mono text-slate-600">
-                        {formatCurrency(row.invoice_total_amount)}
+                        {isAccountDeposit ? '-' : formatCurrency(row.invoice_total_amount)}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-sm text-right font-mono font-bold text-slate-900">
                         {formatCurrency(row.total_paid_against_invoice)}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4 text-center">
-                        {isFullyPaid ? (
+                        {isAccountDeposit ? (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            WALLET DEPOSIT
+                          </span>
+                        ) : isFullyPaid ? (
                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                             Fully Paid
@@ -188,6 +276,55 @@ export default function SupplierPaymentsListPage() {
                                 Total Settled: <strong className="text-slate-900 font-mono">{formatCurrency(row.total_paid_against_invoice)}</strong>
                               </span>
                             </div>
+
+                            {/* ─── Inline Line Items Grid (Phase 3) ─── */}
+                            {!isAccountDeposit && row.line_items && row.line_items.length > 0 && (
+                              <div className="space-y-1.5 pt-1 pb-2">
+                                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                  <span>Purchased Line Items ({row.line_items.length})</span>
+                                </div>
+                                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                  <table className="w-full text-xs text-left">
+                                    <thead className="bg-slate-100 text-slate-700 uppercase text-[10px] font-semibold border-b border-slate-200">
+                                      <tr>
+                                        <th className="py-2 px-3">Product Name</th>
+                                        <th className="py-2 px-3">Size</th>
+                                        <th className="py-2 px-3 text-right">Net Qty</th>
+                                        <th className="py-2 px-3 text-right">Unit Price</th>
+                                        <th className="py-2 px-3 text-right">Total</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                      {row.line_items.map((item: any, iIdx: number) => {
+                                        const qty = item.net_qty ?? item.quantity ?? 0;
+                                        const unit = item.selected_unit ? ` ${item.selected_unit}` : '';
+                                        const unitPrice = Number(item.unit_price || 0);
+                                        const lineTotal = Number(item.total ?? item.total_price ?? (qty * unitPrice));
+                                        return (
+                                          <tr key={item.id || iIdx} className="hover:bg-slate-50/50">
+                                            <td className="py-2 px-3 font-semibold text-slate-800">
+                                              {item.product_name || 'Item'}
+                                            </td>
+                                            <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">
+                                              {item.size || item.product_size || '—'}
+                                            </td>
+                                            <td className="py-2 px-3 text-right font-mono font-medium text-slate-700">
+                                              {Number(qty).toLocaleString()}{unit}
+                                            </td>
+                                            <td className="py-2 px-3 text-right font-mono text-slate-600">
+                                              {formatCurrency(unitPrice)}
+                                            </td>
+                                            <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                                              {formatCurrency(lineTotal)}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
 
                             {row.payment_history.length === 0 ? (
                               <div className="py-4 text-center text-xs text-slate-400 italic">

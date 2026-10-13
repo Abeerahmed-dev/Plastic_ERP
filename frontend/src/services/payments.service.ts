@@ -11,5 +11,17 @@ export const paymentsService = {
   createPayment: async (data: CreatePaymentData): Promise<Payment> => {
     const response = await api.post<ApiSuccess<Payment>>('/payments', data);
     return response.data.data;
-  }
+  },
+
+  createRefund: async (data: {
+    customer_id: string;
+    amount: number;
+    source?: string;
+    notes?: string;
+    refund_date?: string;
+    linked_invoice_id?: string | null;
+  }): Promise<any> => {
+    const response = await api.post<ApiSuccess<any>>('/customer-refunds', data);
+    return response.data.data;
+  },
 };

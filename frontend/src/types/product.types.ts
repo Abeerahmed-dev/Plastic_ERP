@@ -38,6 +38,8 @@ export interface CreateProductData {
   cost_price: number;
   sale_price: number;
   opening_stock: number;
+  opening_stock_kg?: number;
+  historical_wac?: number;
   notes?: string;
 }
 

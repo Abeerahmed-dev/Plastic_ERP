@@ -75,7 +75,6 @@ export async function createInvoiceWithItems(
         : 1.0;
 
       const sold_kg = Number(item.quantity) * unitMultiplier;
-      const currentStock = Number(product.total_stock_kg || 0);
 
       if (sold_kg < 0) {
         // ── RETURN LINE ITEM: Add Stock Back ──
@@ -114,10 +113,19 @@ export async function createInvoiceWithItems(
         });
       } else {
         // ── SALE LINE ITEM: Deduct Stock ──
-        if (sold_kg > currentStock) {
-          throw new Error(
-            `Insufficient stock for ${product.name} (Requested: ${sold_kg} KG, Available: ${currentStock} KG).`
-          );
+        // Concurrency Safety Wall: Lock row and query live inventory bucket in real-time
+        const liveProduct = await trx('products')
+          .where({ id: item.product_id })
+          .forUpdate()
+          .select('id', 'name', 'total_stock_kg')
+          .first();
+
+        const live_stock = Number(liveProduct?.total_stock_kg ?? product.total_stock_kg ?? 0);
+
+        if (live_stock < sold_kg) {
+          const err: any = new Error('INSUFFICIENT_STOCK');
+          err.remainingStock = live_stock;
+          throw err;
         }
 
         // ── Auto-FIFO Price-Bucket Stock Deduction ──
@@ -238,7 +246,9 @@ export async function createInvoiceWithItems(
       }
     }
 
-    const initialPaidAmount = Number((input as any).paid_amount || (input as any).amount_paid || 0);
+    const advanceApplied = Number((input as any).advance_applied_amount || 0);
+    const directPaid = Number((input as any).paid_amount || (input as any).amount_paid || 0);
+    const initialPaidAmount = directPaid + advanceApplied;
     const invoiceStatus = initialPaidAmount >= total_amount ? 'PAID' : (initialPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
 
     // Insert Invoice
@@ -270,18 +280,61 @@ export async function createInvoiceWithItems(
 
     await trx('sales_invoice_items').insert(finalItems);
 
-    // Record initial customer payment if paid_amount was provided
-    if (initialPaidAmount > 0) {
-      await trx('customer_payments').insert({
+    // Record direct customer payment if directPaid > 0
+    if (directPaid > 0) {
+      const [pmt] = await trx('customer_payments').insert({
         customer_id: input.customer_id,
         invoice_id: invoiceId,
         payment_number: `RCV-${invoiceNumber}`,
         payment_date: input.date || new Date().toISOString().split('T')[0],
-        amount: initialPaidAmount,
+        amount: directPaid,
         payment_method: (input as any).payment_method || 'CASH',
         bank_account_id: (input as any).bank_account_id || null,
         notes: `Payment for Invoice ${invoiceNumber}`,
         created_by: userId,
+      }).returning('*');
+
+      await trx('payment_allocations').insert({
+        payment_id: pmt.id,
+        invoice_id: invoiceId,
+        allocated_amount: directPaid,
+      });
+    }
+
+    // Record Virtual Payment from Advance Wallet if advanceApplied > 0
+    if (advanceApplied > 0) {
+      const rows = await trx('customer_payments')
+        .where('payment_number', 'like', 'RCV-%')
+        .select('payment_number');
+
+      let maxNum = 0;
+      for (const r of rows) {
+        if (r.payment_number && !r.payment_number.startsWith('RCV-POS-')) {
+          const numPart = r.payment_number.replace('RCV-', '');
+          const num = parseInt(numPart, 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      }
+      const paymentNumber = `RCV-${(maxNum + 1).toString().padStart(5, '0')}`;
+
+      const [virtualPayment] = await trx('customer_payments').insert({
+        customer_id: input.customer_id,
+        invoice_id: invoiceId,
+        payment_number: paymentNumber,
+        payment_date: input.date || new Date().toISOString().split('T')[0],
+        amount: advanceApplied,
+        payment_method: 'WALLET_ADVANCE',
+        cheque_status: 'CLEARED',
+        notes: 'Manually applied from advance balance',
+        created_by: userId,
+      }).returning('*');
+
+      await trx('payment_allocations').insert({
+        payment_id: virtualPayment.id,
+        invoice_id: invoiceId,
+        allocated_amount: advanceApplied,
       });
     }
 
@@ -529,6 +582,8 @@ export async function findAllInvoices() {
       'c.id as customer_id',
       'c.name as customer_name',
       'c.code as customer_code',
+      'c.city as city',
+      'c.city as customer_city',
       'u.name as created_by_name',
       'r.name as created_by_role'
     )

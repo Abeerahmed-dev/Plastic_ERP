@@ -14,6 +14,7 @@ const productSchema = z.object({
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
   cost_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
+  historical_wac: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   sale_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   opening_stock: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   is_active: z.boolean().optional(),
@@ -62,6 +63,7 @@ export const ProductFormModal = ({
       description: '',
       category_id: '',
       cost_price: 0,
+      historical_wac: 0,
       sale_price: 0,
       opening_stock: 0,
       is_active: true,
@@ -71,6 +73,8 @@ export const ProductFormModal = ({
 
   const selectedCategoryId = watch('category_id');
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+  const openingStockValue = watch('opening_stock');
+  const isZeroStock = Number(openingStockValue || 0) <= 0;
 
   useEffect(() => {
     if (isOpen) {
@@ -82,6 +86,7 @@ export const ProductFormModal = ({
           description: initialData.description || '',
           category_id: initialData.category_id,
           cost_price: Number(initialData.cost_price),
+          historical_wac: Number(initialData.cost_price),
           sale_price: Number(initialData.sale_price),
           opening_stock: Number(initialData.opening_stock),
           is_active: initialData.is_active,
@@ -95,6 +100,7 @@ export const ProductFormModal = ({
           description: '',
           category_id: categories.length > 0 ? categories[0].id : '',
           cost_price: 0,
+          historical_wac: 0,
           sale_price: 0,
           opening_stock: 0,
           is_active: true,
@@ -113,6 +119,18 @@ export const ProductFormModal = ({
         : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
     }`;
 
+  const handleFormSubmit = (data: ProductFormData) => {
+    const openingStock = Number(data.opening_stock || 0);
+    const histWac = openingStock > 0 ? Number(data.historical_wac || data.cost_price || 0) : 0;
+    onSubmit({
+      ...data,
+      opening_stock: openingStock,
+      opening_stock_kg: openingStock,
+      historical_wac: histWac,
+      cost_price: histWac > 0 ? histWac : Number(data.cost_price || 0),
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto pt-10 pb-10">
       <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl flex flex-col my-auto">
@@ -129,7 +147,7 @@ export const ProductFormModal = ({
         </div>
 
         <div className="px-6 py-6 max-h-[70vh] overflow-y-auto">
-          <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <form id="product-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -181,7 +199,21 @@ export const ProductFormModal = ({
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Cost Price (Per Unit/KG)</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Base Unit of Measure
+                </label>
+                <input
+                  type="text"
+                  value="Kilograms (KG)"
+                  disabled
+                  readOnly
+                  className="block w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600 cursor-not-allowed"
+                />
+                <p className="mt-1 text-xs text-slate-400">Standard system-wide unit for all inventory & WAC calculations.</p>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Cost Price (Per KG)</label>
                 <input
                   {...register('cost_price')}
                   type="number"
@@ -204,21 +236,58 @@ export const ProductFormModal = ({
             </div>
 
             {!initialData && (
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Opening Stock (KG) <span className="text-slate-400 font-normal text-xs">(Optional)</span>
-                </label>
-                <input
-                  {...register('opening_stock')}
-                  type="number"
-                  step="0.01"
-                  placeholder="0"
-                  className={inputCls(!!errors.opening_stock)}
-                />
-                <p className="mt-1 text-xs text-slate-500">Opening stock in KG at system go-live (leave blank or 0 if starting with zero stock).</p>
-                {errors.opening_stock && (
-                  <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
-                )}
+              <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/40 space-y-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Day Zero Stock (Optional)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Initialize existing on-hand stock and historical cost. Generates an active Day-Zero FIFO bucket (Owner Equity) without creating a purchase payable.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                      Opening Stock (KG)
+                    </label>
+                    <input
+                      {...register('opening_stock')}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0"
+                      className={inputCls(!!errors.opening_stock)}
+                    />
+                    {errors.opening_stock && (
+                      <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                      Historical WAC / Price per KG (Rs)
+                    </label>
+                    <input
+                      {...register('historical_wac')}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      disabled={isZeroStock}
+                      placeholder="0"
+                      className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
+                        isZeroStock
+                          ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                          : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-blue-500/20'
+                      }`}
+                    />
+                    {isZeroStock ? (
+                      <p className="mt-1 text-[11px] text-slate-400">Disabled when Opening Stock is 0.</p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-blue-600 font-medium">Used as initial FIFO buy price per KG.</p>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 

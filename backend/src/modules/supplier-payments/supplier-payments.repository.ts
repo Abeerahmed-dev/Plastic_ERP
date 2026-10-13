@@ -38,14 +38,31 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       created_by: userId,
     }).returning('*');
 
-    // If linked to an invoice, update the paid_amount and status of the purchase invoice
+    // If linked to an invoice, cap allocation to remaining purchase invoice balance and insert supplier_payment_allocation
     if (data.purchase_invoice_id) {
       const invoice = await trx('purchase_invoices').where('id', data.purchase_invoice_id).first();
       if (invoice) {
-        const newPaidAmount = Number(invoice.paid_amount) + data.amount;
-        let newStatus = invoice.status;
+        const allocRes = await trx('supplier_payment_allocations')
+          .where('purchase_invoice_id', data.purchase_invoice_id)
+          .sum('allocated_amount as total_allocated')
+          .first();
 
-        if (newPaidAmount >= Number(invoice.total_amount)) {
+        const currentAllocated = Number(allocRes?.total_allocated || 0);
+        const invTotal = Number(invoice.total_amount || 0);
+        const remainingUnpaid = Math.max(0, invTotal - currentAllocated);
+        const allocatedAmount = Math.min(Number(data.amount), remainingUnpaid);
+
+        if (allocatedAmount > 0) {
+          await trx('supplier_payment_allocations').insert({
+            payment_id: payment.id,
+            purchase_invoice_id: data.purchase_invoice_id,
+            allocated_amount: allocatedAmount,
+          });
+        }
+
+        const newPaidAmount = currentAllocated + allocatedAmount;
+        let newStatus = 'UNPAID';
+        if (newPaidAmount >= invTotal) {
           newStatus = 'PAID';
         } else if (newPaidAmount > 0) {
           newStatus = 'PARTIAL';
@@ -95,6 +112,8 @@ export async function findAllPayments(query: PaymentQuery) {
       'sp.supplier_id',
       's.name as supplier_name',
       's.code as supplier_code',
+      's.city as city',
+      's.city as supplier_city',
       'sp.purchase_invoice_id',
       'pi.invoice_number as purchase_invoice_number',
       db.raw('COALESCE(pi.total_amount, SUM(sp.amount)) as invoice_total_amount'),
@@ -120,10 +139,50 @@ export async function findAllPayments(query: PaymentQuery) {
         ) as payment_history
       `)
     )
-    .groupByRaw('COALESCE(sp.purchase_invoice_id, sp.id), sp.supplier_id, s.name, s.code, sp.purchase_invoice_id, pi.invoice_number, pi.total_amount, pi.status')
+    .groupByRaw('COALESCE(sp.purchase_invoice_id, sp.id), sp.supplier_id, s.name, s.code, s.city, sp.purchase_invoice_id, pi.invoice_number, pi.total_amount, pi.status')
     .orderBy(db.raw('MAX(sp.payment_date)'), 'desc')
     .limit(limit)
     .offset(offset);
+
+  const purchaseInvoiceIds = rows
+    .map((r: any) => r.purchase_invoice_id)
+    .filter(Boolean);
+
+  const rawPurchaseItems = purchaseInvoiceIds.length > 0
+    ? await db('purchase_invoice_items as pii')
+        .join('products as p', 'pii.product_id', 'p.id')
+        .whereIn('pii.purchase_invoice_id', purchaseInvoiceIds)
+        .select(
+          'pii.id',
+          'pii.purchase_invoice_id',
+          'pii.product_id',
+          'p.name as product_name',
+          'p.size as product_size',
+          'pii.quantity',
+          'pii.selected_unit',
+          'pii.unit_price',
+          'pii.total_price'
+        )
+    : [];
+
+  const lineItemsMap = new Map<string, any[]>();
+  for (const item of rawPurchaseItems) {
+    const list = lineItemsMap.get(item.purchase_invoice_id) || [];
+    list.push({
+      id: item.id,
+      product_id: item.product_id,
+      product_name: item.product_name,
+      product_size: item.product_size,
+      size: item.product_size,
+      quantity: Number(item.quantity || 0),
+      net_qty: Number(item.quantity || 0),
+      selected_unit: item.selected_unit,
+      unit_price: Number(item.unit_price || 0),
+      total_price: Number(item.total_price || 0),
+      total: Number(item.total_price || 0),
+    });
+    lineItemsMap.set(item.purchase_invoice_id, list);
+  }
 
   const formattedRows = rows.map((r: any) => {
     const totalPaid = Number(r.total_paid_against_invoice || 0);
@@ -146,9 +205,12 @@ export async function findAllPayments(query: PaymentQuery) {
       supplier_id: r.supplier_id,
       supplier_name: r.supplier_name,
       supplier_code: r.supplier_code,
+      city: r.city || null,
+      supplier_city: r.supplier_city || null,
       invoice_total_amount: Math.round(invoiceTotal * 100) / 100,
       total_paid_against_invoice: Math.round(totalPaid * 100) / 100,
       invoice_status: status,
+      line_items: r.purchase_invoice_id ? (lineItemsMap.get(r.purchase_invoice_id) || []) : [],
       payment_history: Array.isArray(rawHistory) ? rawHistory.map((p: any) => ({
         ...p,
         amount: Number(p.amount)

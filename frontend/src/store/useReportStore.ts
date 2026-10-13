@@ -36,9 +36,12 @@ export interface LiquidityLedgerData {
   cash_drawer: number;
   bank_balances: number;
   post_dated_cheques: number;
+  issued_post_dated_cheques?: number;
   market_receivables: number;
   total_inventory_value: number;
   total_accounts_payable: number;
+  customer_advances_liability?: number;
+  supplier_advances_asset?: number;
   total_liquid: number;
   net_business_capital: number;
   total_market_capital: number;

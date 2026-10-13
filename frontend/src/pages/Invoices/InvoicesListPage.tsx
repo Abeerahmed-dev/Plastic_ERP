@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, FileText, RotateCcw } from 'lucide-react';
+import { Plus, FileText, RotateCcw } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
 import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
 import { ProcessReturnModal } from './ProcessReturnModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
 export default function InvoicesListPage() {
   const { user, hasPermission } = useAuthStore();
@@ -13,9 +15,8 @@ export default function InvoicesListPage() {
   const isCashier = userRole === 'CASHIER';
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
 
-  const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
+  const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   const [returnInvoiceId, setReturnInvoiceId] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export default function InvoicesListPage() {
   const handleOpenInvoice = async (id: string) => {
     try {
       const detail = await invoicesService.getInvoice(id);
-      setSelectedInvoice(detail as any);
+      setDetailModalInvoice(detail as any);
       setIsDetailModalOpen(true);
     } catch (err) {
       console.error('Failed to fetch invoice details:', err);
@@ -43,11 +44,38 @@ export default function InvoicesListPage() {
     setIsReturnModalOpen(true);
   };
 
-  const filteredInvoices = invoices.filter(
-    (i) =>
-      i.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.customer_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const normalizedInvoices = useMemo(() => {
+    return invoices.map((inv: any) => ({
+      ...inv,
+      city: inv.city || inv.customer_city || null,
+      name: inv.customer_name || inv.name || '',
+      invoice_number: inv.invoice_number || '',
+    }));
+  }, [invoices]);
+
+  // Phase 1: Cascading filters hook
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    availableInvoices,
+    resetFilters,
+  } = useCascadingFilters(normalizedInvoices);
+
+  // Phase 3: Strict multi-condition filter before rendering
+  const filteredTableRows = useMemo(() => {
+    return normalizedInvoices.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+      return matchesCity && matchesName && matchesInvoice;
+    });
+  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice]);
 
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
@@ -127,20 +155,23 @@ export default function InvoicesListPage() {
         )}
       </div>
 
-      {/* Toolbar */}
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div className="relative max-w-md w-full">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <Search className="h-5 w-5 text-slate-400" />
-          </div>
-          <input
-            type="text"
-            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
-            placeholder="Search by invoice number, credit note, or customer..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
+      {/* Cascading Filter Bar */}
+      <div className="mb-6">
+        <CascadingFilterBar
+          selectedCity={selectedCity}
+          selectedName={selectedName}
+          selectedInvoice={selectedInvoice}
+          onCityChange={setSelectedCity}
+          onNameChange={setSelectedName}
+          onInvoiceChange={setSelectedInvoice}
+          availableCities={availableCities}
+          availableNames={availableNames}
+          availableInvoices={availableInvoices}
+          onReset={resetFilters}
+          showInvoice={true}
+          nameLabel="Customer"
+          namePlaceholder="Filter by customer…"
+        />
       </div>
 
       {/* Main Table Card */}
@@ -184,14 +215,16 @@ export default function InvoicesListPage() {
                     </div>
                   </td>
                 </tr>
-              ) : filteredInvoices.length === 0 ? (
+              ) : filteredTableRows.length === 0 ? (
                 <tr>
                   <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
-                    No invoices found.
+                    {selectedCity || selectedName || selectedInvoice
+                      ? 'No invoices match the active cascading filters. Try resetting filters.'
+                      : 'No invoices found.'}
                   </td>
                 </tr>
               ) : (
-                filteredInvoices.map((invoice) => {
+                filteredTableRows.map((invoice) => {
                   const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
                   const balanceDue = Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0));
 
@@ -281,7 +314,7 @@ export default function InvoicesListPage() {
       <InvoiceDetailModal
         isOpen={isDetailModalOpen}
         onClose={() => setIsDetailModalOpen(false)}
-        invoice={selectedInvoice}
+        invoice={detailModalInvoice}
         type="sales"
         onProcessReturn={(invId) => handleInitiateReturn(invId)}
       />

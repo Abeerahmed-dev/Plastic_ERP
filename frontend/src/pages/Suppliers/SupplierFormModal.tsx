@@ -7,7 +7,21 @@ import { X, Loader2 } from 'lucide-react';
 import { createSupplier, updateSupplier } from '../../services/suppliers.service';
 import { Supplier } from '../../types/supplier.types';
 
-const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
+const PAKISTAN_GEOGRAPHY: Record<string, string[]> = {
+  "Sindh": ["Karachi", "Hyderabad", "Sukkur", "Larkana", "Mirpur Khas"],
+  "Punjab": ["Lahore", "Faisalabad", "Rawalpindi", "Multan", "Gujranwala", "Sialkot"],
+  "Khyber Pakhtunkhwa": ["Peshawar", "Mardan", "Abbottabad", "Swat"],
+  "Balochistan": ["Quetta", "Gwadar", "Turbat", "Khuzdar"],
+  "Islamabad Capital Territory": ["Islamabad"]
+};
+
+const regionOptions = Object.keys(PAKISTAN_GEOGRAPHY);
+
+const normalizeRegion = (r?: string | null) => {
+  if (!r) return '';
+  if (r === 'KPK') return 'Khyber Pakhtunkhwa';
+  return r;
+};
 
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
@@ -15,9 +29,10 @@ const schema = z.object({
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   address: z.string().optional(),
   city: z.string().optional(),
-  region: z.enum(REGIONS).optional(),
+  region: z.string().optional(),
   payment_terms: z.coerce.number().int().min(0).default(30),
   opening_payable: z.coerce.number().min(0).default(0),
+  opening_advance: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
 });
 
@@ -33,7 +48,13 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
   const qc = useQueryClient();
   const [serverError, setServerError] = useState('');
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+  const initialRegion = supplier?.region ? normalizeRegion(supplier.region) : '';
+  const initialCity = supplier?.city ?? '';
+
+  const [region, setRegion] = useState<string>(initialRegion);
+  const [city, setCity] = useState<string>(initialCity);
+
+  const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: supplier
       ? {
@@ -41,13 +62,32 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
           phone: supplier.phone ?? '',
           email: supplier.email ?? '',
           address: supplier.address ?? '',
-          city: supplier.city ?? '',
-          region: (supplier.region as (typeof REGIONS)[number]) ?? undefined,
+          city: initialCity,
+          region: initialRegion,
           payment_terms: supplier.payment_terms,
           notes: supplier.notes ?? '',
         }
-      : { payment_terms: 30 },
+      : {
+          payment_terms: 30,
+          opening_payable: 0,
+          opening_advance: 0,
+        },
   });
+
+  const openingPayable = Number(watch('opening_payable') || 0);
+  const openingAdvance = Number(watch('opening_advance') || 0);
+
+  const handleRegionChange = (newRegion: string) => {
+    setRegion(newRegion);
+    setCity('');
+    setValue('region', newRegion);
+    setValue('city', '');
+  };
+
+  const handleCityChange = (newCity: string) => {
+    setCity(newCity);
+    setValue('city', newCity);
+  };
 
   const mutation = useMutation({
     mutationFn: (data: FormData) =>
@@ -63,6 +103,8 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
       hasError ? 'border-red-400 focus:ring-red-200' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-100'
     }`;
 
+  const cityOptions = region ? PAKISTAN_GEOGRAPHY[region] || [] : [];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
       <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
@@ -75,7 +117,7 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="px-6 py-5 space-y-4">
+        <form onSubmit={handleSubmit((d) => mutation.mutate({ ...d, region, city }))} className="px-6 py-5 space-y-4">
           {serverError && (
             <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{serverError}</div>
           )}
@@ -105,35 +147,84 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
-              <input {...register('city')} placeholder="Karachi" className={inputCls(false)} />
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">Region</label>
+              <select
+                value={region}
+                onChange={(e) => handleRegionChange(e.target.value)}
+                className={inputCls(false)}
+              >
+                <option value="">— Select Region —</option>
+                {regionOptions.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">Region</label>
-              <select {...register('region')} className={inputCls(false)}>
-                <option value="">— Select —</option>
-                {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
+              <select
+                value={city}
+                onChange={(e) => handleCityChange(e.target.value)}
+                disabled={!region}
+                className={inputCls(false)}
+              >
+                <option value="">{region ? '— Select City —' : 'Select Region First'}</option>
+                {cityOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                Payment Terms (days)
-              </label>
-              <input type="number" {...register('payment_terms')} placeholder="30" className={inputCls(false)} />
-            </div>
-            {!isEdit && (
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-700">
+              Payment Terms (days)
+            </label>
+            <input type="number" {...register('payment_terms')} placeholder="30" className={inputCls(false)} />
+          </div>
+
+          {!isEdit && (
+            <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                  Opening Payable (Rs.)
+                  Opening Balance (Rs.)
                   <span className="ml-1 text-xs font-normal text-gray-400">set once</span>
                 </label>
-                <input type="number" {...register('opening_payable')} placeholder="0" className={inputCls(false)} />
+                <input
+                  type="number"
+                  step="any"
+                  {...register('opening_payable')}
+                  placeholder="0"
+                  disabled={openingAdvance > 0}
+                  className={`${inputCls(false)} ${
+                    openingAdvance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                  }`}
+                />
+                <p className="mt-1 text-xs text-slate-500">You owe them (Accounts Payable)</p>
               </div>
-            )}
-          </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  Opening Advance (Rs.)
+                  <span className="ml-1 text-xs font-normal text-gray-400">set once</span>
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  {...register('opening_advance')}
+                  placeholder="0"
+                  disabled={openingPayable > 0}
+                  className={`${inputCls(false)} ${
+                    openingPayable > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                  }`}
+                />
+                <p className="mt-1 text-xs text-slate-500">You prepaid them (Wallet Asset)</p>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700">Notes</label>

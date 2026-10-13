@@ -1,4 +1,5 @@
 import db from '../../db/knex';
+import { Knex } from 'knex';
 import { CreateBankAccountInput, UpdateBankAccountInput } from './bank-accounts.schemas';
 
 export interface BankAccountRow {
@@ -97,18 +98,41 @@ export async function findBankAccountById(id: string): Promise<BankAccountWithBa
   return all.find((a) => a.id === id);
 }
 
-export async function createBankAccount(data: CreateBankAccountInput): Promise<BankAccountRow> {
-  const [row] = await db('bank_accounts')
-    .insert({
-      account_title: data.account_title.trim(),
-      bank_name: data.bank_name.trim(),
-      account_number: data.account_number.trim(),
-      iban_details: data.iban_details ? data.iban_details.trim() : null,
-      initial_balance: data.initial_balance || 0,
-      is_active: true,
-    })
-    .returning('*');
-  return row;
+export async function createBankAccount(data: CreateBankAccountInput, userId?: string | null): Promise<BankAccountRow> {
+  const openingBalance = data.opening_balance !== undefined
+    ? Number(data.opening_balance)
+    : Number(data.initial_balance || 0);
+
+  return await db.transaction(async (trx: Knex.Transaction) => {
+    const [row] = await trx('bank_accounts')
+      .insert({
+        account_title: data.account_title.trim(),
+        bank_name: data.bank_name.trim(),
+        account_number: data.account_number.trim(),
+        iban_details: data.iban_details ? data.iban_details.trim() : null,
+        initial_balance: openingBalance,
+        is_active: true,
+      })
+      .returning('*');
+
+    // Day Zero Capital Injection / Opening Balance (Owner Equity)
+    if (openingBalance > 0) {
+      const hasBankTx = await trx.schema.hasTable('bank_transactions');
+      if (hasBankTx) {
+        await trx('bank_transactions').insert({
+          bank_account_id: row.id,
+          type: 'INFLOW',
+          amount: openingBalance,
+          description: 'Day Zero Capital Injection / Opening Balance',
+          category: 'EQUITY',
+          transaction_date: new Date(),
+          created_by: userId || null,
+        });
+      }
+    }
+
+    return row;
+  });
 }
 
 export async function updateBankAccount(
@@ -223,7 +247,15 @@ export async function getBankAccountTransactions(accountId: string): Promise<Ban
       'e.created_at'
     );
 
-  const [custRows, suppRows, expRows] = await Promise.all([custQuery, suppQuery, expQuery]);
+  // 4. Day Zero Capital Injections / Bank Transactions
+  const hasBankTx = await db.schema.hasTable('bank_transactions');
+  const manualQuery = hasBankTx
+    ? db('bank_transactions')
+        .where('bank_account_id', accountId)
+        .select('id', 'amount', 'transaction_date', 'description', 'type', 'created_at')
+    : Promise.resolve([]);
+
+  const [custRows, suppRows, expRows, manualRows] = await Promise.all([custQuery, suppQuery, expQuery, manualQuery]);
 
   const rawTxList: {
     id: string;
@@ -233,6 +265,19 @@ export async function getBankAccountTransactions(accountId: string): Promise<Ban
     type: 'INFLOW' | 'OUTFLOW';
     amount: number;
   }[] = [];
+
+  for (const m of (manualRows as any[])) {
+    const rawDate = m.transaction_date ? new Date(m.transaction_date) : new Date(m.created_at || Date.now());
+    const dateStr = rawDate.toISOString().split('T')[0];
+    rawTxList.push({
+      id: m.id,
+      rawDate,
+      dateStr,
+      description: m.description || 'Day Zero Capital Injection / Opening Balance',
+      type: m.type as 'INFLOW' | 'OUTFLOW',
+      amount: Math.round(Number(m.amount || 0) * 100) / 100,
+    });
+  }
 
   for (const c of custRows) {
     const rawDate = c.payment_date ? new Date(c.payment_date) : new Date(c.created_at || Date.now());
@@ -279,7 +324,10 @@ export async function getBankAccountTransactions(accountId: string): Promise<Ban
   // Sort ascending chronologically to compute running balance sequentially
   rawTxList.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime());
 
-  let currBalance = Number(account.initial_balance || 0);
+  const hasOpeningInjection = (manualRows as any[]).some((m: any) =>
+    m.description && (m.description.includes('Opening Balance') || m.description.includes('Day Zero'))
+  );
+  let currBalance = hasOpeningInjection ? 0 : Number(account.initial_balance || 0);
   const withRunningBalance = rawTxList.map((tx) => {
     if (tx.type === 'INFLOW') {
       currBalance += tx.amount;

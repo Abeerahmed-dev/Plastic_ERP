@@ -17,7 +17,6 @@ const schema = z.object({
   bank_account_id: z.string().optional(),
   notes: z.string().optional(),
   cheque_number: z.string().optional(),
-  cheque_bank_name: z.string().optional(),
   cheque_due_date: z.string().optional(),
 });
 
@@ -41,7 +40,6 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
       bank_account_id: '',
       amount: 0,
       cheque_number: '',
-      cheque_bank_name: '',
       cheque_due_date: new Date().toISOString().split('T')[0],
     }
   });
@@ -82,7 +80,6 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
       ...data,
       purchase_invoice_id: data.purchase_invoice_id || null,
       cheque_number: data.cheque_number || null,
-      cheque_bank_name: data.cheque_bank_name || null,
       cheque_due_date: data.cheque_due_date || null,
     } as any),
     onSuccess: () => {
@@ -208,15 +205,6 @@ export const SupplierPaymentFormModal = ({ onClose, onSuccess }: Props) => {
                       {...register('cheque_number')}
                       placeholder="e.g. CHQ-10022"
                       className={inputCls(!!errors.cheque_number)}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-700">Bank Name</label>
-                    <input
-                      type="text"
-                      {...register('cheque_bank_name')}
-                      placeholder="e.g. HBL"
-                      className={inputCls(!!errors.cheque_bank_name)}
                     />
                   </div>
                   <div>

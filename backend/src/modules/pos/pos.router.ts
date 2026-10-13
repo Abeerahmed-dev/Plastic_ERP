@@ -20,6 +20,13 @@ router.get(
 );
 
 router.post(
+  '/',
+  requireAuth,
+  requirePermission('sales:write'),
+  checkoutController
+);
+
+router.post(
   '/checkout',
   requireAuth,
   requirePermission('sales:write'),

@@ -20,6 +20,8 @@ import { posRouter } from './modules/pos/pos.router';
 import { reportsRouter } from './modules/reports/reports.router';
 import { onboardingRouter } from './modules/onboarding/onboarding.router';
 import bankAccountsRouter from './modules/bank-accounts/bank-accounts.router';
+import incomingPdcsRouter from './modules/incoming-pdcs/incoming-pdcs.router';
+import customerRefundsRouter from './modules/customer-refunds/customer-refunds.router';
 import devRouter from './modules/dev/dev.router';
 import { fail, ok } from './shared/apiResponse';
 
@@ -49,10 +51,13 @@ export function createApp(): Application {
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/users', usersRouter);
   app.use('/api/v1/customers', customersRouter);
+  app.use('/api/customers', customersRouter);
   app.use('/api/v1/suppliers', suppliersRouter);
+  app.use('/api/suppliers', suppliersRouter);
   app.use('/api/v1/categories', categoriesRouter);
   app.use('/api/v1/uom', (_req: Request, res: Response) => res.json(ok([]))); // Deprecated fallback
   app.use('/api/v1/products', productsRouter);
+  app.use('/api/products', productsRouter);
   app.use('/api/v1/invoices', invoicesRouter);
   app.use('/api/invoices', invoicesRouter);
   app.use('/api/v1/sales', invoicesRouter);
@@ -66,12 +71,17 @@ export function createApp(): Application {
   app.use('/api/v1/expenses', expensesRouter);
   app.use('/api/expenses', expensesRouter);
   app.use('/api/v1/pos', posRouter);
+  app.use('/api/pos', posRouter);
   app.use('/api/v1/reports', reportsRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/v1/bank-accounts', bankAccountsRouter);
   app.use('/api/bank-accounts', bankAccountsRouter);
   app.use('/api/v1/banks', bankAccountsRouter);
   app.use('/api/banks', bankAccountsRouter);
+  app.use('/api/v1/incoming-pdcs', incomingPdcsRouter);
+  app.use('/api/incoming-pdcs', incomingPdcsRouter);
+  app.use('/api/v1/customer-refunds', customerRefundsRouter);
+  app.use('/api/customer-refunds', customerRefundsRouter);
   app.use('/api/v1/onboarding', onboardingRouter);
   app.use('/api/dev', devRouter);
   app.use('/api/v1/dev', devRouter);

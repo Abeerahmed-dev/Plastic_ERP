@@ -176,8 +176,12 @@ export async function createProduct(
   const code = (data.code && data.code.trim().length > 0)
     ? data.code.trim()
     : await generateProductCode();
-  const initialStock = data.opening_stock || 0;
-  const initialCost = data.cost_price || 0;
+  const initialStock = data.opening_stock_kg !== undefined
+    ? Number(data.opening_stock_kg)
+    : Number(data.opening_stock || 0);
+  const initialCost = data.historical_wac !== undefined
+    ? Number(data.historical_wac)
+    : Number(data.cost_price || 0);
   const fixedPrice = data.fixed_retail_price_per_kg || data.sale_price || 0;
 
   // Retrieve category name to satisfy products.category NOT NULL string constraint
@@ -205,12 +209,14 @@ export async function createProduct(
     .insert(insertPayload)
     .returning('*');
 
+  // Day Zero FIFO Bucket & Valuation (Bypasses purchase_invoices and accounts_payable)
   if (initialStock > 0) {
     const hasBatches = await db.schema.hasTable('inventory_batches');
     if (hasBatches) {
       const batchNum = `PB-INIT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       await db('inventory_batches').insert({
         product_id: row.id,
+        purchase_invoice_id: null,
         batch_number: batchNum,
         batch_buy_price_per_kg: initialCost,
         original_qty: initialStock,
@@ -228,7 +234,7 @@ export async function createProduct(
         unit_cost: initialCost,
         total_asset_value: initialStock * initialCost,
         capital_equity_value: initialStock * initialCost,
-        notes: 'Initial opening stock on product creation',
+        notes: 'Day Zero initial opening stock / Capital Equity (Owner Paid)',
         created_by: createdBy || null,
       });
     }

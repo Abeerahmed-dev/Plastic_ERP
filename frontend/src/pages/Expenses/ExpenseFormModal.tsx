@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Loader2, AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
 import { expensesService, CreateExpenseData } from '../../services/expenses.service';
+import { bankAccountsService } from '../../services/bank-accounts.service';
+import { toast, handleApiError } from '../../utils/toast';
 
 interface ExpenseFormModalProps {
   isOpen: boolean;
@@ -22,8 +24,8 @@ const CATEGORIES = [
 ];
 
 const PAYMENT_METHODS = [
-  { value: 'Cash in Drawer', label: 'Cash in Drawer (Shift Cash)' },
-  { value: 'Bank Account', label: 'Bank Account' },
+  { value: 'CASH', label: 'Cash in Drawer (Shift Cash)' },
+  { value: 'BANK', label: 'Bank Account' },
 ];
 
 export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onClose }) => {
@@ -33,16 +35,25 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
 
   const [amount, setAmount] = useState<string>('');
   const [category, setCategory] = useState<string>('General/Other');
-  const [paymentMethod, setPaymentMethod] = useState<string>('Cash in Drawer');
+  const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
+  const [selectedBankId, setSelectedBankId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [expenseDate, setExpenseDate] = useState<string>(today);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Fetch list of active bank accounts
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bankAccounts'],
+    queryFn: bankAccountsService.getBankAccounts,
+    enabled: isOpen,
+  });
 
   useEffect(() => {
     if (isOpen) {
       setAmount('');
       setCategory('General/Other');
-      setPaymentMethod('Cash in Drawer');
+      setPaymentMethod('CASH');
+      setSelectedBankId('');
       setDescription('');
       setExpenseDate(new Date().toISOString().split('T')[0]);
       setErrorMsg(null);
@@ -53,10 +64,14 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
     mutationFn: (data: CreateExpenseData) => expensesService.createExpense(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
+      queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      toast.success('Operating expense logged successfully');
       onClose();
     },
     onError: (err: any) => {
-      setErrorMsg(err?.response?.data?.error || err.message || 'Failed to log expense');
+      const message = handleApiError(err);
+      setErrorMsg(message);
     },
   });
 
@@ -68,12 +83,24 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      setErrorMsg('Please enter a valid expense amount greater than 0.');
+      const err = 'Please enter a valid expense amount greater than 0.';
+      setErrorMsg(err);
+      toast.error(err);
       return;
     }
 
     if (!description.trim()) {
-      setErrorMsg('Description is required (e.g. Lunch for workers, Monthly bill).');
+      const err = 'Description is required (e.g. Lunch for workers, Monthly bill).';
+      setErrorMsg(err);
+      toast.error(err);
+      return;
+    }
+
+    // Strict validation: enforce selectedBankId being present if paymentMethod === 'BANK'
+    if (paymentMethod === 'BANK' && !selectedBankId) {
+      const err = 'Bank Account ID is required';
+      setErrorMsg(err);
+      toast.error(err);
       return;
     }
 
@@ -81,6 +108,7 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
       amount: numAmount,
       category,
       payment_method: paymentMethod,
+      bank_account_id: paymentMethod === 'BANK' ? selectedBankId : null,
       description: description.trim(),
       expense_date: expenseDate || today,
     });
@@ -174,7 +202,12 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
               </label>
               <select
                 value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
+                onChange={(e) => {
+                  setPaymentMethod(e.target.value);
+                  if (e.target.value !== 'BANK') {
+                    setSelectedBankId('');
+                  }
+                }}
                 className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
               >
                 {PAYMENT_METHODS.map((pm) => (
@@ -185,6 +218,28 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
               </select>
             </div>
           </div>
+
+          {/* Conditional Bank Account Dropdown */}
+          {paymentMethod === 'BANK' && (
+            <div className="mt-4">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Select Bank Account <span className="text-red-500">*</span>
+              </label>
+              <select 
+                value={selectedBankId} 
+                onChange={(e) => setSelectedBankId(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+                required
+              >
+                <option value="">-- Choose a Bank --</option>
+                {bankAccounts.map((bank: any) => (
+                  <option key={bank.id} value={bank.id}>
+                    {bank.bank_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Description */}
           <div>
@@ -202,7 +257,7 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
           </div>
 
           {/* Liquidity Warning Banner */}
-          {paymentMethod === 'Cash in Drawer' && (
+          {(paymentMethod === 'CASH' || paymentMethod === 'Cash in Drawer') && (
             <div className="rounded-xl bg-amber-50 border border-amber-200 p-3.5 flex items-start gap-3 text-xs text-amber-800">
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <div>

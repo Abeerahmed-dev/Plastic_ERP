@@ -12,8 +12,8 @@ export async function getBankAccount(id: string) {
   return account;
 }
 
-export async function addBankAccount(data: CreateBankAccountInput) {
-  return bankRepo.createBankAccount(data);
+export async function addBankAccount(data: CreateBankAccountInput, userId?: string | null) {
+  return bankRepo.createBankAccount(data, userId);
 }
 
 export async function editBankAccount(id: string, data: UpdateBankAccountInput) {

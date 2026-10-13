@@ -14,6 +14,7 @@ export const createInvoiceSchema = z.object({
   due_date: z.string().optional(),
   discount: z.number().min(0).optional().default(0),
   delivery_charge: z.number().min(0).optional().default(0),
+  advance_applied_amount: z.number().min(0).optional().default(0),
   notes: z.string().optional(),
   items: z.array(invoiceItemSchema).min(1, 'At least one item is required'),
 });

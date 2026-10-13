@@ -29,7 +29,7 @@ import { IssuedPdcLedgerModal } from '../components/Reports/IssuedPdcLedgerModal
 import { BankAccountsModal } from '../components/Reports/BankAccountsModal';
 
 interface LiquidityModalData {
-  type: 'receivables' | 'payables' | 'unsold-stock';
+  type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances';
   title: string;
   items: any[];
 }
@@ -86,7 +86,7 @@ export default function FinancialReports() {
   const safeInventory = Array.isArray(inventoryLedger) ? inventoryLedger : [];
 
   // Open Interactive Liquidity Drill-Down Modal
-  const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc') => {
+  const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc' | 'customer-advances' | 'supplier-advances') => {
     if (type === 'pdc') {
       setIsPdcModalOpen(true);
       return;
@@ -105,12 +105,18 @@ export default function FinancialReports() {
     } else if (type === 'unsold-stock') {
       title = 'Unsold Warehouse Stock Asset Detail';
       endpoint = '/reports/liquidity/unsold-stock';
+    } else if (type === 'customer-advances') {
+      title = 'Customer Overpayment Advances (Unallocated Wallet Liability Detail)';
+      endpoint = '/reports/liquidity/customer-advances';
+    } else if (type === 'supplier-advances') {
+      title = 'Supplier Prepaid Advances (Prepaid Cash Asset Detail)';
+      endpoint = '/reports/liquidity/supplier-advances';
     }
 
     try {
       const response = await api.get(endpoint);
       setModalData({
-        type: type as 'receivables' | 'payables' | 'unsold-stock',
+        type: type as any,
         title,
         items: response.data.data || [],
       });
@@ -527,6 +533,52 @@ export default function FinancialReports() {
             </p>
           </button>
 
+          {/* Card 3C: Customer Advances (Liability) */}
+          <button
+            type="button"
+            onClick={() => openLiquidityModal('customer-advances')}
+            title="Click to view customer advance breakdown →"
+            className="w-full text-left rounded-2xl border border-amber-300 bg-amber-100/60 p-5 space-y-2 hover:ring-2 hover:ring-amber-400 cursor-pointer transition-all shadow-sm active:scale-[0.99]"
+          >
+            <div className="flex items-center justify-between text-amber-900">
+              <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                Customer Advances (Liability)
+                <ExternalLink className="w-3.5 h-3.5 text-amber-800" />
+              </span>
+              <Wallet className="h-5 w-5 text-amber-700" />
+            </div>
+            <p className="text-2xl font-black text-amber-900 font-mono">
+              {formatPKR(liquidityLedger?.customer_advances_liability)}
+            </p>
+            <p className="text-[11px] text-amber-800 font-medium underline flex items-center justify-between">
+              <span>Unallocated customer overpayments</span>
+              <span className="text-amber-900 font-bold">Click to view breakdown →</span>
+            </p>
+          </button>
+
+          {/* Card 3D: Supplier Advances (Asset) */}
+          <button
+            type="button"
+            onClick={() => openLiquidityModal('supplier-advances')}
+            title="Click to view supplier advance breakdown →"
+            className="w-full text-left rounded-2xl border border-teal-300 bg-teal-100/60 p-5 space-y-2 hover:ring-2 hover:ring-teal-400 cursor-pointer transition-all shadow-sm active:scale-[0.99]"
+          >
+            <div className="flex items-center justify-between text-teal-900">
+              <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                Supplier Advances (Asset)
+                <ExternalLink className="w-3.5 h-3.5 text-teal-800" />
+              </span>
+              <Wallet className="h-5 w-5 text-teal-700" />
+            </div>
+            <p className="text-2xl font-black text-teal-900 font-mono">
+              {formatPKR(liquidityLedger?.supplier_advances_asset)}
+            </p>
+            <p className="text-[11px] text-teal-800 font-medium underline flex items-center justify-between">
+              <span>Prepaid supplier cash balances</span>
+              <span className="text-teal-900 font-bold">Click to view breakdown →</span>
+            </p>
+          </button>
+
           {/* Card 4: Market Receivables / Udhaar */}
           <button
             onClick={() => openLiquidityModal('receivables')}
@@ -835,6 +887,68 @@ export default function FinancialReports() {
                               <td className="py-3 px-4 text-right font-bold text-blue-700 font-mono">
                                 {formatPKR(row.total_asset_value)}
                               </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {modalData.type === 'customer-advances' && (
+                      <>
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200">
+                          <tr>
+                            <th className="py-3 px-4">Customer Name & Code</th>
+                            <th className="py-3 px-4">Phone / Location</th>
+                            <th className="py-3 px-4 text-right">Total Billed</th>
+                            <th className="py-3 px-4 text-right">Total Paid</th>
+                            <th className="py-3 px-4 text-right">Unallocated Advance (Rs)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {modalData.items.map((row: any) => (
+                            <tr key={row.customer_id} className="hover:bg-slate-50/70">
+                              <td className="py-3 px-4 font-semibold text-slate-900">
+                                {row.name}
+                                <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 text-xs">
+                                <div>{row.phone}</div>
+                                <div className="text-slate-400">{row.city}</div>
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_billed)}</td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_paid)}</td>
+                              <td className="py-3 px-4 text-right font-bold text-amber-600 font-mono">{formatPKR(row.advance_credit)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {modalData.type === 'supplier-advances' && (
+                      <>
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200">
+                          <tr>
+                            <th className="py-3 px-4">Supplier Name & Code</th>
+                            <th className="py-3 px-4">Phone / Location</th>
+                            <th className="py-3 px-4 text-right">Total Billed</th>
+                            <th className="py-3 px-4 text-right">Total Paid</th>
+                            <th className="py-3 px-4 text-right">Prepaid Advance (Rs)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {modalData.items.map((row: any) => (
+                            <tr key={row.supplier_id} className="hover:bg-slate-50/70">
+                              <td className="py-3 px-4 font-semibold text-slate-900">
+                                {row.name}
+                                <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 text-xs">
+                                <div>{row.phone}</div>
+                                <div className="text-slate-400">{row.city}</div>
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_billed)}</td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_paid)}</td>
+                              <td className="py-3 px-4 text-right font-bold text-teal-600 font-mono">{formatPKR(row.advance_payable)}</td>
                             </tr>
                           ))}
                         </tbody>

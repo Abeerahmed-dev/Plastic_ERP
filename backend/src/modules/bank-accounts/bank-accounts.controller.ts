@@ -28,7 +28,7 @@ export async function createBankAccountController(req: Request, res: Response, n
     if (!parsed.success) {
       throw new ValidationError(parsed.error.errors.map((e) => e.message).join(', '));
     }
-    const data = await bankService.addBankAccount(parsed.data);
+    const data = await bankService.addBankAccount(parsed.data, req.user?.id);
     res.status(201).json(ok(data));
   } catch (err) {
     next(err);

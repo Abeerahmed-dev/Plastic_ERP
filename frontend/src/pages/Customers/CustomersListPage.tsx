@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft } from 'lucide-react';
 import { getCustomers, deactivateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 import { useAuthStore } from '../../store/auth.store';
 import CustomerFormModal from './CustomerFormModal';
+import { CustomerRefundModal } from './CustomerRefundModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
-const LIMIT = 20;
+const LIMIT = 100;
 
 function formatRs(n: number | string) {
   return `Rs. ${Number(n).toLocaleString('en-PK', { minimumFractionDigits: 0 })}`;
@@ -22,35 +25,13 @@ export default function CustomersListPage() {
 
   const [activeTab, setActiveTab] = useState<'CREDIT' | 'CASH'>('CREDIT');
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [city, setCity] = useState('');
-  const [debouncedCity, setDebouncedCity] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | undefined>();
-
-  // Debounce search
-  const handleSearch = (v: string) => {
-    setSearch(v);
-    clearTimeout((window as { _searchTimer?: ReturnType<typeof setTimeout> })._searchTimer);
-    (window as { _searchTimer?: ReturnType<typeof setTimeout> })._searchTimer = setTimeout(() => {
-      setDebouncedSearch(v);
-      setPage(1);
-    }, 350);
-  };
-
-  const handleCity = (v: string) => {
-    setCity(v);
-    clearTimeout((window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer);
-    (window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer = setTimeout(() => {
-      setDebouncedCity(v);
-      setPage(1);
-    }, 350);
-  };
+  const [refundTargetCustomer, setRefundTargetCustomer] = useState<Customer | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['customers', page, debouncedSearch, debouncedCity, activeTab],
-    queryFn: () => getCustomers({ page, limit: LIMIT, search: debouncedSearch || undefined, city: debouncedCity || undefined, customer_type: activeTab }),
+    queryKey: ['customers', page, activeTab],
+    queryFn: () => getCustomers({ page, limit: LIMIT, customer_type: activeTab }),
   });
 
   const deactivateMutation = useMutation({
@@ -60,6 +41,38 @@ export default function CustomersListPage() {
 
   const customers = data?.data ?? [];
   const meta = data?.meta;
+
+  const normalizedCustomers = useMemo(() => {
+    return customers.map((c) => ({
+      ...c,
+      city: c.city || null,
+      name: c.name || '',
+      invoice_number: null,
+    }));
+  }, [customers]);
+
+  // Phase 1: Cascading filters hook
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    resetFilters,
+  } = useCascadingFilters(normalizedCustomers);
+
+  // Phase 3: Strict multi-condition filter before rendering
+  const filteredTableRows = useMemo(() => {
+    return normalizedCustomers.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+      return matchesCity && matchesName && matchesInvoice;
+    });
+  }, [normalizedCustomers, selectedCity, selectedName, selectedInvoice]);
 
   const openCreate = () => { setEditTarget(undefined); setModalOpen(true); };
   const openEdit = (c: Customer) => { setEditTarget(c); setModalOpen(true); };
@@ -120,25 +133,20 @@ export default function CustomersListPage() {
           </button>
         </div>
 
-        {/* Search & City Filters */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search by name, phone, or code…"
-              className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
-          <div className="relative w-48">
-            <input
-              value={city}
-              onChange={(e) => handleCity(e.target.value)}
-              placeholder="Filter by city…"
-              className="w-full rounded-lg border border-gray-300 py-2 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
+        {/* Cascading Filter Bar */}
+        <div className="mt-4">
+          <CascadingFilterBar
+            selectedCity={selectedCity}
+            selectedName={selectedName}
+            onCityChange={setSelectedCity}
+            onNameChange={setSelectedName}
+            availableCities={availableCities}
+            availableNames={availableNames}
+            onReset={resetFilters}
+            showInvoice={false}
+            nameLabel="Customer Name"
+            namePlaceholder="Filter by customer name…"
+          />
         </div>
       </div>
 
@@ -182,17 +190,18 @@ export default function CustomersListPage() {
                   </td>
                 </tr>
               )}
-              {!isLoading && !isError && customers.length === 0 && (
+              {!isLoading && !isError && filteredTableRows.length === 0 && (
                 <tr>
                   <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-gray-400">
-                    {debouncedSearch ? `No customers matching "${debouncedSearch}"` : 'No customers yet. Add your first one.'}
+                    {selectedCity || selectedName
+                      ? 'No customers match the active cascading filters. Try resetting filters.'
+                      : 'No customers yet. Add your first one.'}
                   </td>
                 </tr>
               )}
-              {customers.map((c, idx) => {
-                const masterBalance = Number(c.outstanding_balance || 0);
-                const displayOutstanding = Math.max(0, masterBalance);
-                const displayAdvance = Math.abs(Math.min(0, masterBalance));
+              {filteredTableRows.map((c, idx) => {
+                const displayOutstanding = Number(c.outstanding_balance || 0);
+                const displayAdvance = Number(c.advance_credit || 0);
 
                 return (
                   <tr
@@ -232,13 +241,25 @@ export default function CustomersListPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <span
-                            className={`font-semibold ${
-                              displayAdvance > 0 ? 'text-emerald-600 font-bold' : 'text-gray-400'
-                            }`}
-                          >
-                            {formatRs(displayAdvance)}
-                          </span>
+                          <div className="flex items-center justify-end gap-2">
+                            <span
+                              className={`font-semibold ${
+                                displayAdvance > 0 ? 'text-amber-600 font-bold' : 'text-gray-400'
+                              }`}
+                            >
+                              {formatRs(displayAdvance)}
+                            </span>
+                            {displayAdvance > 0 && canWrite && (
+                              <button
+                                onClick={() => setRefundTargetCustomer(c)}
+                                className="inline-flex items-center gap-1 rounded-md bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 text-xs font-bold transition shadow-2xs cursor-pointer"
+                                title="Issue Cash Refund from Advance Wallet"
+                              >
+                                <ArrowDownLeft className="w-3.5 h-3.5 text-red-600" />
+                                Refund
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </>
                     )}
@@ -322,6 +343,13 @@ export default function CustomersListPage() {
       {modalOpen && (
         <CustomerFormModal customer={editTarget} onClose={closeModal} />
       )}
+
+      <CustomerRefundModal
+        isOpen={!!refundTargetCustomer}
+        customer={refundTargetCustomer}
+        onClose={() => setRefundTargetCustomer(null)}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['customers'] })}
+      />
     </div>
   );
 }

@@ -3,10 +3,10 @@ import db from '../../db/knex';
 export interface UserRow {
   id: string;
   name: string;
-  email: string;
-  password_hash: string;
-  role_id: string;
-  role_name: string;
+  email: string | null;
+  password_hash: string | null;
+  role_id: string | null;
+  role_name: string | null;
   is_active: boolean;
   permissions: string[];
 }
@@ -49,7 +49,7 @@ export async function findUserByEmail(email: string): Promise<UserRow | undefine
  */
 export async function findUserById(id: string): Promise<UserRow | undefined> {
   const row = await db('users as u')
-    .join('roles as r', 'u.role_id', 'r.id')
+    .leftJoin('roles as r', 'u.role_id', 'r.id')
     .where('u.id', id)
     .select(
       'u.id',
@@ -64,7 +64,7 @@ export async function findUserById(id: string): Promise<UserRow | undefined> {
 
   if (!row) return undefined;
 
-  const permissions = await findUserPermissions(row.role_id);
+  const permissions = row.role_id ? await findUserPermissions(row.role_id) : [];
   return { ...row, permissions };
 }
 

@@ -12,11 +12,12 @@ export const createCustomerSchema = z.object({
   customer_type: z.enum(['CASH', 'CREDIT']).default('CREDIT'),
   credit_limit: z.coerce.number().min(0).default(0),
   opening_balance: z.coerce.number().min(0).default(0),
+  opening_advance: z.coerce.number().min(0).default(0),
   notes: z.string().optional().nullable(),
 });
 
 export const updateCustomerSchema = createCustomerSchema
-  .omit({ opening_balance: true }) // opening balance is set once at creation
+  .omit({ opening_balance: true, opening_advance: true }) // opening balance & advance are set once at creation
   .partial()
   .extend({
     is_active: z.boolean().optional(),

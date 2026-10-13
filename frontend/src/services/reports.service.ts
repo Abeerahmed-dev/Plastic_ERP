@@ -90,6 +90,7 @@ export interface InventoryValuationItem {
   id: string;
   product_name: string;
   code: string;
+  size?: string;
   category: string;
   current_stock_kg: number;
   stock_on_hand: number;

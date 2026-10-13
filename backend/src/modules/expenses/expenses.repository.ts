@@ -2,13 +2,21 @@ import db from '../../db/knex';
 import { CreateExpenseInput, ExpenseQuery } from './expenses.schemas';
 
 export async function createExpenseRecord(input: CreateExpenseInput, userId?: string) {
+  let normalizedPaymentMethod = input.payment_method || 'CASH';
+  if (normalizedPaymentMethod === 'Cash in Drawer') normalizedPaymentMethod = 'CASH';
+  if (normalizedPaymentMethod === 'Bank Account') normalizedPaymentMethod = 'BANK';
+
+  const isBank = normalizedPaymentMethod === 'BANK';
+  const bankAccountId = isBank ? (input.bank_account_id || null) : null;
+
   const [expense] = await db('expenses')
     .insert({
       amount: input.amount,
       category: input.category || 'Other',
       description: input.description || null,
       expense_date: input.expense_date || new Date(),
-      payment_method: input.payment_method || 'CASH',
+      payment_method: normalizedPaymentMethod,
+      bank_account_id: bankAccountId,
       created_by: userId || null,
     })
     .returning('*');

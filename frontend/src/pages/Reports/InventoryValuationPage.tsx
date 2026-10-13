@@ -18,7 +18,16 @@ import {
   CheckCircle2,
   CircleDot,
 } from 'lucide-react';
-import { reportsService, InventoryValuationData, FifoBucketItem } from '../../services/reports.service';
+import { reportsService, InventoryValuationData, InventoryValuationItem, FifoBucketItem } from '../../services/reports.service';
+
+interface ProductGroup {
+  groupKey: string;
+  groupName: string;
+  variants: InventoryValuationItem[];
+  totalGroupStock: number;
+  totalGroupAssetValue: number;
+  hasHeavyTieUp: boolean;
+}
 
 export default function InventoryValuationPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -27,7 +36,8 @@ export default function InventoryValuationPage() {
   const [sortField, setSortField] = useState<'asset_value' | 'current_stock_kg' | 'product_name'>('asset_value');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Accordion row expansion state
+  // Two-tier Accordion expansion state: Level 1 (Group) & Level 2 (Variant)
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
   const {
@@ -41,24 +51,18 @@ export default function InventoryValuationPage() {
     queryFn: () => reportsService.getInventoryValuation(),
   });
 
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupKey]: !prev[groupKey],
+    }));
+  };
+
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => ({
       ...prev,
       [id]: !prev[id],
     }));
-  };
-
-  const expandAll = () => {
-    if (!data?.products) return;
-    const next: Record<string, boolean> = {};
-    data.products.forEach((p) => {
-      next[p.id] = true;
-    });
-    setExpandedRows(next);
-  };
-
-  const collapseAll = () => {
-    setExpandedRows({});
   };
 
   const categoriesList = useMemo(() => {
@@ -70,33 +74,97 @@ export default function InventoryValuationPage() {
     return Array.from(set).sort();
   }, [data?.products]);
 
-  const filteredProducts = useMemo(() => {
+  // Step 1: Group the Data (React useMemo)
+  const groupedProducts = useMemo(() => {
     if (!data?.products) return [];
-    return data.products
-      .filter((p) => {
-        const matchesSearch =
-          p.product_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.code.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesCategory = selectedCategory === 'ALL' || p.category === selectedCategory;
-        const assetVal = p.total_asset_value || p.asset_value || 0;
-        const stockKg = p.stock_on_hand || p.current_stock_kg || 0;
-        const isHighCapital = assetVal > 500000 || stockKg > 1000;
-        const matchesCapitalFilter = !highCapitalOnly || isHighCapital;
 
-        return matchesSearch && matchesCategory && matchesCapitalFilter;
-      })
-      .sort((a, b) => {
-        let valA = a[sortField];
-        let valB = b[sortField];
-        if (typeof valA === 'string') {
-          valA = (valA as string).toLowerCase();
-          valB = (valB as string).toLowerCase();
-        }
-        if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-        if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-        return 0;
-      });
+    // Filter products
+    const filtered = data.products.filter((p) => {
+      const matchesSearch =
+        p.product_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.size && p.size.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesCategory = selectedCategory === 'ALL' || p.category === selectedCategory;
+      const assetVal = p.total_asset_value !== undefined ? p.total_asset_value : p.asset_value || 0;
+      const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
+      const isHighCapital = assetVal > 500000 || stockKg > 1000;
+      const matchesCapitalFilter = !highCapitalOnly || isHighCapital;
+
+      return matchesSearch && matchesCategory && matchesCapitalFilter;
+    });
+
+    // Reduce into groups by normalized product_name
+    const groupMap = new Map<string, ProductGroup>();
+
+    filtered.forEach((p) => {
+      const normalizedName = p.product_name.trim().toLowerCase();
+      const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
+      const assetVal = p.total_asset_value !== undefined ? p.total_asset_value : p.asset_value || 0;
+
+      if (!groupMap.has(normalizedName)) {
+        groupMap.set(normalizedName, {
+          groupKey: normalizedName,
+          groupName: p.product_name.trim(),
+          variants: [],
+          totalGroupStock: 0,
+          totalGroupAssetValue: 0,
+          hasHeavyTieUp: false,
+        });
+      }
+
+      const group = groupMap.get(normalizedName)!;
+      group.variants.push(p);
+      group.totalGroupStock += stockKg;
+      group.totalGroupAssetValue += assetVal;
+      if (assetVal > 500000 || stockKg > 1000) {
+        group.hasHeavyTieUp = true;
+      }
+    });
+
+    // Sort groups based on sortField & sortOrder
+    const groupsArray = Array.from(groupMap.values());
+
+    groupsArray.sort((a, b) => {
+      let valA: any;
+      let valB: any;
+
+      if (sortField === 'product_name') {
+        valA = a.groupName.toLowerCase();
+        valB = b.groupName.toLowerCase();
+      } else if (sortField === 'current_stock_kg') {
+        valA = a.totalGroupStock;
+        valB = b.totalGroupStock;
+      } else {
+        valA = a.totalGroupAssetValue;
+        valB = b.totalGroupAssetValue;
+      }
+
+      if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return groupsArray;
   }, [data?.products, searchQuery, selectedCategory, highCapitalOnly, sortField, sortOrder]);
+
+  const expandAll = () => {
+    if (!groupedProducts) return;
+    const nextGroups: Record<string, boolean> = {};
+    const nextRows: Record<string, boolean> = {};
+    groupedProducts.forEach((g) => {
+      nextGroups[g.groupKey] = true;
+      g.variants.forEach((v) => {
+        nextRows[v.id] = true;
+      });
+    });
+    setExpandedGroups(nextGroups);
+    setExpandedRows(nextRows);
+  };
+
+  const collapseAll = () => {
+    setExpandedGroups({});
+    setExpandedRows({});
+  };
 
   const stats = useMemo(() => {
     if (!data?.products) return { totalProducts: 0, totalWeightKg: 0, heavyTieUpCount: 0, heavyTieUpValue: 0 };
@@ -105,8 +173,8 @@ export default function InventoryValuationPage() {
     let heavyVal = 0;
 
     data.products.forEach((p) => {
-      const stockKg = p.stock_on_hand || p.current_stock_kg || 0;
-      const assetVal = p.total_asset_value || p.asset_value || 0;
+      const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
+      const assetVal = p.total_asset_value !== undefined ? p.total_asset_value : p.asset_value || 0;
       totalWeight += stockKg;
       if (assetVal > 500000 || stockKg > 1000) {
         heavyCount++;
@@ -291,7 +359,7 @@ export default function InventoryValuationPage() {
             <Loader2 className="h-8 w-8 animate-spin text-slate-900" />
             <p className="text-xs font-medium">Calculating warehouse asset valuations & FIFO bucket data...</p>
           </div>
-        ) : filteredProducts.length === 0 ? (
+        ) : groupedProducts.length === 0 ? (
           <div className="p-12 text-center text-slate-500 space-y-2">
             <Package className="h-10 w-10 text-slate-300 mx-auto" />
             <p className="text-sm font-semibold text-slate-700">No products found matching your filter</p>
@@ -308,7 +376,7 @@ export default function InventoryValuationPage() {
                       onClick={() => toggleSort('product_name')}
                       className="flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase tracking-wider text-[11px]"
                     >
-                      <span>Product</span>
+                      <span>Product Group / Variant</span>
                       <ArrowUpDown className="h-3 w-3" />
                     </button>
                   </th>
@@ -342,241 +410,418 @@ export default function InventoryValuationPage() {
               </thead>
 
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
-                {filteredProducts.map((product) => {
-                  const stockKg = product.stock_on_hand !== undefined ? product.stock_on_hand : product.current_stock_kg;
-                  const assetVal = product.total_asset_value !== undefined ? product.total_asset_value : product.asset_value;
-                  const isHeavyCapital = assetVal > 500000 || stockKg > 1000;
-                  const isExpanded = !!expandedRows[product.id];
-                  const buckets: FifoBucketItem[] = product.buckets || [];
+                {groupedProducts.map((group) => {
+                  const isGroupExpanded = !!expandedGroups[group.groupKey];
+                  const variantCount = group.variants.length;
+                  const isHeavyCapital = group.hasHeavyTieUp;
 
-                  // Lifetime turnover calculations
-                  const kgAcquired = product.lifetime_kg_acquired > 0 ? product.lifetime_kg_acquired : (stockKg + product.lifetime_kg_sold);
-                  const kgSold = product.lifetime_kg_sold || 0;
-                  const turnoverPct = kgAcquired > 0 ? Math.min(100, Math.max(0, Math.round((kgSold / kgAcquired) * 100))) : 0;
+                  const groupCategories = Array.from(new Set(group.variants.map((v) => v.category))).filter(Boolean);
+                  const categoryDisplay =
+                    groupCategories.length === 1
+                      ? groupCategories[0]
+                      : groupCategories.length > 1
+                      ? `${groupCategories[0]} (+${groupCategories.length - 1})`
+                      : '-';
 
                   return (
-                    <Fragment key={product.id}>
-                      {/* MASTER ROW */}
+                    <Fragment key={group.groupKey}>
+                      {/* ─── LEVEL 1: MASTER GROUP ROW ─── */}
                       <tr
-                        onClick={() => toggleRow(product.id)}
-                        className={`cursor-pointer transition-colors ${
-                          isExpanded
-                            ? 'bg-slate-100/90 font-medium'
+                        onClick={() => toggleGroup(group.groupKey)}
+                        className={`cursor-pointer transition-colors border-t-2 border-slate-200/80 ${
+                          isGroupExpanded
+                            ? 'bg-slate-900 text-white hover:bg-slate-800'
                             : isHeavyCapital
-                            ? 'bg-amber-50/40 hover:bg-amber-100/50'
-                            : 'hover:bg-slate-50/80'
+                            ? 'bg-amber-50/80 hover:bg-amber-100/80 text-slate-900'
+                            : 'bg-slate-100/90 hover:bg-slate-200/80 text-slate-900'
                         }`}
                       >
                         {/* Accordion Chevron */}
-                        <td className="py-3.5 pl-4 pr-2 text-center text-slate-400">
+                        <td className="py-3.5 pl-4 pr-2 text-center">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              toggleRow(product.id);
+                              toggleGroup(group.groupKey);
                             }}
-                            className="p-1 hover:text-slate-900 rounded-lg hover:bg-slate-200 transition-colors"
+                            className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                              isGroupExpanded
+                                ? 'hover:bg-slate-700 text-slate-200'
+                                : 'hover:bg-slate-300 text-slate-600'
+                            }`}
                           >
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4 text-slate-700" />
+                            {isGroupExpanded ? (
+                              <ChevronDown className="h-4 w-4" />
                             ) : (
-                              <ChevronRight className="h-4 w-4 text-slate-400" />
+                              <ChevronRight className="h-4 w-4" />
                             )}
                           </button>
                         </td>
 
-                        {/* Product Name & Warning Badge */}
+                        {/* Product Group Name & Variant Badge */}
                         <td className="py-3.5 px-4 sm:px-6">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-900">{product.product_name}</span>
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="font-bold text-sm sm:text-base tracking-tight">
+                              {group.groupName}
+                            </span>
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+                                isGroupExpanded
+                                  ? 'bg-slate-800 text-slate-200 border border-slate-700'
+                                  : 'bg-slate-200 text-slate-700 border border-slate-300'
+                              }`}
+                            >
+                              {variantCount} {variantCount === 1 ? 'Variant' : 'Variants'}
+                            </span>
                             {isHeavyCapital && (
-                              <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0">
+                              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0">
                                 <AlertTriangle className="h-3 w-3 text-amber-600" /> Heavy Tie-Up
                               </span>
                             )}
                           </div>
-                          {product.code && (
-                            <span className="inline-block mt-0.5 text-[11px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
-                              {product.code}
-                            </span>
-                          )}
                         </td>
 
-                        {/* Category */}
+                        {/* Group Category */}
                         <td className="py-3.5 px-4">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                            {product.category}
+                          <span
+                            className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                              isGroupExpanded
+                                ? 'bg-slate-800 text-slate-200 border border-slate-700'
+                                : 'bg-slate-200/80 text-slate-700'
+                            }`}
+                          >
+                            {categoryDisplay}
                           </span>
                         </td>
 
-                        {/* Stock on Hand (KG) */}
-                        <td className="py-3.5 px-4 text-right font-mono text-xs sm:text-sm tabular-nums font-semibold text-slate-800">
-                          {stockKg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KG
+                        {/* Group Aggregated Stock on Hand (KG) */}
+                        <td className="py-3.5 px-4 text-right font-mono text-xs sm:text-sm tabular-nums font-bold">
+                          {group.totalGroupStock.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          KG
                         </td>
 
-                        {/* Rolling WAC per KG */}
-                        <td className="py-3.5 px-4 text-right font-mono text-xs sm:text-sm tabular-nums text-slate-600">
-                          Rs. {product.current_wac.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {/* Master WAC Column: Display "Multiple" or single WAC */}
+                        <td
+                          className={`py-3.5 px-4 text-right font-mono text-xs sm:text-sm tabular-nums ${
+                            isGroupExpanded ? 'text-slate-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {variantCount > 1 ? (
+                            <span className="italic opacity-80">Multiple</span>
+                          ) : (
+                            `Rs. ${group.variants[0]?.current_wac?.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}`
+                          )}
                         </td>
 
-                        {/* Total Asset Value */}
+                        {/* Group Aggregated Total Asset Value */}
                         <td className="py-3.5 px-4 sm:px-6 text-right font-mono text-xs sm:text-sm tabular-nums">
-                          {isHeavyCapital ? (
-                            <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg font-black shadow-2xs">
+                          {isHeavyCapital && !isGroupExpanded ? (
+                            <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1 rounded-lg font-black shadow-2xs">
                               <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                               <span>
-                                Rs. {assetVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                Rs.{' '}
+                                {group.totalGroupAssetValue.toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
                               </span>
                             </div>
                           ) : (
-                            <span className="font-bold text-slate-900">
-                              Rs. {assetVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <span className="font-extrabold">
+                              Rs.{' '}
+                              {group.totalGroupAssetValue.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
                             </span>
                           )}
                         </td>
                       </tr>
 
-                      {/* EXPANDABLE SUB-ROW (FIFO BUCKETS & TURNOVER) */}
-                      {isExpanded && (
-                        <tr className="bg-slate-50/90 border-b border-slate-200 shadow-inner">
-                          <td colSpan={6} className="p-4 sm:p-6 space-y-6">
-                            {/* Sub-Row Header */}
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
-                              <div className="flex items-center gap-2">
-                                <History className="h-4 w-4 text-slate-600" />
-                                <h3 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wider">
-                                  Active & Historical Price Buckets (FIFO Depletion)
-                                </h3>
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
-                                  {buckets.length} Lots
-                                </span>
-                              </div>
-                              <span className="text-xs text-slate-500">
-                                Real-time FIFO bucket depletion progress tracked per purchase lot
-                              </span>
-                            </div>
+                      {/* ─── LEVEL 2 & 3: EXPANDED GROUP VARIANTS & FIFO BUCKETS ─── */}
+                      {isGroupExpanded &&
+                        group.variants.map((product) => {
+                          const stockKg =
+                            product.stock_on_hand !== undefined
+                              ? product.stock_on_hand
+                              : product.current_stock_kg;
+                          const assetVal =
+                            product.total_asset_value !== undefined
+                              ? product.total_asset_value
+                              : product.asset_value;
+                          const isVariantHeavy = assetVal > 500000 || stockKg > 1000;
+                          const isRowExpanded = !!expandedRows[product.id];
+                          const buckets: FifoBucketItem[] = product.buckets || [];
 
-                            {/* BUCKETS TABLE */}
-                            {buckets.length === 0 ? (
-                              <div className="p-4 text-center text-xs text-slate-400 bg-white rounded-xl border border-slate-200">
-                                No historical purchase buckets recorded for this product.
-                              </div>
-                            ) : (
-                              <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
-                                <table className="w-full text-left border-collapse text-xs">
-                                  <thead>
-                                    <tr className="bg-slate-100/80 text-slate-600 font-semibold border-b border-slate-200 text-[11px] uppercase tracking-wider">
-                                      <th className="py-2.5 px-4">Bucket #</th>
-                                      <th className="py-2.5 px-4">Created Date</th>
-                                      <th className="py-2.5 px-4 text-right">Buy Price / KG</th>
-                                      <th className="py-2.5 px-4 text-right">Stock (Remaining / Original)</th>
-                                      <th className="py-2.5 px-4 w-48 text-center">Depletion Progress</th>
-                                      <th className="py-2.5 px-4 text-center">Status</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-100 font-sans">
-                                    {buckets.map((bucket, idx) => {
-                                      const orig = bucket.original_stock > 0 ? bucket.original_stock : 1;
-                                      const rem = bucket.remaining_stock || 0;
-                                      const depPct = Math.min(
-                                        100,
-                                        Math.max(0, Math.round(((orig - rem) / orig) * 100))
-                                      );
-                                      const isActive = rem > 0;
+                          const kgAcquired =
+                            product.lifetime_kg_acquired > 0
+                              ? product.lifetime_kg_acquired
+                              : stockKg + (product.lifetime_kg_sold || 0);
+                          const kgSold = product.lifetime_kg_sold || 0;
+                          const turnoverPct =
+                            kgAcquired > 0
+                              ? Math.min(100, Math.max(0, Math.round((kgSold / kgAcquired) * 100)))
+                              : 0;
 
-                                      return (
-                                        <tr key={bucket.bucket_id || idx} className="hover:bg-slate-50/80">
-                                          {/* Bucket # */}
-                                          <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
-                                            {bucket.batch_number || `LOT-${idx + 1}`}
-                                          </td>
+                          return (
+                            <Fragment key={product.id}>
+                              {/* LEVEL 2: VARIANT SUB-ROW */}
+                              <tr
+                                onClick={() => toggleRow(product.id)}
+                                className={`cursor-pointer transition-colors border-b border-slate-200/60 ${
+                                  isRowExpanded
+                                    ? 'bg-blue-50/90 font-medium'
+                                    : isVariantHeavy
+                                    ? 'bg-amber-50/50 hover:bg-amber-100/60'
+                                    : 'bg-slate-50 hover:bg-slate-100/90'
+                                }`}
+                              >
+                                {/* Accordion Chevron for Level 3 */}
+                                <td className="py-3 pl-8 pr-2 text-center text-slate-400">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleRow(product.id);
+                                    }}
+                                    className="p-1 hover:text-slate-900 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                                  >
+                                    {isRowExpanded ? (
+                                      <ChevronDown className="h-4 w-4 text-blue-700" />
+                                    ) : (
+                                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                                    )}
+                                  </button>
+                                </td>
 
-                                          {/* Created Date */}
-                                          <td className="py-2.5 px-4 text-slate-600 font-mono">
-                                            {bucket.created_date}
-                                          </td>
+                                {/* Size / Variant Label & Product Code */}
+                                <td className="py-3 px-4 sm:px-6">
+                                  <div className="flex items-center gap-2 pl-4 border-l-2 border-slate-300">
+                                    <span className="font-semibold text-slate-800 text-xs sm:text-sm">
+                                      {product.size ? `Size: ${product.size}` : product.product_name}
+                                    </span>
+                                    {product.code && (
+                                      <span className="inline-block text-[11px] font-mono text-slate-700 bg-slate-200 px-2 py-0.5 rounded font-bold">
+                                        {product.code}
+                                      </span>
+                                    )}
+                                    {isVariantHeavy && (
+                                      <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0">
+                                        <AlertTriangle className="h-3 w-3 text-amber-600" /> Heavy
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
 
-                                          {/* Buy Price / KG */}
-                                          <td className="py-2.5 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
-                                            Rs. {bucket.buy_price_per_kg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                          </td>
-
-                                          {/* Stock Remaining / Original */}
-                                          <td className="py-2.5 px-4 text-right font-mono tabular-nums text-slate-700">
-                                            <span className="font-bold text-slate-900">{rem.toLocaleString()}</span>
-                                            <span className="text-slate-400"> / {bucket.original_stock.toLocaleString()} KG</span>
-                                          </td>
-
-                                          {/* Depletion Progress Bar */}
-                                          <td className="py-2.5 px-4">
-                                            <div className="flex items-center gap-2">
-                                              <div className="flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                                                <div
-                                                  className={`h-2.5 rounded-full transition-all ${
-                                                    isActive ? 'bg-emerald-500' : 'bg-slate-400'
-                                                  }`}
-                                                  style={{ width: `${depPct}%` }}
-                                                />
-                                              </div>
-                                              <span className="text-[11px] font-mono font-bold text-slate-700 w-10 text-right">
-                                                {depPct}%
-                                              </span>
-                                            </div>
-                                          </td>
-
-                                          {/* Status Badge */}
-                                          <td className="py-2.5 px-4 text-center">
-                                            {isActive ? (
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                                <CircleDot className="w-2.5 h-2.5 text-emerald-600" /> ACTIVE
-                                              </span>
-                                            ) : (
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-600 border border-slate-300">
-                                                <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" /> DEPLETED
-                                              </span>
-                                            )}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-
-                            {/* LIFETIME TURNOVER METRIC BLOCK */}
-                            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <TrendingUp className="h-4 w-4 text-blue-600" />
-                                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                                    Lifetime Inventory Turnover & Margin
-                                  </h4>
-                                </div>
-
-                                <div className="text-xs font-semibold font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
-                                  All-Time Gross Margin: {(product.all_time_gross_margin || 0).toFixed(1)}%
-                                </div>
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between text-xs text-slate-600">
-                                  <span>
-                                    Depletion Velocity: <strong className="text-slate-900 font-mono">{kgSold.toLocaleString()} KG Sold</strong> out of <strong className="text-slate-900 font-mono">{kgAcquired.toLocaleString()} KG Acquired</strong>
+                                {/* Variant Category */}
+                                <td className="py-3 px-4">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-200/70 text-slate-700">
+                                    {product.category}
                                   </span>
-                                  <span className="font-mono font-bold text-blue-700">{turnoverPct}% Cleared</span>
-                                </div>
+                                </td>
 
-                                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200 p-0.5">
-                                  <div
-                                    className="bg-blue-600 h-2 rounded-full transition-all shadow-xs"
-                                    style={{ width: `${turnoverPct}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
+                                {/* Variant Stock on Hand */}
+                                <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums font-semibold text-slate-800">
+                                  {stockKg.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}{' '}
+                                  KG
+                                </td>
+
+                                {/* Variant Rolling Cost WAC */}
+                                <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums text-slate-700">
+                                  Rs.{' '}
+                                  {product.current_wac.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                                </td>
+
+                                {/* Variant Asset Value */}
+                                <td className="py-3 px-4 sm:px-6 text-right font-mono text-xs sm:text-sm tabular-nums">
+                                  <span className="font-bold text-slate-900">
+                                    Rs.{' '}
+                                    {assetVal.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                </td>
+                              </tr>
+
+                              {/* LEVEL 3: FIFO BUCKETS & TURNOVER */}
+                              {isRowExpanded && (
+                                <tr className="bg-slate-100/90 border-b border-slate-200 shadow-inner">
+                                  <td colSpan={6} className="p-4 sm:p-6 pl-12 sm:pl-16 space-y-6">
+                                    {/* Sub-Row Header */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                                      <div className="flex items-center gap-2">
+                                        <History className="h-4 w-4 text-slate-600" />
+                                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wider">
+                                          Active & Historical Price Buckets (FIFO Depletion)
+                                        </h3>
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
+                                          {buckets.length} Lots
+                                        </span>
+                                      </div>
+                                      <span className="text-xs text-slate-500">
+                                        Real-time FIFO bucket depletion progress tracked per purchase lot
+                                      </span>
+                                    </div>
+
+                                    {/* BUCKETS TABLE */}
+                                    {buckets.length === 0 ? (
+                                      <div className="p-4 text-center text-xs text-slate-400 bg-white rounded-xl border border-slate-200">
+                                        No historical purchase buckets recorded for this product.
+                                      </div>
+                                    ) : (
+                                      <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+                                        <table className="w-full text-left border-collapse text-xs">
+                                          <thead>
+                                            <tr className="bg-slate-100/80 text-slate-600 font-semibold border-b border-slate-200 text-[11px] uppercase tracking-wider">
+                                              <th className="py-2.5 px-4">Bucket #</th>
+                                              <th className="py-2.5 px-4">Created Date</th>
+                                              <th className="py-2.5 px-4 text-right">Buy Price / KG</th>
+                                              <th className="py-2.5 px-4 text-right">
+                                                Stock (Remaining / Original)
+                                              </th>
+                                              <th className="py-2.5 px-4 w-48 text-center">
+                                                Depletion Progress
+                                              </th>
+                                              <th className="py-2.5 px-4 text-center">Status</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 font-sans">
+                                            {buckets.map((bucket, idx) => {
+                                              const orig =
+                                                bucket.original_stock > 0 ? bucket.original_stock : 1;
+                                              const rem = bucket.remaining_stock || 0;
+                                              const depPct = Math.min(
+                                                100,
+                                                Math.max(0, Math.round(((orig - rem) / orig) * 100))
+                                              );
+                                              const isActive = rem > 0;
+
+                                              return (
+                                                <tr key={bucket.bucket_id || idx} className="hover:bg-slate-50/80">
+                                                  {/* Bucket # */}
+                                                  <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
+                                                    {bucket.batch_number || `LOT-${idx + 1}`}
+                                                  </td>
+
+                                                  {/* Created Date */}
+                                                  <td className="py-2.5 px-4 text-slate-600 font-mono">
+                                                    {bucket.created_date}
+                                                  </td>
+
+                                                  {/* Buy Price / KG */}
+                                                  <td className="py-2.5 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
+                                                    Rs.{' '}
+                                                    {bucket.buy_price_per_kg.toLocaleString(undefined, {
+                                                      minimumFractionDigits: 2,
+                                                      maximumFractionDigits: 2,
+                                                    })}
+                                                  </td>
+
+                                                  {/* Stock Remaining / Original */}
+                                                  <td className="py-2.5 px-4 text-right font-mono tabular-nums text-slate-700">
+                                                    <span className="font-bold text-slate-900">
+                                                      {rem.toLocaleString()}
+                                                    </span>
+                                                    <span className="text-slate-400">
+                                                      {' '}
+                                                      / {bucket.original_stock.toLocaleString()} KG
+                                                    </span>
+                                                  </td>
+
+                                                  {/* Depletion Progress Bar */}
+                                                  <td className="py-2.5 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                      <div className="flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                                                        <div
+                                                          className={`h-2.5 rounded-full transition-all ${
+                                                            isActive ? 'bg-emerald-500' : 'bg-slate-400'
+                                                          }`}
+                                                          style={{ width: `${depPct}%` }}
+                                                        />
+                                                      </div>
+                                                      <span className="text-[11px] font-mono font-bold text-slate-700 w-10 text-right">
+                                                        {depPct}%
+                                                      </span>
+                                                    </div>
+                                                  </td>
+
+                                                  {/* Status Badge */}
+                                                  <td className="py-2.5 px-4 text-center">
+                                                    {isActive ? (
+                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                                        <CircleDot className="w-2.5 h-2.5 text-emerald-600" /> ACTIVE
+                                                      </span>
+                                                    ) : (
+                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-600 border border-slate-300">
+                                                        <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" /> DEPLETED
+                                                      </span>
+                                                    )}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+
+                                    {/* LIFETIME TURNOVER METRIC BLOCK */}
+                                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                                        <div className="flex items-center gap-2">
+                                          <TrendingUp className="h-4 w-4 text-blue-600" />
+                                          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                                            Lifetime Inventory Turnover & Margin
+                                          </h4>
+                                        </div>
+
+                                        <div className="text-xs font-semibold font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
+                                          All-Time Gross Margin: {(product.all_time_gross_margin || 0).toFixed(1)}%
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between text-xs text-slate-600">
+                                          <span>
+                                            Depletion Velocity:{' '}
+                                            <strong className="text-slate-900 font-mono">
+                                              {kgSold.toLocaleString()} KG Sold
+                                            </strong>{' '}
+                                            out of{' '}
+                                            <strong className="text-slate-900 font-mono">
+                                              {kgAcquired.toLocaleString()} KG Acquired
+                                            </strong>
+                                          </span>
+                                          <span className="font-mono font-bold text-blue-700">
+                                            {turnoverPct}% Cleared
+                                          </span>
+                                        </div>
+
+                                        <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200 p-0.5">
+                                          <div
+                                            className="bg-blue-600 h-2 rounded-full transition-all shadow-xs"
+                                            style={{ width: `${turnoverPct}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
                     </Fragment>
                   );
                 })}

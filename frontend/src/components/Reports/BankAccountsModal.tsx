@@ -87,12 +87,14 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
       return;
     }
 
+    const bal = initialBalance === '' ? 0 : Number(initialBalance);
     const payload = {
       account_title: accountTitle.trim(),
       bank_name: bankName.trim(),
       account_number: accountNumber.trim(),
       iban_details: ibanDetails.trim() || undefined,
-      initial_balance: initialBalance === '' ? 0 : Number(initialBalance),
+      initial_balance: bal,
+      opening_balance: bal,
     };
 
     if (editingAccount) {
@@ -244,16 +246,18 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Initial Opening Balance (PKR)
+                    Opening Balance (Rs)
                   </label>
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="0.00"
+                    min="0"
+                    placeholder="0"
                     value={initialBalance}
                     onChange={(e) => setInitialBalance(e.target.value === '' ? '' : parseFloat(e.target.value))}
                     className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
+                  <p className="text-[11px] text-slate-400 mt-1">Logged as Owner's Equity Capital Injection (bypasses P&L).</p>
                 </div>
 
                 <div className="sm:col-span-2 lg:col-span-1 flex items-end justify-end gap-2 pt-2">

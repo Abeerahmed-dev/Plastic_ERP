@@ -45,6 +45,7 @@ export async function createCustomerController(
     if (isCashier) {
       payload.credit_limit = 0;
       payload.opening_balance = 0;
+      payload.opening_advance = 0;
     }
     const data = createCustomerSchema.parse(payload);
     const customer = await customersService.addCustomer(data, req.user!.id);

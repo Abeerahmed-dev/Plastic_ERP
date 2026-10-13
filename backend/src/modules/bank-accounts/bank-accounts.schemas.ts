@@ -5,6 +5,10 @@ export const createBankAccountSchema = z.object({
   bank_name: z.string().min(1, 'Bank name is required').max(150),
   account_number: z.string().min(1, 'Account number is required').max(100),
   iban_details: z.string().optional().nullable(),
+  opening_balance: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? undefined : Number(val)),
+    z.number().min(0).default(0)
+  ).optional(),
   initial_balance: z.preprocess(
     (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)),
     z.number().default(0)

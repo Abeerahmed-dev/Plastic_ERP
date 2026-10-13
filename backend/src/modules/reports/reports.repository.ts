@@ -1,5 +1,7 @@
 import db from '../../db/knex';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
+import { computeCustomerNetBalance } from '../customers/customers.repository';
+import { computeSupplierNetBalance } from '../suppliers/suppliers.repository';
 
 export async function getDashboardMetrics() {
   const walkin = await db('customers').where({ phone: WALKIN_CUSTOMER_PHONE }).first();
@@ -160,7 +162,7 @@ export async function getInventoryLedgerReport() {
  */
 export async function getLiquidityLedgerReport() {
   const cashPayments = await db('customer_payments')
-    .whereIn('payment_method', ['Cash', 'CASH'])
+    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'CASH_REFUND'])
     .sum('amount as total')
     .first();
 
@@ -268,35 +270,29 @@ export async function getLiquidityLedgerReport() {
 
   const issued_post_dated_cheques = Number(issuedPdcs?.total || 0);
 
-  // Customer Market Receivables (Udhaar)
+  // Customer Market Receivables (Udhaar) & Customer Advance Wallet Liabilities
   const customers = await db('customers').select('id');
   let market_receivables = 0;
+  let customer_advances_liability = 0;
   for (const c of customers) {
-    const invResult = await db('sales_invoices')
-      .where('customer_id', c.id)
-      .sum('total_amount as total_inv')
-      .sum('paid_amount as total_paid')
-      .first();
-
-    const inv = Number(invResult?.total_inv || 0);
-    const paid = Number(invResult?.total_paid || 0);
-    const balance = inv - paid;
-    if (balance > 0) market_receivables += balance;
+    const netDetails = await computeCustomerNetBalance(c.id);
+    market_receivables += netDetails.outstanding_balance;
+    customer_advances_liability += netDetails.advance_credit;
   }
 
   // Inventory Asset Value (Unsold Stock Value in warehouse)
   const inventoryReport = await getInventoryLedgerReport();
   const total_inventory_value = inventoryReport.reduce((sum, item) => sum + Number(item.total_asset_value || 0), 0);
 
-  // Accounts Payable (Supplier debt owed to market)
-  const supplierInvoices = await db('purchase_invoices')
-    .sum('total_amount as total_inv')
-    .sum('paid_amount as total_paid')
-    .first();
-
-  const suppInvTotal = Number(supplierInvoices?.total_inv || 0);
-  const suppPaidTotal = Number(supplierInvoices?.total_paid || 0);
-  const total_accounts_payable = Math.max(0, suppInvTotal - suppPaidTotal);
+  // Accounts Payable (Supplier debt owed to market) & Supplier Advances Asset using Global Account Netting
+  const suppliers = await db('suppliers').select('id');
+  let total_accounts_payable = 0;
+  let supplier_advances_asset = 0;
+  for (const s of suppliers) {
+    const netDetails = await computeSupplierNetBalance(s.id);
+    total_accounts_payable += netDetails.outstanding_payable;
+    supplier_advances_asset += netDetails.advance_payable;
+  }
 
   const total_liquid = cash_drawer + bank_balances;
   const net_business_capital = (total_liquid + market_receivables + total_inventory_value) - total_accounts_payable;
@@ -309,6 +305,8 @@ export async function getLiquidityLedgerReport() {
     market_receivables: Math.round(market_receivables * 100) / 100,
     total_inventory_value: Math.round(total_inventory_value * 100) / 100,
     total_accounts_payable: Math.round(total_accounts_payable * 100) / 100,
+    customer_advances_liability: Math.round(customer_advances_liability * 100) / 100,
+    supplier_advances_asset: Math.round(supplier_advances_asset * 100) / 100,
     total_liquid: Math.round(total_liquid * 100) / 100,
     net_business_capital: Math.round(net_business_capital * 100) / 100,
     total_market_capital: Math.round((total_liquid + post_dated_cheques + market_receivables) * 100) / 100,
@@ -323,32 +321,54 @@ export async function getLiquidityReceivablesDetail() {
   const list = [];
 
   for (const c of customers) {
-    const invResult = await db('sales_invoices')
-      .where('customer_id', c.id)
-      .sum('total_amount as total_inv')
-      .sum('paid_amount as total_paid')
-      .first();
+    const netDetails = await computeCustomerNetBalance(c.id);
 
-    const inv = Number(invResult?.total_inv || 0);
-    const paid = Number(invResult?.total_paid || 0);
-    const opening = Number(c.opening_balance || 0);
-    const totalReceivable = Math.round((opening + inv - paid) * 100) / 100;
-
-    if (totalReceivable > 0) {
+    if (netDetails.outstanding_balance > 0 || netDetails.advance_credit > 0) {
       list.push({
         customer_id: c.id,
         name: c.name,
         code: c.code,
         phone: c.phone || 'N/A',
         city: c.city || 'N/A',
-        opening_balance: opening,
-        invoice_balance: Math.round((inv - paid) * 100) / 100,
-        total_receivable: totalReceivable,
+        opening_balance: netDetails.opening_balance,
+        invoice_balance: Math.round((netDetails.total_billed - netDetails.opening_balance) * 100) / 100,
+        total_receivable: netDetails.outstanding_balance,
+        advance_credit: netDetails.advance_credit,
+        net_balance: netDetails.net_balance,
       });
     }
   }
 
   return list.sort((a, b) => b.total_receivable - a.total_receivable);
+}
+
+/**
+ * GET /api/reports/liquidity/customer-advances
+ */
+export async function getLiquidityCustomerAdvancesDetail() {
+  const customers = await db('customers').select('*');
+  const list = [];
+
+  for (const c of customers) {
+    const netDetails = await computeCustomerNetBalance(c.id);
+
+    if (netDetails.advance_credit > 0) {
+      list.push({
+        customer_id: c.id,
+        name: c.name,
+        code: c.code,
+        phone: c.phone || 'N/A',
+        city: c.city || 'N/A',
+        opening_balance: netDetails.opening_balance,
+        total_billed: netDetails.total_billed,
+        total_paid: netDetails.total_paid,
+        advance_credit: netDetails.advance_credit,
+        net_balance: netDetails.net_balance,
+      });
+    }
+  }
+
+  return list.sort((a, b) => b.advance_credit - a.advance_credit);
 }
 
 /**
@@ -359,32 +379,54 @@ export async function getLiquidityPayablesDetail() {
   const list = [];
 
   for (const s of suppliers) {
-    const invResult = await db('purchase_invoices')
-      .where('supplier_id', s.id)
-      .sum('total_amount as total_inv')
-      .sum('paid_amount as total_paid')
-      .first();
+    const netDetails = await computeSupplierNetBalance(s.id);
 
-    const inv = Number(invResult?.total_inv || 0);
-    const paid = Number(invResult?.total_paid || 0);
-    const opening = Number(s.opening_payable || s.opening_balance || 0);
-    const totalPayable = Math.round((opening + inv - paid) * 100) / 100;
-
-    if (totalPayable > 0) {
+    if (netDetails.outstanding_payable > 0 || netDetails.advance_payable > 0) {
       list.push({
         supplier_id: s.id,
         name: s.name,
         code: s.code,
         phone: s.phone || 'N/A',
         city: s.city || 'N/A',
-        opening_payable: opening,
-        invoice_balance: Math.round((inv - paid) * 100) / 100,
-        total_payable: totalPayable,
+        opening_payable: netDetails.opening_payable,
+        invoice_balance: Math.round((netDetails.total_billed - netDetails.opening_payable) * 100) / 100,
+        total_payable: netDetails.outstanding_payable,
+        advance_payable: netDetails.advance_payable,
+        net_balance: netDetails.net_balance,
       });
     }
   }
 
   return list.sort((a, b) => b.total_payable - a.total_payable);
+}
+
+/**
+ * GET /api/reports/liquidity/supplier-advances
+ */
+export async function getLiquiditySupplierAdvancesDetail() {
+  const suppliers = await db('suppliers').select('*');
+  const list = [];
+
+  for (const s of suppliers) {
+    const netDetails = await computeSupplierNetBalance(s.id);
+
+    if (netDetails.advance_payable > 0) {
+      list.push({
+        supplier_id: s.id,
+        name: s.name,
+        code: s.code,
+        phone: s.phone || 'N/A',
+        city: s.city || 'N/A',
+        opening_payable: netDetails.opening_payable,
+        total_billed: netDetails.total_billed,
+        total_paid: netDetails.total_paid,
+        advance_payable: netDetails.advance_payable,
+        net_balance: netDetails.net_balance,
+      });
+    }
+  }
+
+  return list.sort((a, b) => b.advance_payable - a.advance_payable);
 }
 
 /**
@@ -509,7 +551,7 @@ export async function getCashierTallyReport(userId: string) {
   const paymentsResult = await db('customer_payments')
     .where('created_by', userId)
     .where('created_at', '>=', startOfDay)
-    .whereIn('payment_method', ['CASH', 'CASH_DRAWER', 'Cash'])
+    .whereIn('payment_method', ['CASH', 'CASH_DRAWER', 'Cash', 'CASH_REFUND'])
     .sum('amount as total')
     .count('id as count')
     .first();
@@ -1144,6 +1186,7 @@ export async function getInventoryValuationReport() {
         'p.id',
         'p.name as product_name',
         'p.code',
+        'p.size',
         'c.name as category',
         'p.total_stock_kg',
         'p.rolling_avg_cost_per_kg',
@@ -1269,6 +1312,7 @@ export async function getInventoryValuationReport() {
         id: r.id,
         product_name: r.product_name || 'Unnamed Product',
         code: r.code || '',
+        size: r.size || '',
         category: r.category || 'General',
         current_stock_kg: stock_on_hand,
         stock_on_hand,

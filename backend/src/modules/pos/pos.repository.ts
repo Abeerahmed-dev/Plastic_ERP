@@ -10,9 +10,9 @@ export async function processPOSCheckout(
   discount: number,
   userRole?: string,
   customerId?: string,
-  amountPaidInput?: number,
-  paymentMethodInput?: string,
-  bankAccountId?: string | null
+  _amountPaidInput?: number,
+  _paymentMethodInput?: string,
+  _bankAccountId?: string | null
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
     const isCashier = userRole?.toUpperCase() === 'CASHIER';
@@ -32,7 +32,20 @@ export async function processPOSCheckout(
       targetCustomer = await trx('customers').where({ phone: WALKIN_CUSTOMER_PHONE }).first();
     }
     if (!targetCustomer) {
-      throw new Error('Customer not found in database.');
+      targetCustomer = await trx('customers').whereILike('name', '%Walk-In%').first();
+    }
+    if (!targetCustomer) {
+      const [newWalkIn] = await trx('customers')
+        .insert({
+          code: 'CUST-WALKIN',
+          name: 'Walk-In Customer',
+          phone: WALKIN_CUSTOMER_PHONE || '0000000000',
+          customer_type: 'CASH',
+          credit_limit: 0,
+          opening_balance: 0,
+        })
+        .returning('*');
+      targetCustomer = newWalkIn;
     }
 
     let subtotal = 0;
@@ -68,7 +81,8 @@ export async function processPOSCheckout(
         : 1.0;
 
       const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
-      const effectiveUnitPrice = isCashier ? (fixedRetailKg * unitMultiplier) : Number(item.unit_price);
+      // Strictly lock selling price: ignore any frontend overrides and rely on database's product selling price
+      const effectiveUnitPrice = fixedRetailKg * unitMultiplier;
       const lineTotal = Number(item.quantity) * effectiveUnitPrice;
       subtotal += lineTotal;
 
@@ -78,8 +92,6 @@ export async function processPOSCheckout(
         const absQty = Math.abs(Number(item.quantity));
         const abs_kg = absQty * unitMultiplier;
         const sold_kg = -abs_kg; // negative quantity
-        const lineTotal = Number(item.quantity) * effectiveUnitPrice; // negative total
-        subtotal += lineTotal;
 
         const appliedCogsPerKg = Number(product.rolling_avg_cost_per_kg || product.cost_price || 0);
         const lineCogs = Math.round((abs_kg * appliedCogsPerKg) * 100) / 100;
@@ -117,12 +129,20 @@ export async function processPOSCheckout(
         });
       } else {
         const sold_kg = Number(item.quantity) * unitMultiplier;
-        const currentStock = Number(product.total_stock_kg || 0);
 
-        if (sold_kg > currentStock) {
-          throw new Error(
-            `Insufficient stock for ${product.name} (Requested: ${sold_kg} KG, Available: ${currentStock} KG).`
-          );
+        // Concurrency Safety Wall: Lock row and query live inventory bucket in real-time
+        const liveProduct = await trx('products')
+          .where({ id: item.product_id })
+          .forUpdate()
+          .select('id', 'name', 'total_stock_kg')
+          .first();
+
+        const live_stock = Number(liveProduct?.total_stock_kg ?? product.total_stock_kg ?? 0);
+
+        if (live_stock < sold_kg) {
+          const err: any = new Error('INSUFFICIENT_STOCK');
+          err.remainingStock = live_stock;
+          throw err;
         }
 
         // ── Auto-FIFO Price-Bucket Stock Deduction ──
@@ -222,14 +242,10 @@ export async function processPOSCheckout(
 
     const totalAmount = subtotal - effectiveDiscount;
 
-    const effectiveAmountPaid = amountPaidInput !== undefined ? Number(amountPaidInput) : totalAmount;
-    const balanceDue = totalAmount - effectiveAmountPaid;
-
-    if (isCashier && effectiveAmountPaid > totalAmount + 0.01) {
-      throw new ForbiddenError('Cashiers cannot receive excess ledger payments.');
-    }
-
-    const effectivePaymentMethod = isCashier ? 'CASH' : (paymentMethodInput || 'CASH');
+    // Strict Retail Cash-and-Carry: Ignore any payment_method or bank_account_id overrides.
+    // The transaction writes the final grand_total directly as an inflow to the cash drawer.
+    const effectiveAmountPaid = totalAmount;
+    const balanceDue = 0;
 
     // 2. Create Sales Invoice
     const [invoice] = await trx('sales_invoices')
@@ -243,8 +259,8 @@ export async function processPOSCheckout(
         discount: effectiveDiscount,
         total_amount: totalAmount,
         paid_amount: effectiveAmountPaid,
-        status: balanceDue <= 0 ? 'PAID' : (effectiveAmountPaid > 0 ? 'PARTIAL' : 'UNPAID'),
-        notes: totalAmount < 0 ? `POS Refund (${targetCustomer.name})` : `POS Sale (${targetCustomer.name})`,
+        status: 'PAID',
+        notes: totalAmount < 0 ? `POS Refund (${targetCustomer.name})` : `POS Cash Sale (${targetCustomer.name})`,
         created_by: userId,
       })
       .returning('*');
@@ -256,7 +272,7 @@ export async function processPOSCheckout(
     }));
     await trx('sales_invoice_items').insert(finalItems);
 
-    // 4. Create Customer Payment
+    // 4. Create Customer Payment (Direct Inflow to Cash Drawer)
     if (effectiveAmountPaid !== 0) {
       await trx('customer_payments').insert({
         customer_id: targetCustomer.id,
@@ -264,9 +280,9 @@ export async function processPOSCheckout(
         payment_number: `RCV-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         payment_date: new Date(),
         amount: effectiveAmountPaid,
-        payment_method: effectivePaymentMethod,
-        bank_account_id: bankAccountId || null,
-        notes: effectiveAmountPaid < 0 ? 'POS Refund' : 'POS Payment',
+        payment_method: 'CASH',
+        bank_account_id: null,
+        notes: effectiveAmountPaid < 0 ? 'POS Refund (Cash Drawer)' : 'POS Retail Cash Sale (Cash Drawer)',
         created_by: userId,
       });
     }

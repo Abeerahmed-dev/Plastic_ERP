@@ -1,13 +1,18 @@
 export interface PaymentHistoryItem {
   id: string;
+  type?: 'PAYMENT' | 'CREDIT_NOTE' | 'REFUND' | string;
+  polarity?: 'POSITIVE' | 'NEGATIVE' | string;
+  display_type?: string;
   payment_no: string;
   payment_number?: string;
+  credit_note_number?: string;
   date: string;
   payment_date?: string;
   method: string;
   payment_method?: string;
   amount: number;
   notes?: string | null;
+  return_reason?: string | null;
   bank_account_id?: string | null;
   cheque_number?: string | null;
   cheque_bank_name?: string | null;
@@ -15,17 +20,43 @@ export interface PaymentHistoryItem {
   cheque_status?: 'PENDING' | 'CLEARED' | 'BOUNCED' | null;
 }
 
+export interface InvoiceLineItem {
+  id?: string;
+  product_id?: string;
+  product_name: string;
+  product_size?: string | null;
+  size?: string | null;
+  quantity?: number;
+  net_qty?: number;
+  selected_unit?: string;
+  actual_weight_per_unit?: number | null;
+  net_kg_processed?: number | null;
+  unit_price: number;
+  total_price?: number;
+  total?: number;
+}
+
 export interface CustomerPaymentSummary {
   id: string;
   sales_id?: string;
   invoice_id: string | null;
+  parent_invoice_id?: string | null;
   invoice_number: string;
+  invoice_type?: string;
+  type?: string;
+  payment_method?: string;
   customer_id: string;
   customer_name: string;
   customer_code?: string;
+  original_total?: number;
   invoice_total_amount: number;
+  total_paid?: number;
   total_paid_against_invoice: number;
   invoice_status: string;
+  dynamic_status?: string;
+  line_items?: InvoiceLineItem[];
+  linked_credit_notes?: any[];
+  linked_refunds?: any[];
   payment_history: PaymentHistoryItem[];
 }
 

@@ -54,6 +54,19 @@ export async function getLiquidityReceivablesController(
   }
 }
 
+export async function getLiquidityCustomerAdvancesController(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await reportsService.getLiquidityCustomerAdvancesDetail();
+    res.status(200).json(ok(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getLiquidityPayablesController(
   _req: Request,
   res: Response,
@@ -61,6 +74,19 @@ export async function getLiquidityPayablesController(
 ): Promise<void> {
   try {
     const data = await reportsService.getLiquidityPayablesDetail();
+    res.status(200).json(ok(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getLiquiditySupplierAdvancesController(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await reportsService.getLiquiditySupplierAdvancesDetail();
     res.status(200).json(ok(data));
   } catch (err) {
     next(err);

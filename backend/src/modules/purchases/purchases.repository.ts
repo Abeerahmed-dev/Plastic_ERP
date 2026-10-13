@@ -57,6 +57,8 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
       'purchase_invoices.*',
       'suppliers.name as supplier_name',
       'suppliers.code as supplier_code',
+      'suppliers.city as city',
+      'suppliers.city as supplier_city',
       'u.name as created_by_name',
       'r.name as created_by_role'
     )
@@ -127,33 +129,24 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     const itemsToInsert = [];
 
     for (const item of data.items) {
-      const itemTotal = Number(item.quantity) * Number(item.unit_price);
+      // Direct KG Wholesale Model: quantity is strictly weight in KG, unit_price is rate per KG
+      const quantity_kg = Number((item.quantity_kg ?? item.quantity) || 0);
+      const price_per_kg = Number((item.price_per_kg ?? item.unit_price) || 0);
+      const itemTotal = Math.round(quantity_kg * price_per_kg * 100) / 100;
       subtotal += itemTotal;
 
-      // Fetch Product & Category
+      // Fetch Product
       const productWithCat = await trx('products as p')
-        .join('categories as c', 'p.category_id', 'c.id')
         .where('p.id', item.product_id)
-        .select('p.id', 'p.total_stock_kg', 'p.rolling_avg_cost_per_kg', 'c.bag_weight_kg')
+        .select('p.id', 'p.total_stock_kg', 'p.rolling_avg_cost_per_kg')
         .first();
 
       if (!productWithCat) {
-        throw new Error(`Product or Category not found for product ID ${item.product_id}`);
+        throw new Error(`Product not found for product ID ${item.product_id}`);
       }
 
-      const defaultBagWeight = Number(productWithCat.bag_weight_kg || 25.0);
-
-      const actualKantaWtInput = item.actual_kanta_wt ?? item.actual_weight_per_unit ?? item.actual_weight_kg;
-      const actualKantaWt = actualKantaWtInput !== undefined && actualKantaWtInput !== null && actualKantaWtInput !== ''
-        ? Number(actualKantaWtInput)
-        : null;
-
-      const effectiveBagWeight = (actualKantaWt && !isNaN(actualKantaWt) && actualKantaWt > 0)
-        ? actualKantaWt
-        : defaultBagWeight;
-
-      const incoming_kg = Number(item.quantity) * effectiveBagWeight;
-      const purchase_cost_per_kg = incoming_kg > 0 ? (itemTotal / incoming_kg) : Number(item.unit_price);
+      const incoming_kg = quantity_kg;
+      const purchase_cost_per_kg = price_per_kg;
 
       // ── Weighted Average Costing (WAC) Formula ──
       const currentStock = Number(productWithCat.total_stock_kg || 0);
@@ -214,19 +207,23 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
 
       itemsToInsert.push({
         product_id: item.product_id,
-        quantity: Number(item.quantity),
-        selected_unit: 'Bag',
-        actual_weight_per_unit: actualKantaWt,
+        quantity: quantity_kg,
+        selected_unit: 'KG',
+        actual_weight_per_unit: 1.0,
         net_kg_processed: incoming_kg,
         net_kg_added: incoming_kg,
-        actual_weight_kg: actualKantaWt,
-        unit_price: Number(item.unit_price),
+        actual_weight_kg: incoming_kg,
+        unit_price: price_per_kg,
         total_price: itemTotal,
       });
     }
 
     const discount = Number(data.discount) || 0;
     const total_amount = subtotal - discount;
+
+    const advanceApplied = Number((data as any).advance_applied_amount || 0);
+    const initialPaidAmount = advanceApplied;
+    const invoiceStatus = initialPaidAmount >= total_amount ? 'PAID' : (initialPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
 
     const [invoice] = await trx('purchase_invoices')
       .insert({
@@ -237,8 +234,8 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         subtotal,
         discount,
         total_amount,
-        paid_amount: 0,
-        status: 'UNPAID',
+        paid_amount: initialPaidAmount,
+        status: invoiceStatus,
         notes: data.notes || null,
         created_by: createdBy,
       })
@@ -264,8 +261,45 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         unit_cost: avgCost,
         total_asset_value: Number(pii.total_price),
         capital_equity_value: 0,
-        notes: `Purchase Invoice ${invoice.invoice_number} (${pii.quantity} Bags @ ${avgCost}/KG WAC)`,
+        notes: `Purchase Invoice ${invoice.invoice_number} (${pii.quantity} KG @ ${pii.unit_price}/KG)`,
         created_by: createdBy,
+      });
+    }
+
+    // Record Virtual Supplier Payment from Advance Wallet if advanceApplied > 0
+    if (advanceApplied > 0) {
+      const rows = await trx('supplier_payments')
+        .where('payment_number', 'like', 'PAY-OUT-%')
+        .select('payment_number');
+
+      let maxNum = 0;
+      for (const r of rows) {
+        if (r.payment_number) {
+          const numPart = r.payment_number.replace('PAY-OUT-', '');
+          const num = parseInt(numPart, 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      }
+      const paymentNumber = `PAY-OUT-${(maxNum + 1).toString().padStart(5, '0')}`;
+
+      const [virtualPayment] = await trx('supplier_payments').insert({
+        supplier_id: data.supplier_id,
+        purchase_invoice_id: invoice.id,
+        payment_number: paymentNumber,
+        payment_date: data.date || new Date().toISOString().split('T')[0],
+        amount: advanceApplied,
+        payment_method: 'WALLET_ADVANCE',
+        cheque_status: 'CLEARED',
+        notes: 'Manually applied from advance balance',
+        created_by: createdBy,
+      }).returning('*');
+
+      await trx('supplier_payment_allocations').insert({
+        payment_id: virtualPayment.id,
+        purchase_invoice_id: invoice.id,
+        allocated_amount: advanceApplied,
       });
     }
 

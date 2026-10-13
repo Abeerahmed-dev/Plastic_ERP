@@ -22,7 +22,7 @@ export async function getInvoice(req: Request, res: Response, next: NextFunction
   }
 }
 
-export async function createInvoice(req: Request, res: Response, _next: NextFunction) {
+export async function createInvoice(req: Request, res: Response, next: NextFunction) {
   try {
     const parsed = createInvoiceSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -44,8 +44,7 @@ export async function createInvoice(req: Request, res: Response, _next: NextFunc
     const invoice = await invoicesService.createInvoice(parsed.data, userId);
     res.status(201).json(ok(invoice));
   } catch (error: any) {
-    console.error("SALES API CRASH:", error);
-    res.status(500).json({ error: error.message || "Internal Server Error", detail: error.detail });
+    next(error);
   }
 }
 

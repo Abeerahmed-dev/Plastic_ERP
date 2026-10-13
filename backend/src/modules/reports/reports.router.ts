@@ -6,7 +6,9 @@ import {
   getInventoryLedgerController,
   getLiquidityLedgerController,
   getLiquidityReceivablesController,
+  getLiquidityCustomerAdvancesController,
   getLiquidityPayablesController,
+  getLiquiditySupplierAdvancesController,
   getLiquidityUnsoldStockController,
   getProfitMatrixController,
   getCashierTallyController,
@@ -30,7 +32,9 @@ router.get('/inventory', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), getInventory
 
 // Restricted reports for OWNER and ADMIN only
 router.get('/liquidity/receivables', verifyRole(['OWNER', 'ADMIN']), getLiquidityReceivablesController);
+router.get('/liquidity/customer-advances', verifyRole(['OWNER', 'ADMIN']), getLiquidityCustomerAdvancesController);
 router.get('/liquidity/payables', verifyRole(['OWNER', 'ADMIN']), getLiquidityPayablesController);
+router.get('/liquidity/supplier-advances', verifyRole(['OWNER', 'ADMIN']), getLiquiditySupplierAdvancesController);
 router.get('/liquidity/unsold-stock', verifyRole(['OWNER', 'ADMIN']), getLiquidityUnsoldStockController);
 router.get('/liquidity', verifyRole(['OWNER', 'ADMIN']), getLiquidityLedgerController);
 router.get('/pdc', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), getPdcController);

@@ -31,6 +31,36 @@ const paymentSchema = z.object({
       message: 'Supplier selection is required for Direct to Supplier settlement',
     });
   }
+  if ((data.payment_method === 'PDC' || data.payment_method === 'CHEQUE' || data.payment_method === 'BANK' || data.payment_method === 'BANK_TRANSFER') && (!data.bank_account_id || data.bank_account_id.trim() === '')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['bank_account_id'],
+      message: 'Destination bank account is required',
+    });
+  }
+  if (data.payment_method === 'PDC' || data.payment_method === 'CHEQUE') {
+    if (!data.cheque_number || data.cheque_number.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cheque_number'],
+        message: 'Cheque number is required',
+      });
+    }
+    if (!data.cheque_bank_name || data.cheque_bank_name.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cheque_bank_name'],
+        message: 'Customer origin bank name is required',
+      });
+    }
+    if (!data.cheque_due_date || data.cheque_due_date.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cheque_due_date'],
+        message: 'Cheque due date is required',
+      });
+    }
+  }
 });
 
 type PaymentFormData = z.infer<typeof paymentSchema>;
@@ -276,7 +306,7 @@ export const PaymentFormModal = ({ isOpen, onClose, onSuccess }: PaymentFormModa
                     <option value="">Select Target Supplier...</option>
                     {(suppliersResponse?.data || []).map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} ({s.code}) — Balance: Rs. {(Number(s?.outstanding_payable ?? s?.outstanding_balance) || 0).toLocaleString()}
+                        {s.name} ({s.code}) — Balance: Rs. {(Number(s?.outstanding_payable ?? (s as any)?.outstanding_balance) || 0).toLocaleString()}
                       </option>
                     ))}
                   </select>

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, DollarSign, AlertCircle, Receipt } from 'lucide-react';
 import { expensesService } from '../../services/expenses.service';
+import { bankAccountsService } from '../../services/bank-accounts.service';
+import { toast, handleApiError } from '../../utils/toast';
 
 interface LogExpenseModalProps {
   isOpen: boolean;
@@ -38,17 +40,34 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
   const [category, setCategory] = useState<string>('Tea & Refreshments');
   const [description, setDescription] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
+  const [selectedBankId, setSelectedBankId] = useState<string>('');
   const [expenseDate, setExpenseDate] = useState<string>(getTodayLocalDate());
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch list of active bank accounts
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bankAccounts'],
+    queryFn: bankAccountsService.getBankAccounts,
+    enabled: isOpen,
+  });
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || Number(amount) <= 0) {
-      setError('Please enter a valid expense amount');
+      const err = 'Please enter a valid expense amount';
+      setError(err);
+      toast.error(err);
+      return;
+    }
+
+    if (paymentMethod === 'BANK' && !selectedBankId) {
+      const err = 'Bank Account ID is required';
+      setError(err);
+      toast.error(err);
       return;
     }
 
@@ -62,6 +81,7 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
         description: description.trim() || undefined,
         expense_date: expenseDate,
         payment_method: paymentMethod,
+        bank_account_id: paymentMethod === 'BANK' ? selectedBankId : null,
       });
 
       // Invalidate all related financial and ledger queries
@@ -72,6 +92,9 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
       queryClient.invalidateQueries({ queryKey: ['shiftAudit'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardMetrics'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
+
+      toast.success('Expense recorded successfully');
 
       if (onExpenseLogged) {
         onExpenseLogged();
@@ -81,8 +104,10 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
       // Reset
       setAmount('');
       setDescription('');
+      setSelectedBankId('');
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || 'Failed to record expense');
+      const message = handleApiError(err);
+      setError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -164,7 +189,12 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
               </label>
               <select
                 value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
+                onChange={(e) => {
+                  setPaymentMethod(e.target.value);
+                  if (e.target.value !== 'BANK') {
+                    setSelectedBankId('');
+                  }
+                }}
                 className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
               >
                 <option value="CASH">Cash in Drawer</option>
@@ -185,6 +215,28 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
               />
             </div>
           </div>
+
+          {/* Conditional Bank Account Dropdown */}
+          {paymentMethod === 'BANK' && (
+            <div className="mt-2">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Select Bank Account <span className="text-red-500">*</span>
+              </label>
+              <select 
+                value={selectedBankId} 
+                onChange={(e) => setSelectedBankId(e.target.value)}
+                className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                required
+              >
+                <option value="">-- Choose a Bank --</option>
+                {bankAccounts.map((bank: any) => (
+                  <option key={bank.id} value={bank.id}>
+                    {bank.bank_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
