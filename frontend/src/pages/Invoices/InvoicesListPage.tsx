@@ -187,6 +187,9 @@ export default function InvoicesListPage() {
                   Customer
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Billed By
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Date
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -208,7 +211,7 @@ export default function InvoicesListPage() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isCashier ? 7 : 8} className="px-6 py-12 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       <span className="mt-2">Loading invoices...</span>
@@ -217,7 +220,7 @@ export default function InvoicesListPage() {
                 </tr>
               ) : filteredTableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isCashier ? 7 : 8} className="px-6 py-12 text-center text-sm text-slate-500">
                     {selectedCity || selectedName || selectedInvoice
                       ? 'No invoices match the active cascading filters. Try resetting filters.'
                       : 'No invoices found.'}
@@ -264,6 +267,18 @@ export default function InvoicesListPage() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-slate-900">{invoice.customer_name}</div>
                         <div className="text-xs text-slate-500">{invoice.customer_code}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-slate-800">
+                            {invoice.creator?.name || invoice.created_by_name || 'System'}
+                          </span>
+                          {isOwner && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                              {invoice.created_by_role || invoice.creator?.role || 'Staff'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-slate-900">

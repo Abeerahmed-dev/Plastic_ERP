@@ -380,4 +380,47 @@ export async function getCashierShiftAudit(userId: string) {
   }));
 }
 
+export async function getPosInvoicesList(filter?: { created_by?: string }) {
+  const query = db('sales_invoices as si')
+    .join('customers as c', 'si.customer_id', 'c.id')
+    .leftJoin('users as u', 'si.created_by', 'u.id')
+    .leftJoin('roles as r', 'u.role_id', 'r.id')
+    .where('si.invoice_number', 'like', 'POS-%');
+
+  if (filter?.created_by) {
+    query.where('si.created_by', filter.created_by);
+  }
+
+  const invoices = await query
+    .select(
+      'si.id',
+      'si.invoice_number',
+      'si.date',
+      'si.subtotal',
+      'si.discount',
+      'si.total_amount',
+      'si.paid_amount',
+      'si.status',
+      'si.notes',
+      'si.created_by',
+      'si.created_at',
+      'c.id as customer_id',
+      'c.name as customer_name',
+      'c.code as customer_code',
+      'u.name as created_by_name',
+      'r.name as created_by_role'
+    )
+    .orderBy('si.created_at', 'desc');
+
+  return invoices.map((inv) => ({
+    ...inv,
+    created_by_name: inv.created_by_name || 'System',
+    created_by_role: inv.created_by_role || 'CASHIER',
+    creator: {
+      name: inv.created_by_name || 'System',
+      role: inv.created_by_role || 'CASHIER',
+    },
+  }));
+}
+
 

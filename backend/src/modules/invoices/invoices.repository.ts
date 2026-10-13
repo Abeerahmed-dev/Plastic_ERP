@@ -554,8 +554,8 @@ export async function processSalesReturn(
   });
 }
 
-export async function findAllInvoices() {
-  const rows = await db('sales_invoices as si')
+export async function findAllInvoices(filter?: { created_by?: string }) {
+  const query = db('sales_invoices as si')
     .join('customers as c', 'si.customer_id', 'c.id')
     .leftJoin('users as u', 'si.created_by', 'u.id')
     .leftJoin('roles as r', 'u.role_id', 'r.id')
@@ -563,7 +563,13 @@ export async function findAllInvoices() {
       this.where('si.invoice_type', '!=', 'CREDIT_NOTE')
           .orWhereNull('si.invoice_type');
     })
-    .whereNull('si.parent_invoice_id')
+    .whereNull('si.parent_invoice_id');
+
+  if (filter?.created_by) {
+    query.where('si.created_by', filter.created_by);
+  }
+
+  const rows = await query
     .select(
       'si.id',
       'si.invoice_number',

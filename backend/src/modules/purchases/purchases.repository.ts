@@ -9,6 +9,7 @@ export interface PurchaseInvoiceQuery {
   supplier_id?: string;
   startDate?: string;
   endDate?: string;
+  created_by?: string;
 }
 
 export async function generatePurchaseInvoiceNumber(): Promise<string> {
@@ -27,7 +28,7 @@ export async function generatePurchaseInvoiceNumber(): Promise<string> {
 }
 
 export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
-  const { page, limit, search, status, supplier_id, startDate, endDate } = query;
+  const { page, limit, search, status, supplier_id, startDate, endDate, created_by } = query;
   const offset = (page - 1) * limit;
 
   const baseQuery = db('purchase_invoices')
@@ -35,6 +36,7 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
     .leftJoin('users as u', 'purchase_invoices.created_by', 'u.id')
     .leftJoin('roles as r', 'u.role_id', 'r.id')
     .modify((qb: Knex.QueryBuilder) => {
+      if (created_by) qb.where('purchase_invoices.created_by', created_by);
       if (search) {
         qb.where((inner: Knex.QueryBuilder) => {
           inner

@@ -1,4 +1,4 @@
-import { processPOSCheckout, getTodayCashTally, getCashierShiftAudit } from './pos.repository';
+import { processPOSCheckout, getTodayCashTally, getCashierShiftAudit, getPosInvoicesList } from './pos.repository';
 import { CheckoutInput } from './pos.schemas';
 
 export async function checkout(userId: string, data: CheckoutInput, userRole?: string) {
@@ -21,6 +21,10 @@ export async function getCashTallyForUser(userId: string) {
 
 export async function getCashierShiftAuditForUser(userId: string) {
   return await getCashierShiftAudit(userId);
+}
+
+export async function getPosInvoices(filter?: { created_by?: string }) {
+  return await getPosInvoicesList(filter);
 }
 
 

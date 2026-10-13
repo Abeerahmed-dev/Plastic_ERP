@@ -46,6 +46,9 @@ export interface InvoiceDetailData {
   notes?: string | null;
   items: InvoiceDetailItem[];
   credit_notes?: InvoiceDetailData[];
+  creator?: { name: string; role?: string };
+  created_by_name?: string;
+  created_by_role?: string;
 }
 
 interface InvoiceDetailModalProps {
@@ -216,6 +219,15 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   Due Date: {new Date(invoice.due_date).toLocaleDateString('en-PK', { dateStyle: 'medium' })}
                 </p>
               )}
+              <div className="text-xs text-slate-600 font-medium flex items-center gap-1.5 md:justify-end mt-1">
+                <span className="font-semibold text-slate-500">Billed By:</span>
+                <span className="text-slate-900 font-bold">{invoice.creator?.name || invoice.created_by_name || 'System'}</span>
+                {invoice.created_by_role && (
+                  <span className="inline-flex items-center px-1 py-0.2 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                    {invoice.created_by_role}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

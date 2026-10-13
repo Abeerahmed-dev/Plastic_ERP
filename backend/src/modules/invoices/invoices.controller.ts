@@ -4,9 +4,19 @@ import { createInvoiceSchema, createSalesReturnSchema } from './invoices.schemas
 import { ok } from '../../shared/apiResponse';
 import { ValidationError, ForbiddenError } from '../../shared/errors';
 
-export async function listInvoices(_req: Request, res: Response, next: NextFunction) {
+export async function listInvoices(req: Request, res: Response, next: NextFunction) {
   try {
-    const invoices = await invoicesService.getInvoices();
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
+    const userId = req.user?.id;
+
+    // RBAC: Cashiers can only view invoices they personally created
+    const queryFilter: { created_by?: string } = {};
+    if (userRole === 'CASHIER' && userId) {
+      queryFilter.created_by = userId;
+    }
+    // If role is 'Owner' / 'Admin', the filter remains empty, fetching all company invoices.
+
+    const invoices = await invoicesService.getInvoices(queryFilter);
     res.json(ok(invoices));
   } catch (error) {
     next(error);
@@ -16,6 +26,14 @@ export async function listInvoices(_req: Request, res: Response, next: NextFunct
 export async function getInvoice(req: Request, res: Response, next: NextFunction) {
   try {
     const invoice = await invoicesService.getInvoice(req.params.id);
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
+    const userId = req.user?.id;
+
+    // RBAC: Cashiers can only fetch invoices they created
+    if (userRole === 'CASHIER' && userId && invoice.created_by && invoice.created_by !== userId) {
+      throw new ForbiddenError('You are only authorized to view invoices you personally created.');
+    }
+
     res.json(ok(invoice));
   } catch (error) {
     next(error);

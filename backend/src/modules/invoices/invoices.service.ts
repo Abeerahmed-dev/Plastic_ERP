@@ -8,8 +8,8 @@ export async function createInvoice(input: CreateInvoiceInput, userId?: string) 
   return await getInvoice(invoiceId);
 }
 
-export async function getInvoices() {
-  return await invoicesRepo.findAllInvoices();
+export async function getInvoices(filter?: { created_by?: string }) {
+  return await invoicesRepo.findAllInvoices(filter);
 }
 
 export async function getInvoice(id: string) {

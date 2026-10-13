@@ -187,6 +187,7 @@ export default function PurchasesListPage() {
                   <th className="px-6 py-4 font-semibold">Invoice #</th>
                   <th className="px-6 py-4 font-semibold">Date</th>
                   <th className="px-6 py-4 font-semibold">Supplier</th>
+                  <th className="px-6 py-4 font-semibold">Billed By</th>
                   {!isCashier && <th className="px-6 py-4 font-semibold text-right">Total Amount</th>}
                   <th className="px-6 py-4 font-semibold text-center">Status</th>
                 </tr>
@@ -216,6 +217,18 @@ export default function PurchasesListPage() {
                     <td className="px-6 py-4 text-slate-600">{new Date(inv.date).toLocaleDateString()}</td>
                     <td className="px-6 py-4">
                       <div className="font-medium text-slate-900">{inv.supplier_name || 'Unknown'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-slate-800">
+                          {inv.creator?.name || inv.created_by_name || 'System'}
+                        </span>
+                        {isOwner && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                            {inv.created_by_role || inv.creator?.role || 'Staff'}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     {!isCashier && (
                       <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>

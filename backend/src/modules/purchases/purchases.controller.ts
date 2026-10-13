@@ -12,6 +12,15 @@ export async function getPurchaseInvoices(req: Request, res: Response) {
     const startDate = req.query.startDate as string;
     const endDate = req.query.endDate as string;
 
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
+    const userId = req.user?.id;
+
+    // RBAC: Cashiers can only view invoices they personally created
+    let created_by: string | undefined = undefined;
+    if (userRole === 'CASHIER' && userId) {
+      created_by = userId;
+    }
+
     const result = await purchasesService.getPurchaseInvoices({
       page,
       limit,
@@ -19,7 +28,8 @@ export async function getPurchaseInvoices(req: Request, res: Response) {
       status,
       supplier_id,
       startDate,
-      endDate
+      endDate,
+      created_by,
     });
 
     res.json({
@@ -40,6 +50,15 @@ export async function getPurchaseInvoices(req: Request, res: Response) {
 export async function getPurchaseInvoiceById(req: Request, res: Response) {
   try {
     const invoice = await purchasesService.getPurchaseInvoiceById(req.params.id);
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
+    const userId = req.user?.id;
+
+    // RBAC: Cashiers can only fetch invoices they created
+    if (userRole === 'CASHIER' && userId && invoice.created_by && invoice.created_by !== userId) {
+      res.status(403).json({ success: false, error: 'You are only authorized to view invoices you personally created.' });
+      return;
+    }
+
     res.json({ success: true, data: invoice });
   } catch (error: any) {
     res.status(404).json({ success: false, error: error.message });

@@ -1,9 +1,28 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
 import { requirePermission } from '../../middleware/requirePermission';
-import { checkoutController, getTodayCashTallyController, getCashierShiftAuditController } from './pos.controller';
+import {
+  checkoutController,
+  getTodayCashTallyController,
+  getCashierShiftAuditController,
+  getPosInvoicesController,
+} from './pos.controller';
 
 const router = Router();
+
+router.get(
+  '/',
+  requireAuth,
+  requirePermission('sales:read'),
+  getPosInvoicesController
+);
+
+router.get(
+  '/invoices',
+  requireAuth,
+  requirePermission('sales:read'),
+  getPosInvoicesController
+);
 
 router.get(
   '/today-tally',

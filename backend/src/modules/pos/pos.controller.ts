@@ -48,4 +48,27 @@ export async function getCashierShiftAuditController(
   }
 }
 
+export async function getPosInvoicesController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
+    const userId = req.user?.id;
+
+    // RBAC: Cashiers only see invoices they personally created
+    const queryFilter: { created_by?: string } = {};
+    if (userRole === 'CASHIER' && userId) {
+      queryFilter.created_by = userId;
+    }
+    // Owners/Admins see all company POS sales
+
+    const invoices = await posService.getPosInvoices(queryFilter);
+    res.json(ok(invoices));
+  } catch (err) {
+    next(err);
+  }
+}
+
 
