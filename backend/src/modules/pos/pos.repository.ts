@@ -291,13 +291,43 @@ export async function getTodayCashTally(userId: string) {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
-  const result = await db('sales_invoices')
+  // 1. Total POS Sales cash collected today
+  const salesResult = await db('sales_invoices')
     .where('created_by', userId)
     .whereBetween('date', [startOfDay, endOfDay])
+    .whereNot('status', 'CANCELLED')
     .sum('paid_amount as total_cash')
     .first();
 
-  return Number(result?.total_cash || 0);
+  const totalSalesCash = Number(salesResult?.total_cash || 0);
+
+  // 2. Total Cash Refunds paid out to customers today
+  const refundsResult = await db('customer_payments')
+    .where('created_by', userId)
+    .whereBetween('payment_date', [startOfDay, endOfDay])
+    .where(function() {
+      this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
+        .orWhere(function() {
+          this.whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER'])
+            .andWhere('amount', '<', 0);
+        });
+    })
+    .sum('amount as total_refunds')
+    .first();
+
+  const totalRefundsCash = Math.abs(Number(refundsResult?.total_refunds || 0));
+
+  // 3. Total Petty Cash Expenses paid from register today
+  const expensesResult = await db('expenses')
+    .where('created_by', userId)
+    .whereBetween('expense_date', [startOfDay, endOfDay])
+    .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+    .sum('amount as total_expenses')
+    .first();
+
+  const totalExpensesCash = Number(expensesResult?.total_expenses || 0);
+
+  return Math.max(0, Math.round((totalSalesCash - totalRefundsCash - totalExpensesCash) * 100) / 100);
 }
 
 export async function getCashierShiftAudit(userId: string) {
@@ -307,6 +337,7 @@ export async function getCashierShiftAudit(userId: string) {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
+  // 1. Fetch Sales Invoices
   const invoices = await db('sales_invoices as si')
     .join('customers as c', 'si.customer_id', 'c.id')
     .where('si.created_by', userId)
@@ -327,41 +358,146 @@ export async function getCashierShiftAudit(userId: string) {
     )
     .orderBy('si.created_at', 'desc');
 
-  if (invoices.length === 0) {
-    return [];
-  }
+  let invoicesWithItems: any[] = [];
 
-  const invoiceIds = invoices.map((inv) => inv.id);
+  if (invoices.length > 0) {
+    const invoiceIds = invoices.map((inv) => inv.id);
 
-  const items = await db('sales_invoice_items as sii')
-    .join('products as p', 'sii.product_id', 'p.id')
-    .whereIn('sii.invoice_id', invoiceIds)
-    .select(
-      'sii.id',
-      'sii.invoice_id',
-      'sii.product_id',
-      'sii.quantity',
-      'sii.selected_unit',
-      'sii.actual_weight_per_unit',
-      'sii.net_kg_processed',
-      'sii.unit_price',
-      'sii.total_price',
-      'p.name as product_name',
-      'p.code as product_code'
-    );
+    const items = await db('sales_invoice_items as sii')
+      .join('products as p', 'sii.product_id', 'p.id')
+      .whereIn('sii.invoice_id', invoiceIds)
+      .select(
+        'sii.id',
+        'sii.invoice_id',
+        'sii.product_id',
+        'sii.quantity',
+        'sii.selected_unit',
+        'sii.actual_weight_per_unit',
+        'sii.net_kg_processed',
+        'sii.unit_price',
+        'sii.total_price',
+        'p.name as product_name',
+        'p.code as product_code'
+      );
 
-  const itemsByInvoiceId: Record<string, typeof items> = {};
-  for (const item of items) {
-    if (!itemsByInvoiceId[item.invoice_id]) {
-      itemsByInvoiceId[item.invoice_id] = [];
+    const itemsByInvoiceId: Record<string, typeof items> = {};
+    for (const item of items) {
+      if (!itemsByInvoiceId[item.invoice_id]) {
+        itemsByInvoiceId[item.invoice_id] = [];
+      }
+      itemsByInvoiceId[item.invoice_id].push(item);
     }
-    itemsByInvoiceId[item.invoice_id].push(item);
+
+    invoicesWithItems = invoices.map((inv) => ({
+      ...inv,
+      items: itemsByInvoiceId[inv.id] || [],
+    }));
   }
 
-  return invoices.map((inv) => ({
-    ...inv,
-    items: itemsByInvoiceId[inv.id] || [],
-  }));
+  // 2. Fetch Customer Cash Refunds today
+  const refunds = await db('customer_payments as cp')
+    .join('customers as c', 'cp.customer_id', 'c.id')
+    .where('cp.created_by', userId)
+    .whereBetween('cp.payment_date', [startOfDay, endOfDay])
+    .where(function() {
+      this.whereIn('cp.payment_method', ['CASH_REFUND', 'cash_refund'])
+        .orWhere(function() {
+          this.whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER'])
+            .andWhere('cp.amount', '<', 0);
+        });
+    })
+    .select(
+      'cp.id',
+      'cp.payment_number',
+      'cp.payment_date',
+      'cp.amount',
+      'cp.notes',
+      'cp.created_at',
+      'c.id as customer_id',
+      'c.name as customer_name',
+      'c.code as customer_code'
+    )
+    .orderBy('cp.created_at', 'desc');
+
+  const formattedRefunds = refunds.map((r) => {
+    const refundAmt = Math.abs(Number(r.amount));
+    return {
+      id: r.id,
+      invoice_number: r.payment_number || `RFD-${r.id.slice(0, 8)}`,
+      date: r.payment_date,
+      subtotal: -refundAmt,
+      discount: 0,
+      total_amount: -refundAmt,
+      paid_amount: -refundAmt,
+      status: 'REFUND',
+      created_at: r.created_at,
+      customer_id: r.customer_id,
+      customer_name: r.customer_name,
+      customer_code: r.customer_code,
+      items: [
+        {
+          id: r.id,
+          invoice_id: r.id,
+          product_id: '',
+          product_name: r.notes || 'Customer Cash Refund from Advance Wallet',
+          product_code: 'REFUND',
+          quantity: 1,
+          selected_unit: 'CASH',
+          actual_weight_per_unit: 0,
+          net_kg_processed: 0,
+          unit_price: -refundAmt,
+          total_price: -refundAmt,
+        },
+      ],
+    };
+  });
+
+  // 3. Fetch Cash Expenses today
+  const expenses = await db('expenses as e')
+    .where('e.created_by', userId)
+    .whereBetween('e.expense_date', [startOfDay, endOfDay])
+    .whereIn('e.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+    .select('e.id', 'e.amount', 'e.category', 'e.description', 'e.expense_date', 'e.created_at')
+    .orderBy('e.created_at', 'desc');
+
+  const formattedExpenses = expenses.map((e) => {
+    const expenseAmt = Math.abs(Number(e.amount));
+    return {
+      id: e.id,
+      invoice_number: `EXP-${e.id.slice(0, 8).toUpperCase()}`,
+      date: e.expense_date,
+      subtotal: -expenseAmt,
+      discount: 0,
+      total_amount: -expenseAmt,
+      paid_amount: -expenseAmt,
+      status: 'EXPENSE',
+      created_at: e.created_at,
+      customer_id: '',
+      customer_name: `Expense: ${e.category}`,
+      customer_code: 'EXP',
+      items: [
+        {
+          id: e.id,
+          invoice_id: e.id,
+          product_id: '',
+          product_name: e.description || `${e.category} (Petty Cash from Drawer)`,
+          product_code: 'EXP',
+          quantity: 1,
+          selected_unit: 'CASH',
+          actual_weight_per_unit: 0,
+          net_kg_processed: 0,
+          unit_price: -expenseAmt,
+          total_price: -expenseAmt,
+        },
+      ],
+    };
+  });
+
+  const allEntries = [...invoicesWithItems, ...formattedRefunds, ...formattedExpenses];
+  allEntries.sort(
+    (a, b) => new Date(b.created_at || b.date).getTime() - new Date(a.created_at || a.date).getTime()
+  );
+  return allEntries;
 }
 
 

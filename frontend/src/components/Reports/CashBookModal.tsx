@@ -91,7 +91,15 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
 
   if (!isOpen) return null;
 
-  const totalCashSales = entries.reduce((sum, e) => sum + Number(e.amount || e.cash_in || 0), 0);
+  const totalCashIn = entries.reduce(
+    (sum, e) => sum + (Number(e.cash_in || 0) > 0 ? Number(e.cash_in) : Number(e.amount || 0) > 0 ? Number(e.amount) : 0),
+    0
+  );
+  const totalCashOut = entries.reduce(
+    (sum, e) => sum + (Number(e.cash_out || 0) > 0 ? Number(e.cash_out) : Number(e.amount || 0) < 0 ? Math.abs(Number(e.amount)) : 0),
+    0
+  );
+  const netCashBalance = totalCashIn - totalCashOut;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -104,7 +112,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
             </div>
             <div>
               <h2 className="text-xl font-bold leading-tight">Cash Drawer Audit Ledger</h2>
-              <p className="text-xs text-emerald-100 font-medium">Audit of physical cash sales & incoming receipts</p>
+              <p className="text-xs text-emerald-100 font-medium">Audit of physical cash sales, receipts & cash refunds</p>
             </div>
           </div>
           <button
@@ -151,10 +159,20 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
             )}
           </div>
 
-          <div className="flex items-center gap-4 text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
             <span className="px-3 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-900 font-mono text-xs flex items-center gap-1.5">
               <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
-              Total Cash Sales: Rs. {totalCashSales.toLocaleString()}
+              Inflow: +Rs. {totalCashIn.toLocaleString()}
+            </span>
+            {totalCashOut > 0 && (
+              <span className="px-3 py-1.5 rounded-xl bg-red-100 border border-red-300 text-red-900 font-mono text-xs flex items-center gap-1.5">
+                <ArrowUpRight className="w-4 h-4 text-red-600" />
+                Refunds: -Rs. {totalCashOut.toLocaleString()}
+              </span>
+            )}
+            <span className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-mono text-xs flex items-center gap-1.5 shadow-xs">
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+              Net Drawer: Rs. {netCashBalance.toLocaleString()}
             </span>
           </div>
         </div>
@@ -185,12 +203,14 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                   {entries.flatMap((item) => {
                     const isExpanded = !!expandedRows[item.id];
                     const hasLineItems = Array.isArray(item.order_details) && item.order_details.length > 0;
+                    const isRefund = item.entry_type === 'CUSTOMER REFUND' || Number(item.amount) < 0;
 
                     const dateStr = item.date
                       ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                       : new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-                    const saleAmount = Number(item.amount || item.cash_in || 0);
+                    const rawAmount = Number(item.amount || item.cash_in || 0);
+                    const displayAmount = isRefund ? Math.abs(Number(item.cash_out || item.amount || 0)) : rawAmount;
 
                     return [
                       /* Parent Row */
@@ -214,15 +234,25 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                           {dateStr}
                         </td>
                         <td className="p-3 font-bold whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold">
-                            CASH SALE
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                              isRefund
+                                ? 'bg-red-100 text-red-800 border-red-200'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            }`}
+                          >
+                            {isRefund ? 'CUSTOMER REFUND' : 'CASH SALE'}
                           </span>
                         </td>
                         <td className="p-3 font-medium text-slate-800">
                           {item.description}
                         </td>
-                        <td className="p-3 text-right font-mono font-bold text-emerald-600 whitespace-nowrap">
-                          +Rs. {saleAmount.toLocaleString()}
+                        <td
+                          className={`p-3 text-right font-mono font-bold whitespace-nowrap ${
+                            isRefund ? 'text-red-600' : 'text-emerald-600'
+                          }`}
+                        >
+                          {isRefund ? `-Rs. ${displayAmount.toLocaleString()}` : `+Rs. ${displayAmount.toLocaleString()}`}
                         </td>
                       </tr>,
 

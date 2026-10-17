@@ -12,6 +12,9 @@ const DEFAULT_UOMS = [
 ];
 
 export async function seed(knex: Knex): Promise<void> {
+  const hasTable = await knex.schema.hasTable('units_of_measure');
+  if (!hasTable) return;
+
   // Idempotent seed: insert or do nothing if the abbreviation already exists
   for (const uom of DEFAULT_UOMS) {
     await knex('units_of_measure')

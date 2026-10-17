@@ -142,7 +142,28 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto print:p-0 print:bg-white print:fixed print:inset-0">
-      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] print:max-h-none print:shadow-none print:rounded-none print:w-full">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 8mm;
+          }
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+          }
+          #a4-invoice-container {
+            width: 100% !important;
+            max-width: 194mm !important;
+            margin: 0 auto !important;
+            box-shadow: none !important;
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 0 !important;
+          }
+        }
+      `}</style>
+      <div id="a4-invoice-container" className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] print:max-h-none print:shadow-none print:rounded-none print:w-full">
         {/* Modal Window Top Controls (hidden on print) */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50 print:hidden">
           <div className="flex items-center gap-2">

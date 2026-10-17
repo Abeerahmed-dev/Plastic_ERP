@@ -19,7 +19,20 @@ export const ShiftAuditModal: React.FC<ShiftAuditModalProps> = ({ isOpen, onClos
 
   if (!isOpen) return null;
 
-  const totalCashCollected = invoices.reduce((acc, inv) => acc + Number(inv.paid_amount || inv.total_amount || 0), 0);
+  const salesInflow = invoices
+    .filter((inv) => Number(inv.paid_amount || inv.total_amount || 0) > 0)
+    .reduce((acc, inv) => acc + Number(inv.paid_amount || inv.total_amount || 0), 0);
+
+  const refundsOutflow = invoices
+    .filter((inv) => inv.status === 'REFUND' || (Number(inv.paid_amount || inv.total_amount || 0) < 0 && inv.status !== 'EXPENSE'))
+    .reduce((acc, inv) => acc + Math.abs(Number(inv.paid_amount || inv.total_amount || 0)), 0);
+
+  const expensesOutflow = invoices
+    .filter((inv) => inv.status === 'EXPENSE')
+    .reduce((acc, inv) => acc + Math.abs(Number(inv.paid_amount || inv.total_amount || 0)), 0);
+
+  const totalCashCollected = Math.max(0, salesInflow - refundsOutflow - expensesOutflow);
+
   const formattedToday = new Date().toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
@@ -65,9 +78,20 @@ export const ShiftAuditModal: React.FC<ShiftAuditModalProps> = ({ isOpen, onClos
             <span className="text-2xl font-black text-emerald-700 font-mono">
               Rs. {totalCashCollected.toLocaleString()}
             </span>
+            {(refundsOutflow > 0 || expensesOutflow > 0) && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-600 mt-1">
+                <span className="text-emerald-700">Sales: +Rs. {salesInflow.toLocaleString()}</span>
+                {refundsOutflow > 0 && (
+                  <span className="text-red-600">Refunds: -Rs. {refundsOutflow.toLocaleString()}</span>
+                )}
+                {expensesOutflow > 0 && (
+                  <span className="text-amber-700">Expenses: -Rs. {expensesOutflow.toLocaleString()}</span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2 bg-white px-3.5 py-1.5 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-800 shadow-xs">
-            <span>{invoices.length} Sales Transactions Generated</span>
+            <span>{invoices.length} Shift Transactions Recorded</span>
           </div>
         </div>
 
@@ -89,6 +113,9 @@ export const ShiftAuditModal: React.FC<ShiftAuditModalProps> = ({ isOpen, onClos
                   hour: '2-digit',
                   minute: '2-digit',
                 });
+                const isRefund = inv.status === 'REFUND';
+                const isExpense = inv.status === 'EXPENSE';
+                const rawAmount = Number(inv.paid_amount || inv.total_amount || 0);
 
                 return (
                   <div
@@ -101,7 +128,15 @@ export const ShiftAuditModal: React.FC<ShiftAuditModalProps> = ({ isOpen, onClos
                       className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors select-none"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 text-slate-600 rounded-lg">
+                        <div
+                          className={`p-2 rounded-lg ${
+                            isRefund
+                              ? 'bg-red-100 text-red-600'
+                              : isExpense
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
                           <FileText className="w-4 h-4" />
                         </div>
                         <div>
@@ -123,11 +158,23 @@ export const ShiftAuditModal: React.FC<ShiftAuditModalProps> = ({ isOpen, onClos
 
                       <div className="flex items-center gap-4">
                         <div className="text-right">
-                          <span className="text-sm font-black text-emerald-700 block font-mono">
-                            Rs. {Number(inv.paid_amount || inv.total_amount).toLocaleString()}
+                          <span
+                            className={`text-sm font-black block font-mono ${
+                              isRefund ? 'text-red-600' : isExpense ? 'text-amber-700' : 'text-emerald-700'
+                            }`}
+                          >
+                            {isRefund || isExpense ? `- Rs. ${Math.abs(rawAmount).toLocaleString()}` : `Rs. ${rawAmount.toLocaleString()}`}
                           </span>
-                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                            CASH PAID
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              isRefund
+                                ? 'text-red-700 bg-red-50 border-red-200'
+                                : isExpense
+                                ? 'text-amber-800 bg-amber-50 border-amber-200'
+                                : 'text-emerald-600 bg-emerald-50 border-emerald-100'
+                            }`}
+                          >
+                            {isRefund ? 'REFUND PAID' : isExpense ? 'EXPENSE PAID' : 'CASH PAID'}
                           </span>
                         </div>
                         {isExpanded ? (

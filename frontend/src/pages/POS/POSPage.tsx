@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, ShoppingCart, Trash2, AlertCircle, DollarSign, UserCheck, Lock, UserPlus, RotateCcw, TrendingUp } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, AlertCircle, DollarSign, UserCheck, Lock, UserPlus, RotateCcw, TrendingUp, Printer } from 'lucide-react';
 import { productsService } from '../../services/products.service';
 import { posService } from '../../services/pos.service';
 import { reportsService } from '../../services/reports.service';
@@ -215,17 +215,29 @@ export default function POSPage() {
   }, [shouldPrint, lastInvoice]);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden">
-      {/* LEFT: Product Search & Customer Selection */}
-      <div className="flex-1 flex flex-col p-6 border-r border-slate-200 overflow-y-auto">
-        {/* Walk-in POS Summary Cards */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-blue-500" />
-              Walk-in POS Summary
-            </h2>
-            {isCashier && (
+    <>
+      <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden">
+        {/* LEFT: Product Search & Customer Selection */}
+        <div className="flex-1 flex flex-col p-6 border-r border-slate-200 overflow-y-auto">
+          {/* Walk-in POS Summary Cards */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-blue-500" />
+                Walk-in POS Summary
+              </h2>
+              <div className="flex items-center gap-2">
+                {lastInvoice && (
+                  <button
+                    onClick={() => window.print()}
+                    className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs"
+                    title="Print the last generated thermal receipt"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Reprint Last Slip</span>
+                  </button>
+                )}
+                {isCashier && (
               <div
                 onClick={() => setIsShiftAuditOpen(true)}
                 className="flex items-center gap-2.5 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-xl shadow-2xs cursor-pointer hover:ring-2 hover:ring-emerald-400 hover:shadow-sm transition-all select-none group"
@@ -241,9 +253,10 @@ export default function POSPage() {
                   <span className="text-sm font-black text-emerald-700 leading-none mt-0.5 block">
                     Rs. {todayCashTallyData?.today_cash_tally?.toLocaleString() ?? '0'}
                   </span>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="bg-white p-3.5 rounded-xl shadow-xs border border-slate-200">
@@ -665,14 +678,17 @@ export default function POSPage() {
         onClose={() => setIsShiftAuditOpen(false)}
       />
 
-      {/* Hidden Receipt for Printing */}
+      </div>
+
+      {/* Hidden Receipt for Thermal Printing - placed outside print:hidden */}
       {lastInvoice && (
         <ReceiptPrinter
           invoice={lastInvoice.invoice}
           items={lastInvoice.items}
           cashierName={lastInvoice.cashierName}
+          customerName={lastInvoice.customerName}
         />
       )}
-    </div>
+    </>
   );
 }
