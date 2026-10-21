@@ -32,7 +32,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     heading: 'Sales',
     items: [
       { to: '/invoices', label: 'Sales Invoices', icon: FileText, permission: 'sales:read' },
-      { to: '/payments', label: 'Cust. Payments', icon: HandCoins, permission: 'payments:read' },
       { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read' },
     ],
   },
@@ -40,7 +39,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     heading: 'Purchases',
     items: [
       { to: '/purchases', label: 'Purchase Invoices', icon: Truck, permission: 'purchases:read' },
-      { to: '/supplier-payments', label: 'Supp. Payments', icon: HandCoins, permission: 'payments:read' },
       { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },
     ],
   },
@@ -311,8 +309,8 @@ export const MainLayout = () => {
   /* ─── Cashier: horizontal top-nav ─── */
   if (isCashier) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        <nav className="bg-slate-900 shadow-md border-b border-slate-800 shrink-0">
+      <div className="min-h-screen bg-slate-50 flex flex-col print:bg-white print:m-0 print:p-0">
+        <nav className="bg-slate-900 shadow-md border-b border-slate-800 shrink-0 print:hidden">
           <div className="w-full px-4 sm:px-6">
             <div className="flex items-center justify-between h-16 gap-4">
               {/* Brand Logo & Title */}
@@ -392,9 +390,9 @@ export const MainLayout = () => {
 
   /* ─── Owner / Admin: fixed sidebar layout ─── */
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 flex print:bg-white print:m-0 print:p-0">
       {/* Desktop fixed sidebar */}
-      <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md">
+      <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md print:hidden">
         <SidebarContent
           user={user}
           hasPermission={hasPermission}
@@ -404,7 +402,7 @@ export const MainLayout = () => {
 
       {/* Mobile sidebar overlay */}
       {mobileSidebarOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+        <div className="fixed inset-0 z-50 lg:hidden flex print:hidden">
           <div
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
             onClick={() => setMobileSidebarOpen(false)}
@@ -427,9 +425,9 @@ export const MainLayout = () => {
       )}
 
       {/* Right: slim topbar + page content */}
-      <div className="flex flex-col flex-1 lg:ml-60 min-h-screen">
+      <div className="flex flex-col flex-1 lg:ml-60 min-h-screen print:ml-0 print:p-0">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 gap-3 shrink-0 shadow-sm">
+        <header className="sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 gap-3 shrink-0 shadow-sm print:hidden">
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileSidebarOpen(true)}

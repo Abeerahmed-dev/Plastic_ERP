@@ -34,6 +34,40 @@ export function errorHandler(
     return;
   }
 
+  // Liquidity Wall: Catch INSUFFICIENT_LIQUIDITY errors
+  if (
+    (err instanceof Error && (err.message.startsWith('INSUFFICIENT_LIQUIDITY') || err.name === 'InsufficientLiquidityError')) ||
+    (typeof err === 'object' && err !== null && (err as any).name === 'InsufficientLiquidityError')
+  ) {
+    const message = (err as Error).message || 'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.';
+    res.status(400).json({
+      success: false,
+      error: message,
+      message,
+    });
+    return;
+  }
+
+  // Validation Error Wall: Catch VALIDATION_ERROR prefix errors
+  if (err instanceof Error && err.message.startsWith('VALIDATION_ERROR')) {
+    res.status(400).json({
+      success: false,
+      error: err.message,
+      message: err.message,
+    });
+    return;
+  }
+
+  // Not Found Wall: Catch NOT_FOUND prefix errors
+  if (err instanceof Error && err.message.startsWith('NOT_FOUND')) {
+    res.status(404).json({
+      success: false,
+      error: err.message,
+      message: err.message,
+    });
+    return;
+  }
+
   // Zod validation error
   if (err instanceof ZodError) {
     const details: Record<string, string[]> = {};

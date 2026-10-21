@@ -86,3 +86,12 @@ export interface LedgerEntry {
   credit: number;
   balance: number;
 }
+
+export interface RefundableCreditSource {
+  id: string;
+  type: 'OVERPAID_INVOICE' | 'ADVANCE';
+  reference: string;
+  available_credit: number;
+  date: string;
+}
+

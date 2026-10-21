@@ -9,8 +9,6 @@ import UsersListPage from './pages/Users/UsersListPage';
 import ProductsListPage from './pages/Products/ProductsListPage';
 import CategoriesPage from './pages/Categories/CategoriesPage';
 import InvoicesListPage from './pages/Invoices/InvoicesListPage';
-import PaymentsListPage from './pages/Payments/PaymentsListPage';
-import SupplierPaymentsListPage from './pages/Payments/SupplierPaymentsListPage';
 import PurchasesListPage from './pages/Purchases/PurchasesListPage';
 import POSPage from './pages/POS/POSPage';
 import { MainLayout } from './components/Layout/MainLayout';
@@ -50,8 +48,9 @@ function App() {
           <Route path="/invoices" element={<InvoicesListPage />} />
           <Route path="/sales" element={<InvoicesListPage />} />
           <Route path="/purchases" element={<PurchasesListPage />} />
-          <Route path="/payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
-          <Route path="/supplier-payments" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierPaymentsListPage />} />
+          <Route path="/payments" element={<Navigate to="/customers" replace />} />
+          <Route path="/customer-payments" element={<Navigate to="/customers" replace />} />
+          <Route path="/supplier-payments" element={<Navigate to="/suppliers" replace />} />
           <Route path="/expenses" element={<ExpensesListPage />} />
           <Route path="/pos" element={<POSPage />} />
           <Route path="/stock" element={<CashierStockPage />} />

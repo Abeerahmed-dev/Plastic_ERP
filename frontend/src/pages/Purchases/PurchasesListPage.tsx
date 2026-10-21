@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck } from 'lucide-react';
 import { purchasesService } from '../../services/purchases.service';
@@ -7,6 +8,9 @@ import PurchaseFormModal from './PurchaseFormModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
+import ProcessPurchaseReturnModal from '../Payments/ProcessPurchaseReturnModal';
+import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
+import { getSuppliers } from '../../services/suppliers.service';
 
 const LIMIT = 100;
 
@@ -21,10 +25,30 @@ export default function PurchasesListPage() {
   const isCashier = userRole === 'CASHIER';
   const canWrite = isCashier || isOwner || hasPermission('purchases:write');
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const [prefillProductId, setPrefillProductId] = useState<string | undefined>(undefined);
+
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnInvoiceId, setReturnInvoiceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const orderProduct = searchParams.get('orderProduct') || (location.state as any)?.prefillVariantId;
+    if (orderProduct) {
+      setPrefillProductId(orderProduct);
+      setModalOpen(true);
+    }
+  }, [searchParams, location.state]);
+
+  const handleProcessReturn = (invoiceId: string) => {
+    setReturnInvoiceId(invoiceId);
+    setReturnModalOpen(true);
+  };
 
   const renderCreatorBadge = (inv: any) => {
     const role = (inv.created_by_role || inv.creator?.role || 'ADMIN').toUpperCase();
@@ -56,6 +80,13 @@ export default function PurchasesListPage() {
     queryFn: () => purchasesService.getInvoices({ page, limit: LIMIT }),
     staleTime: 30000,
   });
+
+  const { data: suppliersResponse } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => getSuppliers({ limit: 100 }),
+    staleTime: 30000,
+  });
+  const suppliersList = suppliersResponse?.data || [];
 
   const invoices = data?.data || [];
   const meta = data?.meta;
@@ -116,15 +147,25 @@ export default function PurchasesListPage() {
             Track inventory stock arrivals and supplier purchase bills. Click purple document icon to view details.
           </p>
         </div>
-        {canWrite && (
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setModalOpen(true)}
-            className="inline-flex items-center justify-center rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 transition-all gap-2"
+            type="button"
+            onClick={() => setIsPaymentModalOpen(true)}
+            className="inline-flex items-center justify-center rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 transition-all cursor-pointer gap-2"
           >
             <Plus className="h-5 w-5" />
-            New Purchase Invoice
+            Record Payment
           </button>
-        )}
+          {canWrite && (
+            <button
+              onClick={() => setModalOpen(true)}
+              className="inline-flex items-center justify-center rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 transition-all gap-2"
+            >
+              <Plus className="h-5 w-5" />
+              New Purchase Invoice
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Cascading Filter Bar */}
@@ -234,13 +275,19 @@ export default function PurchasesListPage() {
                       <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
                     )}
                     <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                        inv.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                        inv.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        {inv.status}
-                      </span>
+                      {inv.balance_due !== undefined && Number(inv.balance_due) < 0 ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          OVERPAID
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                          inv.status === 'PAID' ? 'bg-green-100 text-green-700' :
+                          inv.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {inv.status}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -280,8 +327,23 @@ export default function PurchasesListPage() {
 
       {modalOpen && (
         <PurchaseFormModal
-          onClose={() => setModalOpen(false)}
-          onSuccess={() => refetch()}
+          initialProductId={prefillProductId}
+          onClose={() => {
+            setModalOpen(false);
+            setPrefillProductId(undefined);
+            if (searchParams.has('orderProduct')) {
+              searchParams.delete('orderProduct');
+              setSearchParams(searchParams, { replace: true });
+            }
+          }}
+          onSuccess={() => {
+            refetch();
+            setPrefillProductId(undefined);
+            if (searchParams.has('orderProduct')) {
+              searchParams.delete('orderProduct');
+              setSearchParams(searchParams, { replace: true });
+            }
+          }}
         />
       )}
 
@@ -290,6 +352,31 @@ export default function PurchasesListPage() {
         onClose={() => setIsDetailModalOpen(false)}
         invoice={detailModalInvoice}
         type="purchase"
+        onProcessReturn={canWrite ? handleProcessReturn : undefined}
+      />
+
+      {returnModalOpen && returnInvoiceId && (
+        <ProcessPurchaseReturnModal
+          parentInvoiceId={returnInvoiceId}
+          onClose={() => {
+            setReturnModalOpen(false);
+            setReturnInvoiceId(null);
+          }}
+          onSuccess={() => {
+            refetch();
+          }}
+        />
+      )}
+
+      <RecordPaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        type="SUPPLIER"
+        entityType="supplier"
+        suppliers={suppliersList}
+        onSuccess={() => {
+          refetch();
+        }}
       />
     </div>
   );

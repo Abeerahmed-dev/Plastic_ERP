@@ -9,6 +9,7 @@
     "test:backend": "npm --prefix backend test",
     "type-check:backend": "npm --prefix backend run type-check",
     "type-check:frontend": "npm --prefix frontend run type-check",
-    "migrate:latest": "npm --prefix backend run migrate:latest"
+    "migrate:latest": "npm --prefix backend run migrate:latest",
+    "db:clean": "npm --prefix backend run db:clean"
   }
 }

@@ -59,3 +59,15 @@
 [data-sonner-toast][data-type='info'] [data-icon] {
   color: #2563eb !important;
 }
+
+/* ─── Global Print Media CSS Architecture ─── */
+@media print {
+  @page {
+    margin: 0;
+  }
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    background-color: #ffffff !important;
+  }
+}

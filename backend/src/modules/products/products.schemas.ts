@@ -3,7 +3,13 @@ import { z } from 'zod';
 export const createProductSchema = z.object({
   code: z.string().optional().nullable(),
   name: z.string().min(1, 'Name is required').max(150),
-  size: z.string().optional().nullable(),
+  size: z.string({ required_error: 'Size/Variant is compulsory' })
+    .trim()
+    .min(1, 'Size/Variant is compulsory'),
+  low_stock_threshold: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)),
+    z.number().min(0, 'Low stock threshold cannot be negative').default(0)
+  ).optional(),
   description: z.string().optional().nullable(),
   category_id: z.string().uuid('Invalid Category ID'),
   cost_price: z.preprocess((val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)), z.number().min(0).default(0)).optional(),
@@ -14,6 +20,7 @@ export const createProductSchema = z.object({
   opening_stock_kg: z.preprocess((val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? undefined : Number(val)), z.number().min(0)).optional(),
   notes: z.string().optional().nullable(),
 });
+
 
 export const updateProductSchema = createProductSchema
   .omit({ opening_stock: true, opening_stock_kg: true, historical_wac: true }) // Day Zero stock fields are immutable

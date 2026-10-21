@@ -15,6 +15,11 @@ export function requirePermission(permission: string) {
       return next(new UnauthorizedError());
     }
 
+    const userRole = (req.user.roleName || '').toUpperCase();
+    if (userRole === 'OWNER' || userRole === 'ADMIN') {
+      return next();
+    }
+
     if (!req.user.permissions.includes(permission)) {
       return next(
         new ForbiddenError(

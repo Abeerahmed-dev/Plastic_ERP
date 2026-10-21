@@ -422,116 +422,397 @@ export async function softDeleteCustomer(id: string): Promise<boolean> {
   return count > 0;
 }
 
-export interface LedgerEntry {
+export interface StatementEntry {
   id: string;
+  source_id?: string;
   date: string;
-  type: 'INVOICE' | 'PAYMENT' | 'OPENING_BALANCE' | 'CREDIT_NOTE';
+  type: 'INVOICE' | 'CREDIT_NOTE' | 'PAYMENT' | 'ADVANCE_DEPOSIT' | 'CASH_REFUND' | 'OPENING_BALANCE';
+  reference_no: string;
   reference: string;
-  debit: number;  // increases balance
-  credit: number; // decreases balance
+  debit: number;
+  credit: number;
+  running_balance: number;
   balance: number;
+  payment_method?: string | null;
+  notes?: string | null;
 }
 
-export async function getCustomerLedger(id: string): Promise<LedgerEntry[]> {
-  const customer = await db('customers').where({ id }).first();
+export type LedgerEntry = StatementEntry;
+
+export async function getCustomerStatement(id: string, trx: Knex.Transaction | Knex = db): Promise<StatementEntry[]> {
+  const customer = await trx('customers').where({ id }).first();
   if (!customer) return [];
 
-  const ledger: LedgerEntry[] = [];
-  let runningBalance = Number(customer.opening_balance);
+  const rawEntries: Array<{
+    id: string;
+    source_id: string;
+    raw_date: Date;
+    date: string;
+    type: 'INVOICE' | 'CREDIT_NOTE' | 'PAYMENT' | 'ADVANCE_DEPOSIT' | 'CASH_REFUND' | 'OPENING_BALANCE';
+    reference_no: string;
+    reference: string;
+    debit: number;
+    credit: number;
+    payment_method: string | null;
+    notes: string | null;
+  }> = [];
 
-  // 1. Opening Balance Entry
-  ledger.push({
-    id: 'opening',
-    date: customer.created_at.toISOString(),
-    type: 'OPENING_BALANCE',
-    reference: 'Opening Balance',
-    debit: runningBalance >= 0 ? runningBalance : 0,
-    credit: runningBalance < 0 ? Math.abs(runningBalance) : 0,
-    balance: runningBalance
-  });
-
-  // 2. Fetch Invoices & Credit Notes
-  const invoices = await db('sales_invoices')
+  // 1. Invoices & Credit Notes
+  const invoices = await trx('sales_invoices')
     .where('customer_id', id)
-    .select('id', 'date', 'invoice_number', 'total_amount', 'invoice_type');
-    
-  const invoiceEntries = invoices.map(inv => {
+    .whereNot('status', 'CANCELLED')
+    .select('id', 'date', 'invoice_number', 'total_amount', 'invoice_type', 'notes', 'created_at');
+
+  for (const inv of invoices) {
     const total = Number(inv.total_amount);
     const isCreditNote = inv.invoice_type === 'CREDIT_NOTE' || total < 0;
-    
+    const invDate = inv.date ? new Date(inv.date) : (inv.created_at ? new Date(inv.created_at) : new Date());
+
     if (isCreditNote) {
       const positiveAmt = Math.abs(total);
-      return {
+      rawEntries.push({
         id: inv.id,
-        date: new Date(inv.date).toISOString(),
-        type: 'CREDIT_NOTE' as const,
+        source_id: inv.id,
+        raw_date: invDate,
+        date: invDate.toISOString(),
+        type: 'CREDIT_NOTE',
+        reference_no: inv.invoice_number,
         reference: inv.invoice_number,
         debit: 0,
-        credit: positiveAmt
-      };
+        credit: positiveAmt,
+        payment_method: null,
+        notes: inv.notes || 'Sales Return / Credit Note',
+      });
+    } else {
+      rawEntries.push({
+        id: inv.id,
+        source_id: inv.id,
+        raw_date: invDate,
+        date: invDate.toISOString(),
+        type: 'INVOICE',
+        reference_no: inv.invoice_number,
+        reference: inv.invoice_number,
+        debit: total,
+        credit: 0,
+        payment_method: null,
+        notes: inv.notes || null,
+      });
     }
+  }
 
-    return {
-      id: inv.id,
-      date: new Date(inv.date).toISOString(),
-      type: 'INVOICE' as const,
-      reference: inv.invoice_number,
-      debit: total,
-      credit: 0
-    };
-  });
-
-  // 3. Fetch Payments
-  const payments = await db('customer_payments')
+  // 2. Customer Payments, Advances & Cash Refunds
+  const payments = await trx('customer_payments')
     .where('customer_id', id)
-    .select('id', 'payment_date', 'payment_number', 'amount', 'cheque_status');
+    .select('id', 'payment_date', 'payment_number', 'amount', 'payment_type', 'payment_method', 'notes', 'cheque_status', 'created_at');
 
-  const paymentEntries = payments.map(pay => {
+  for (const pay of payments) {
     const amt = Number(pay.amount);
+    const payDate = pay.payment_date ? new Date(pay.payment_date) : (pay.created_at ? new Date(pay.created_at) : new Date());
+
     if (pay.cheque_status === 'BOUNCED') {
-      return {
+      rawEntries.push({
         id: pay.id,
-        date: new Date(pay.payment_date).toISOString(),
-        type: 'PAYMENT' as const,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'PAYMENT',
+        reference_no: `${pay.payment_number} (BOUNCED)`,
         reference: `${pay.payment_number} (BOUNCED)`,
         debit: 0,
         credit: 0,
-      };
+        payment_method: pay.payment_method || null,
+        notes: 'Bounced Cheque',
+      });
+      continue;
     }
-    if (amt < 0) {
-      return {
+
+    if (pay.payment_type === 'CASH_REFUND' || amt < 0) {
+      // Cash Refund: debit: amount, credit: 0
+      rawEntries.push({
         id: pay.id,
-        date: new Date(pay.payment_date).toISOString(),
-        type: 'PAYMENT' as const,
-        reference: `${pay.payment_number} (REFUND)`,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'CASH_REFUND',
+        reference_no: pay.payment_number,
+        reference: pay.payment_number,
         debit: Math.abs(amt),
         credit: 0,
-      };
+        payment_method: pay.payment_method || null,
+        notes: pay.notes || 'Cash Refund from Advance Wallet',
+      });
+    } else if (pay.payment_type === 'ADVANCE_DEPOSIT') {
+      // Advance Deposit: debit: 0, credit: amount
+      rawEntries.push({
+        id: pay.id,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'ADVANCE_DEPOSIT',
+        reference_no: pay.payment_number,
+        reference: pay.payment_number,
+        debit: 0,
+        credit: amt,
+        payment_method: pay.payment_method || null,
+        notes: pay.notes || 'Advance Deposit to Wallet',
+      });
+    } else {
+      // Payment (Receipt): debit: 0, credit: amount
+      rawEntries.push({
+        id: pay.id,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'PAYMENT',
+        reference_no: pay.payment_number,
+        reference: pay.payment_number,
+        debit: 0,
+        credit: amt,
+        payment_method: pay.payment_method || null,
+        notes: pay.notes || null,
+      });
     }
-    return {
-      id: pay.id,
-      date: new Date(pay.payment_date).toISOString(),
-      type: 'PAYMENT' as const,
-      reference: pay.payment_number,
-      debit: 0,
-      credit: amt,
-    };
+  }
+
+  // 3. Chronological Sorting: sort by date ASC
+  const sortedTransactions = rawEntries.sort((a, b) => {
+    const diff = a.raw_date.getTime() - b.raw_date.getTime();
+    if (diff !== 0) return diff;
+    if (a.type === 'INVOICE' && b.type !== 'INVOICE') return -1;
+    if (a.type !== 'INVOICE' && b.type === 'INVOICE') return 1;
+    return 0;
   });
 
-  // Combine and sort by date ASC
-  const transactions = [...invoiceEntries, ...paymentEntries].sort((a, b) => {
-    return new Date(a.date).getTime() - new Date(b.date).getTime();
-  });
+  // 4. Opening Balance row (if exists) & running balance math engine
+  const statement: StatementEntry[] = [];
+  let running_balance = 0;
 
-  // Calculate running balances
-  for (const t of transactions) {
-    runningBalance = runningBalance + t.debit - t.credit;
-    ledger.push({
-      ...t,
-      balance: runningBalance
+  const openingBal = Number(customer.opening_balance || 0);
+  if (openingBal !== 0) {
+    const custDate = customer.created_at ? new Date(customer.created_at) : new Date();
+    const firstTxDate = sortedTransactions.length > 0 ? sortedTransactions[0].raw_date : null;
+    const openingDate = firstTxDate && firstTxDate.getTime() < custDate.getTime() ? firstTxDate : custDate;
+    const debit = openingBal > 0 ? openingBal : 0;
+    const credit = openingBal < 0 ? Math.abs(openingBal) : 0;
+    running_balance = debit - credit;
+
+    statement.push({
+      id: 'opening',
+      source_id: 'opening',
+      date: openingDate.toISOString(),
+      type: 'OPENING_BALANCE',
+      reference_no: 'OPENING-BAL',
+      reference: 'Opening Balance',
+      debit,
+      credit,
+      running_balance,
+      balance: running_balance,
+      payment_method: null,
+      notes: 'Initial opening balance',
     });
   }
 
-  return ledger;
+  // Loop through the array to calculate the running_balance. (Previous Balance + Debit - Credit)
+  for (const t of sortedTransactions) {
+    running_balance = running_balance + t.debit - t.credit;
+    statement.push({
+      id: t.id,
+      source_id: t.source_id,
+      date: t.date,
+      type: t.type,
+      reference_no: t.reference_no,
+      reference: t.reference,
+      debit: t.debit,
+      credit: t.credit,
+      running_balance,
+      balance: running_balance,
+      payment_method: t.payment_method,
+      notes: t.notes,
+    });
+  }
+
+  return statement;
 }
+
+export async function getCustomerLedger(id: string): Promise<LedgerEntry[]> {
+  return await getCustomerStatement(id);
+}
+
+export interface RefundableCreditSource {
+  id: string;
+  type: 'OVERPAID_INVOICE' | 'ADVANCE';
+  reference: string;
+  available_credit: number;
+  date: string;
+}
+
+export async function getCustomerRefundableCredits(
+  customerId: string,
+  trx: Knex.Transaction | Knex = db
+): Promise<RefundableCreditSource[]> {
+  const customer = await trx('customers').where({ id: customerId }).first();
+  if (!customer) return [];
+
+  const creditSources: RefundableCreditSource[] = [];
+
+  // 1. Query Overpaid Invoices: Fetch sales invoices where (amount_paid - net_total) > 0
+  const salesInvoices = await trx('sales_invoices as si')
+    .where('si.customer_id', customerId)
+    .whereNot('si.status', 'CANCELLED')
+    .where((qb) => {
+      qb.whereNull('si.invoice_type')
+        .orWhereNotIn('si.invoice_type', ['CREDIT_NOTE', 'RETURN']);
+    })
+    .where('si.total_amount', '>', 0)
+    .select('si.id', 'si.invoice_number', 'si.total_amount', 'si.paid_amount', 'si.date', 'si.created_at');
+
+  const invoiceIds = salesInvoices.map((inv) => inv.id);
+
+  if (invoiceIds.length > 0) {
+    const creditNotes = await trx('sales_invoices')
+      .whereIn('parent_invoice_id', invoiceIds)
+      .where(function () {
+        this.whereIn('invoice_type', ['CREDIT_NOTE', 'RETURN'])
+          .orWhere('invoice_number', 'like', 'CN-%');
+      })
+      .whereNot('status', 'CANCELLED')
+      .select('parent_invoice_id', 'total_amount');
+
+    const returnedByInvoice = new Map<string, number>();
+    for (const cn of creditNotes) {
+      if (cn.parent_invoice_id) {
+        const prev = returnedByInvoice.get(cn.parent_invoice_id) || 0;
+        returnedByInvoice.set(cn.parent_invoice_id, prev + Math.abs(Number(cn.total_amount || 0)));
+      }
+    }
+
+    const linkedRefunds = await trx('customer_payments')
+      .where((qb) => {
+        qb.whereIn('linked_invoice_id', invoiceIds)
+          .orWhereIn('invoice_id', invoiceIds);
+      })
+      .andWhere((qb) => {
+        qb.where('payment_type', 'CASH_REFUND')
+          .orWhere('payment_method', 'CASH_REFUND')
+          .orWhere('amount', '<', 0);
+      })
+      .select('linked_invoice_id', 'invoice_id', 'amount');
+
+    const refundedByInvoice = new Map<string, number>();
+    for (const rf of linkedRefunds) {
+      const invId = rf.linked_invoice_id || rf.invoice_id;
+      if (invId) {
+        const prev = refundedByInvoice.get(invId) || 0;
+        refundedByInvoice.set(invId, prev + Math.abs(Number(rf.amount || 0)));
+      }
+    }
+
+    for (const inv of salesInvoices) {
+      const originalTotal = Math.abs(Number(inv.total_amount || 0));
+      const returnedTotal = returnedByInvoice.get(inv.id) || 0;
+      const netTotal = Math.round((originalTotal - returnedTotal) * 100) / 100;
+      const alreadyRefunded = refundedByInvoice.get(inv.id) || 0;
+      const paidAmount = Math.max(0, Number(inv.paid_amount || 0) - alreadyRefunded);
+
+      const overpayment = Math.round((paidAmount - netTotal) * 100) / 100;
+      if (overpayment > 0) {
+        const invDate = inv.date ? new Date(inv.date) : (inv.created_at ? new Date(inv.created_at) : new Date());
+        creditSources.push({
+          id: inv.id,
+          type: 'OVERPAID_INVOICE',
+          reference: inv.invoice_number,
+          available_credit: overpayment,
+          date: invDate.toISOString().split('T')[0],
+        });
+      }
+    }
+  }
+
+  // 2. Query Advance Deposits: Fetch payments where payment_type = 'ADVANCE_DEPOSIT' or (invoice_id is null and linked_invoice_id is null) that have unconsumed balances
+  const advancePayments = await trx('customer_payments')
+    .where('customer_id', customerId)
+    .where((qb) => {
+      qb.where('payment_type', 'ADVANCE_DEPOSIT')
+        .orWhere('payment_type', 'ADVANCE')
+        .orWhere((inner) => {
+          inner.whereNull('invoice_id').whereNull('linked_invoice_id');
+        });
+    })
+    .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+    .where('amount', '>', 0)
+    .where((qb) => {
+      qb.whereNull('payment_method')
+        .orWhereNot('payment_method', 'WALLET_ADVANCE');
+    })
+    .select('id', 'payment_number', 'amount', 'payment_date', 'notes', 'created_at');
+
+  const advancePaymentIds = advancePayments.map((p) => p.id);
+
+  const hasAllocationsTable = await trx.schema.hasTable('payment_allocations');
+  const allocations = (hasAllocationsTable && advancePaymentIds.length > 0)
+    ? await trx('payment_allocations')
+        .whereIn('payment_id', advancePaymentIds)
+        .select('payment_id', 'allocated_amount')
+    : [];
+
+  const allocatedByPayment = new Map<string, number>();
+  for (const alloc of allocations) {
+    const prev = allocatedByPayment.get(alloc.payment_id) || 0;
+    allocatedByPayment.set(alloc.payment_id, prev + Number(alloc.allocated_amount || 0));
+  }
+
+  const advanceRefunds = await trx('customer_payments')
+    .where('customer_id', customerId)
+    .where((qb) => {
+      qb.where('payment_type', 'CASH_REFUND')
+        .orWhere('payment_method', 'CASH_REFUND')
+        .orWhere('amount', '<', 0);
+    })
+    .select('notes', 'amount');
+
+  for (const pay of advancePayments) {
+    const totalAmount = Number(pay.amount || 0);
+    const allocatedAmount = allocatedByPayment.get(pay.id) || 0;
+
+    let refundedFromPay = 0;
+    if (pay.payment_number) {
+      for (const rf of advanceRefunds) {
+        if (rf.notes && rf.notes.includes(pay.payment_number)) {
+          refundedFromPay += Math.abs(Number(rf.amount || 0));
+        }
+      }
+    }
+
+    const unallocated = Math.round((totalAmount - allocatedAmount - refundedFromPay) * 100) / 100;
+    if (unallocated > 0) {
+      const payDate = pay.payment_date ? new Date(pay.payment_date) : (pay.created_at ? new Date(pay.created_at) : new Date());
+      creditSources.push({
+        id: pay.id,
+        type: 'ADVANCE',
+        reference: pay.payment_number || 'Advance Payment',
+        available_credit: unallocated,
+        date: payDate.toISOString().split('T')[0],
+      });
+    }
+  }
+
+  // 3. Fallback: If customer has advance_credit in balance not covered by individual records, include it as general wallet advance
+  const balanceDetails = await computeCustomerNetBalance(customerId, trx);
+  const currentTotal = creditSources.reduce((sum, s) => sum + s.available_credit, 0);
+  const leftoverAdvance = Math.round((balanceDetails.advance_credit - currentTotal) * 100) / 100;
+  if (leftoverAdvance > 0 && creditSources.length === 0) {
+    const custDate = customer.created_at ? new Date(customer.created_at) : new Date();
+    creditSources.push({
+      id: 'customer-wallet-advance',
+      type: 'ADVANCE',
+      reference: 'Advance Wallet Deposit',
+      available_credit: leftoverAdvance,
+      date: custDate.toISOString().split('T')[0],
+    });
+  }
+
+  // Return combined array sorted by date (chronological ASC)
+  return creditSources.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
 

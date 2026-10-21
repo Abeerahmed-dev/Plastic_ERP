@@ -1,8 +1,11 @@
 import db from '../../db/knex';
 import { Knex } from 'knex';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
+import { restoreInventoryBucketsLifo } from '../invoices/invoices.repository';
 
-import { ForbiddenError } from '../../shared/errors';
+export { restoreInventoryBucketsLifo };
+
+import { ForbiddenError, NotFoundError, ValidationError, InsufficientStockError } from '../../shared/errors';
 
 export async function processPOSCheckout(
   userId: string,
@@ -56,7 +59,7 @@ export async function processPOSCheckout(
 
       // Fetch Product & Category
       const product = await trx('products as p')
-        .join('categories as c', 'p.category_id', 'c.id')
+        .leftJoin('categories as c', 'p.category_id', 'c.id')
         .where('p.id', item.product_id)
         .select(
           'p.id',
@@ -71,7 +74,7 @@ export async function processPOSCheckout(
         .first();
 
       if (!product) {
-        throw new Error(`Product ${item.product_id} not found.`);
+        throw new NotFoundError(`Product ${item.product_id}`);
       }
 
       // Unit multiplier (default Bag wt if Bag selected, else 1 for KG)
@@ -80,9 +83,17 @@ export async function processPOSCheckout(
         ? bagWeight
         : 1.0;
 
-      const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
-      // Strictly lock selling price: ignore any frontend overrides and rely on database's product selling price
-      const effectiveUnitPrice = fixedRetailKg * unitMultiplier;
+      const retailNum = Number(product.fixed_retail_price_per_kg || 0);
+      const saleNum = Number(product.sale_price || 0);
+      const itemUnitPriceNum = Number(item.unit_price || 0);
+
+      // Correctly handle string '0.00' coercion from PostgreSQL
+      const fixedRetailKg = retailNum > 0
+        ? retailNum
+        : (saleNum > 0 ? saleNum : (itemUnitPriceNum > 0 ? (itemUnitPriceNum / unitMultiplier) : 0));
+
+      // Strictly lock selling price: use database's product selling price, or fallback to unit_price
+      const effectiveUnitPrice = fixedRetailKg > 0 ? (fixedRetailKg * unitMultiplier) : itemUnitPriceNum;
       const lineTotal = Number(item.quantity) * effectiveUnitPrice;
       subtotal += lineTotal;
 
@@ -93,8 +104,17 @@ export async function processPOSCheckout(
         const abs_kg = absQty * unitMultiplier;
         const sold_kg = -abs_kg; // negative quantity
 
-        const appliedCogsPerKg = Number(product.rolling_avg_cost_per_kg || product.cost_price || 0);
-        const lineCogs = Math.round((abs_kg * appliedCogsPerKg) * 100) / 100;
+        // ── LIFO Restoration Loop for POS Return ──
+        const { totalRestoredCogs, primaryBatchId } = await restoreInventoryBucketsLifo(
+          trx,
+          item.product_id,
+          abs_kg
+        );
+
+        const appliedCogsPerKg = abs_kg > 0
+          ? Math.round((totalRestoredCogs / abs_kg) * 10000) / 10000
+          : 0;
+        const lineCogs = Math.round(totalRestoredCogs * 100) / 100;
 
         // Reverse inventory: Add stock back into product total
         await trx('products')
@@ -106,7 +126,7 @@ export async function processPOSCheckout(
 
         invoiceItemsToInsert.push({
           product_id: item.product_id,
-          batch_id: null,
+          batch_id: primaryBatchId,
           quantity: item.quantity,
           selected_unit,
           actual_weight_per_unit: unitMultiplier,
@@ -140,9 +160,7 @@ export async function processPOSCheckout(
         const live_stock = Number(liveProduct?.total_stock_kg ?? product.total_stock_kg ?? 0);
 
         if (live_stock < sold_kg) {
-          const err: any = new Error('INSUFFICIENT_STOCK');
-          err.remainingStock = live_stock;
-          throw err;
+          throw new InsufficientStockError(live_stock);
         }
 
         // ── Auto-FIFO Price-Bucket Stock Deduction ──
@@ -203,7 +221,9 @@ export async function processPOSCheckout(
         const sellingPricePerKg = sold_kg > 0 ? (lineTotal / sold_kg) : Number(item.unit_price);
 
         if (sellingPricePerKg < floorPricePerKg - 0.01) {
-          throw new Error(`Selling price for ${product.name} is below minimum authorized margin.`);
+          throw new ValidationError(
+            `Selling price for ${product.name} (Rs. ${sellingPricePerKg.toFixed(2)}/kg) is below minimum authorized margin (Floor: Rs. ${floorPricePerKg.toFixed(2)}/kg).`
+          );
         }
 
         // Deduct stock from product

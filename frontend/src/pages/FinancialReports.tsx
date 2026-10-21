@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Layers,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 import { BusinessPerformanceRow } from '../components/Reports/BusinessPerformanceRow';
@@ -27,6 +28,7 @@ import { CashBookModal } from '../components/Reports/CashBookModal';
 import { PdcLedgerModal } from '../components/Reports/PdcLedgerModal';
 import { IssuedPdcLedgerModal } from '../components/Reports/IssuedPdcLedgerModal';
 import { BankAccountsModal } from '../components/Reports/BankAccountsModal';
+import { TransferFundsModal } from '../components/Modals/TransferFundsModal';
 
 interface LiquidityModalData {
   type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances';
@@ -57,6 +59,7 @@ export default function FinancialReports() {
   const [isPdcModalOpen, setIsPdcModalOpen] = useState(false);
   const [isIssuedPdcModalOpen, setIsIssuedPdcModalOpen] = useState(false);
   const [isBankAccountsModalOpen, setIsBankAccountsModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
 
   const toggleProductAccordion = (productId: string) => {
     setExpandedProducts((prev) => ({
@@ -443,7 +446,18 @@ export default function FinancialReports() {
               <p className="text-xs text-slate-500">Click summary cards to open granular drill-down entity lists</p>
             </div>
           </div>
-          {isLoadingLiquidity && <span className="text-xs text-blue-600 animate-pulse font-medium">Loading liquidity...</span>}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsTransferModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs active:scale-95 shrink-0"
+              title="Move funds between Bank Accounts and Cash Drawer"
+            >
+              <ArrowRightLeft className="w-4 h-4" />
+              ⇄ Transfer Funds
+            </button>
+            {isLoadingLiquidity && <span className="text-xs text-blue-600 animate-pulse font-medium">Loading liquidity...</span>}
+          </div>
         </div>
 
         {/* 6 Grid Cards */}
@@ -982,6 +996,13 @@ export default function FinancialReports() {
 
       {/* ─── MULTI-BANK ACCOUNTS BREAKDOWN & MANAGEMENT MODAL ─── */}
       <BankAccountsModal isOpen={isBankAccountsModalOpen} onClose={() => setIsBankAccountsModalOpen(false)} />
+
+      {/* ─── INTERNAL FUNDS TRANSFER (CONTRA) MODAL ─── */}
+      <TransferFundsModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        onSuccess={() => fetchAllReports()}
+      />
     </div>
   );
 }

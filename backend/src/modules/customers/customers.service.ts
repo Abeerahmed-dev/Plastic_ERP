@@ -64,8 +64,19 @@ export async function deactivateCustomer(id: string): Promise<void> {
   await softDeleteCustomer(id);
 }
 
-export async function fetchCustomerLedger(id: string) {
+export async function fetchCustomerStatement(id: string) {
   await getCustomer(id); // ensure exists
-  const { getCustomerLedger } = await import('./customers.repository');
-  return await getCustomerLedger(id);
+  const { getCustomerStatement } = await import('./customers.repository');
+  return await getCustomerStatement(id);
 }
+
+export async function fetchCustomerLedger(id: string) {
+  return await fetchCustomerStatement(id);
+}
+
+export async function getCustomerRefundableCredits(id: string) {
+  await getCustomer(id);
+  const { getCustomerRefundableCredits: repoGetCustomerRefundableCredits } = await import('./customers.repository');
+  return await repoGetCustomerRefundableCredits(id);
+}
+

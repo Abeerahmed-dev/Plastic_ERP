@@ -657,20 +657,22 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
 }
 
 export async function getCashLedgerReport(startDate?: string, endDate?: string) {
-  let query = db('customer_payments as cp')
-    .join('customers as c', 'cp.customer_id', 'c.id')
+  let custQuery = db('customer_payments as cp')
+    .leftJoin('customers as c', 'cp.customer_id', 'c.id')
     .leftJoin('sales_invoices as si', 'cp.invoice_id', 'si.id')
     .leftJoin('sales_invoice_items as sii', 'si.id', 'sii.invoice_id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
-    .whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER'])
+    .whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'CASH_REFUND'])
     .select(
       'cp.id',
       'cp.payment_date as date',
       'cp.created_at',
-      db.raw("'CASH SALE' as entry_type"),
-      db.raw("CONCAT('Cash Payment from ', c.name, COALESCE(CONCAT(' (Inv #', si.invoice_number, ')'), '')) as description"),
+      'cp.payment_number',
+      'si.invoice_number',
+      'si.notes as invoice_notes',
+      'cp.notes',
+      'c.name as customer_name',
       'cp.amount as amount',
-      'cp.amount as cash_in',
       db.raw(`
         COALESCE(
           json_agg(
@@ -690,44 +692,177 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
       'cp.id',
       'cp.payment_date',
       'cp.created_at',
+      'cp.payment_number',
       'c.name',
       'si.invoice_number',
+      'si.notes',
+      'cp.notes',
       'cp.amount'
     )
     .orderBy('cp.created_at', 'desc');
 
+  let suppQuery = db('supplier_payments as sp')
+    .leftJoin('suppliers as s', 'sp.supplier_id', 's.id')
+    .whereIn('sp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'CASH_REFUND'])
+    .select(
+      'sp.id',
+      'sp.payment_date as date',
+      'sp.created_at',
+      'sp.payment_number',
+      'sp.notes',
+      's.name as supplier_name',
+      'sp.amount'
+    )
+    .orderBy('sp.created_at', 'desc');
+
+  let expQuery = db('expenses as e')
+    .whereIn('e.payment_method', ['CASH', 'Cash', 'Cash in Drawer'])
+    .select(
+      'e.id',
+      'e.expense_date as date',
+      'e.created_at',
+      'e.category',
+      'e.description',
+      'e.amount'
+    )
+    .orderBy('e.created_at', 'desc');
+
   if (startDate) {
     const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
-    query = query.where(function () {
+    custQuery = custQuery.where(function () {
       this.where('cp.created_at', '>=', startDate).orWhereRaw('cp.payment_date::text >= ?', [startDateOnly]);
+    });
+    suppQuery = suppQuery.where(function () {
+      this.where('sp.created_at', '>=', startDate).orWhereRaw('sp.payment_date::text >= ?', [startDateOnly]);
+    });
+    expQuery = expQuery.where(function () {
+      this.where('e.created_at', '>=', startDate).orWhereRaw('e.expense_date::text >= ?', [startDateOnly]);
     });
   }
 
   if (endDate) {
     const endDateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
-    query = query.where(function () {
+    custQuery = custQuery.where(function () {
       this.where('cp.created_at', '<=', endDate).orWhereRaw('cp.payment_date::text <= ?', [endDateOnly]);
+    });
+    suppQuery = suppQuery.where(function () {
+      this.where('sp.created_at', '<=', endDate).orWhereRaw('sp.payment_date::text <= ?', [endDateOnly]);
+    });
+    expQuery = expQuery.where(function () {
+      this.where('e.created_at', '<=', endDate).orWhereRaw('e.expense_date::text <= ?', [endDateOnly]);
     });
   }
 
-  const rows = await query;
+  const [custRows, suppRows, expRows] = await Promise.all([custQuery, suppQuery, expQuery]);
 
-  return rows.map((item) => {
+  const results: any[] = [];
+
+  for (const item of custRows) {
     const rawOrderDetails = typeof item.order_details === 'string'
       ? JSON.parse(item.order_details)
       : (Array.isArray(item.order_details) ? item.order_details : []);
 
-    return {
-      id: item.id,
-      date: item.date,
-      created_at: item.created_at,
-      entry_type: item.entry_type || 'CASH SALE',
-      description: item.description,
-      amount: Number(item.amount || item.cash_in || 0),
-      cash_in: Number(item.cash_in || item.amount || 0),
-      order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
-    };
-  });
+    const amt = Number(item.amount || 0);
+    const isRefund = amt < 0;
+
+    const isPos = Boolean(
+      (item.payment_number && item.payment_number.includes('POS')) ||
+      (item.invoice_number && item.invoice_number.startsWith('POS')) ||
+      (item.notes && item.notes.toLowerCase().includes('pos')) ||
+      (item.invoice_notes && item.invoice_notes.toLowerCase().includes('pos'))
+    );
+
+    if (isRefund) {
+      results.push({
+        id: item.id,
+        date: item.date,
+        created_at: item.created_at,
+        entry_type: 'CASH REFUND',
+        source: 'OUTFLOW',
+        source_type: 'OUTFLOW',
+        transaction_type: 'WITHDRAWAL',
+        description: `Customer Cash Refund: ${item.customer_name || 'Customer'}${item.invoice_number ? ` (Inv #${item.invoice_number})` : ''}`,
+        amount: Math.abs(amt),
+        cash_out: Math.abs(amt),
+        cash_in: 0,
+        order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
+      });
+    } else {
+      const source: 'POS' | 'CUSTOMER_PAYMENT' = isPos ? 'POS' : 'CUSTOMER_PAYMENT';
+      results.push({
+        id: item.id,
+        date: item.date,
+        created_at: item.created_at,
+        entry_type: isPos ? 'POS SALE' : 'CASH PAYMENT',
+        source,
+        source_type: source,
+        transaction_type: 'DEPOSIT',
+        description: isPos
+          ? `Walk-in POS Sale: ${item.customer_name || 'Counter Customer'}`
+          : `Cash Payment from ${item.customer_name || 'Customer'}${item.invoice_number ? ` (Inv #${item.invoice_number})` : ''}`,
+        amount: amt,
+        cash_in: amt,
+        cash_out: 0,
+        order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
+      });
+    }
+  }
+
+  for (const sp of suppRows) {
+    const amt = Number(sp.amount || 0);
+    if (amt >= 0) {
+      results.push({
+        id: sp.id,
+        date: sp.date,
+        created_at: sp.created_at,
+        entry_type: 'SUPPLIER PAYMENT',
+        source: 'OUTFLOW',
+        source_type: 'OUTFLOW',
+        transaction_type: 'WITHDRAWAL',
+        description: `Cash Payment to Supplier: ${sp.supplier_name || 'Vendor'}${sp.payment_number ? ` (${sp.payment_number})` : ''}`,
+        amount: amt,
+        cash_out: amt,
+        cash_in: 0,
+        order_details: [],
+      });
+    } else {
+      results.push({
+        id: sp.id,
+        date: sp.date,
+        created_at: sp.created_at,
+        entry_type: 'SUPPLIER REFUND',
+        source: 'CUSTOMER_PAYMENT',
+        source_type: 'CUSTOMER_PAYMENT',
+        transaction_type: 'DEPOSIT',
+        description: `Supplier Cash Refund: ${sp.supplier_name || 'Vendor'}`,
+        amount: Math.abs(amt),
+        cash_in: Math.abs(amt),
+        cash_out: 0,
+        order_details: [],
+      });
+    }
+  }
+
+  for (const exp of expRows) {
+    const amt = Number(exp.amount || 0);
+    results.push({
+      id: exp.id,
+      date: exp.date,
+      created_at: exp.created_at,
+      entry_type: 'EXPENSE',
+      source: 'OUTFLOW',
+      source_type: 'OUTFLOW',
+      transaction_type: 'WITHDRAWAL',
+      description: `Cash Expense: ${exp.category || 'General'}${exp.description ? ` (${exp.description})` : ''}`,
+      amount: amt,
+      cash_out: amt,
+      cash_in: 0,
+      order_details: [],
+    });
+  }
+
+  results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return results;
 }
 
 export async function getPdcReport() {
@@ -836,13 +971,16 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       })
       .select(db.raw('SUM(ABS(CAST(COALESCE(si.total_amount, 0) AS NUMERIC))) as total_returns'));
 
-    // 3. COGS Query
+    // 3. COGS Query (aggregates sales COGS and reduces by exact restored COGS from credit notes / returns)
     let cogsQuery = db('sales_invoice_items as sii')
       .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
       .leftJoin('products as p', 'sii.product_id', 'p.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .select(
         db.raw(
@@ -861,35 +999,36 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
 
     const sDateOnly = sDate.includes('T') ? sDate.split('T')[0] : sDate;
     const eDateOnly = eDate.includes('T') ? eDate.split('T')[0] : eDate;
+    const endTimestamp = eDate.includes('T') ? eDate : `${eDate}T23:59:59.999Z`;
 
     salesQuery = salesQuery.where(function () {
       this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
     }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+      this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [eDateOnly]);
     });
 
     returnsQuery = returnsQuery.where(function () {
       this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
     }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+      this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [eDateOnly]);
     });
 
     cogsQuery = cogsQuery.where(function () {
       this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
     }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+      this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [eDateOnly]);
     });
 
     expensesQuery = expensesQuery.where(function () {
       this.where('e.created_at', '>=', sDate).orWhereRaw('e.expense_date::text >= ?', [sDateOnly]);
     }).where(function () {
-      this.where('e.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
+      this.where('e.created_at', '<=', endTimestamp).orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
     });
 
     expensesBreakdownQuery = expensesBreakdownQuery.where(function () {
       this.where('e.created_at', '>=', sDate).orWhereRaw('e.expense_date::text >= ?', [sDateOnly]);
     }).where(function () {
-      this.where('e.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
+      this.where('e.created_at', '<=', endTimestamp).orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
     });
 
     const [salesRes, returnsRes, cogsRes, expRes, breakdownRes] = await Promise.all([
@@ -950,6 +1089,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
 
     const sDateOnly = sDate.includes('T') ? sDate.split('T')[0] : sDate;
     const eDateOnly = eDate.includes('T') ? eDate.split('T')[0] : eDate;
+    const endTimestamp = eDate.includes('T') ? eDate : `${eDate}T23:59:59.999Z`;
 
     let query = db('sales_invoices as si')
       .innerJoin('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
@@ -979,7 +1119,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
     query = query.where(function () {
       this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
     }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
+      this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [eDateOnly]);
     });
 
     const rows = await query;
@@ -1020,7 +1160,10 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .leftJoin('categories as c', 'p.category_id', 'c.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .groupBy('p.id', 'p.name', 'c.name', 'p.rolling_avg_cost_per_kg', 'p.cost_price')
       .select(
@@ -1041,7 +1184,10 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .leftJoin('products as p', 'sii.product_id', 'p.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .groupBy('cust.id', 'cust.name')
       .select(
@@ -1060,7 +1206,10 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .leftJoin('products as p', 'sii.product_id', 'p.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .groupByRaw('DATE(si.created_at)')
       .select(
@@ -1087,14 +1236,15 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
 
     if (endDate && eDateOnly) {
       const ed: string = eDateOnly;
+      const endTimestamp = endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`;
       pQuery = pQuery.where(function () {
-        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
+        this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [ed]);
       });
       cQuery = cQuery.where(function () {
-        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
+        this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [ed]);
       });
       tQuery = tQuery.where(function () {
-        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
+        this.where('si.created_at', '<=', endTimestamp).orWhereRaw('si.date <= ?', [ed]);
       });
     }
 

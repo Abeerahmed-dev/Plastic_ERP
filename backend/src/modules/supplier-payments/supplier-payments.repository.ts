@@ -1,9 +1,11 @@
 import db from '../../db/knex';
 import { Knex } from 'knex';
 import { CreateSupplierPaymentInput, PaymentQuery } from './supplier-payments.schemas';
+import { InsufficientLiquidityError } from '../../shared/errors';
+import { getCashDrawerBalance } from '../bank-accounts/bank-accounts.repository';
 
-export async function generatePaymentNumber(): Promise<string> {
-  const rows = await db('supplier_payments')
+export async function generatePaymentNumber(trx: Knex.Transaction | Knex = db): Promise<string> {
+  const rows = await trx('supplier_payments')
     .where('payment_number', 'like', 'PAY-OUT-%')
     .select('payment_number');
 
@@ -23,7 +25,39 @@ export async function generatePaymentNumber(): Promise<string> {
 
 export async function createSupplierPayment(data: CreateSupplierPaymentInput, userId: string) {
   return await db.transaction(async (trx: Knex.Transaction) => {
-    const payment_number = await generatePaymentNumber();
+    // ── Liquidity Wall: Intercept outgoing supplier payments ──
+    const paymentAmount = parseFloat((data.amount as any) || 0);
+    if (data.bank_account_id) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.bank_account_id);
+      const account = isUuid ? await trx('bank_accounts').where('id', data.bank_account_id).first() : null;
+
+      if (!account) {
+        throw new Error(`NOT_FOUND: Bank account with ID ${data.bank_account_id} does not exist.`);
+      }
+
+      const availableBalance = parseFloat(account.current_balance || 0);
+      const requestedAmount = parseFloat((data.amount as any) || 0);
+
+      if (availableBalance < requestedAmount) {
+        throw new InsufficientLiquidityError(
+          `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`
+        );
+      }
+    } else if ((data.payment_method as string) === 'CASH' || (data.payment_method as string) === 'Cash') {
+      const cashBalance = await getCashDrawerBalance(trx);
+      const availableBalance = parseFloat(String(cashBalance || 0));
+      const requestedAmount = parseFloat((data.amount as any) || 0);
+
+      if (availableBalance < requestedAmount) {
+        throw new InsufficientLiquidityError(
+          `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`
+        );
+      }
+    } else {
+      throw new Error('VALIDATION_ERROR: No bank_account_id provided in the request payload.');
+    }
+
+    const payment_number = await generatePaymentNumber(trx);
     const isCheque = data.payment_method === 'CHEQUE' || data.payment_method === 'PDC';
     const chequeStatus = isCheque ? (data.cheque_status || 'PENDING') : 'CLEARED';
 
@@ -34,48 +68,75 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       cheque_bank_name: data.cheque_bank_name || null,
       cheque_due_date: data.cheque_due_date || null,
       cheque_status: chequeStatus,
+      payment_type: data.purchase_invoice_id ? 'INVOICE_SETTLEMENT' : 'ADVANCE_DEPOSIT',
       payment_number,
       created_by: userId,
     }).returning('*');
 
-    // If linked to an invoice, cap allocation to remaining purchase invoice balance and insert supplier_payment_allocation
+    // Decrement bank account current_balance if cleared immediately
+    if (data.bank_account_id && chequeStatus === 'CLEARED') {
+      await trx('bank_accounts')
+        .where('id', data.bank_account_id)
+        .decrement('current_balance', paymentAmount);
+    }
+
+    // If linked to an invoice, strictly cap allocation to remaining purchase invoice balance and insert supplier_payment_allocation
     if (data.purchase_invoice_id) {
       const invoice = await trx('purchase_invoices').where('id', data.purchase_invoice_id).first();
-      if (invoice) {
-        const allocRes = await trx('supplier_payment_allocations')
-          .where('purchase_invoice_id', data.purchase_invoice_id)
-          .sum('allocated_amount as total_allocated')
-          .first();
-
-        const currentAllocated = Number(allocRes?.total_allocated || 0);
-        const invTotal = Number(invoice.total_amount || 0);
-        const remainingUnpaid = Math.max(0, invTotal - currentAllocated);
-        const allocatedAmount = Math.min(Number(data.amount), remainingUnpaid);
-
-        if (allocatedAmount > 0) {
-          await trx('supplier_payment_allocations').insert({
-            payment_id: payment.id,
-            purchase_invoice_id: data.purchase_invoice_id,
-            allocated_amount: allocatedAmount,
-          });
-        }
-
-        const newPaidAmount = currentAllocated + allocatedAmount;
-        let newStatus = 'UNPAID';
-        if (newPaidAmount >= invTotal) {
-          newStatus = 'PAID';
-        } else if (newPaidAmount > 0) {
-          newStatus = 'PARTIAL';
-        }
-
-        await trx('purchase_invoices')
-          .where('id', invoice.id)
-          .update({
-            paid_amount: newPaidAmount,
-            status: newStatus,
-            updated_at: new Date()
-          });
+      if (!invoice) {
+        throw new Error('Purchase invoice not found');
       }
+
+      const allocRes = await trx('supplier_payment_allocations')
+        .where('purchase_invoice_id', data.purchase_invoice_id)
+        .sum('allocated_amount as total_allocated')
+        .first();
+
+      const retRes = await trx('purchase_invoices')
+        .where('parent_invoice_id', data.purchase_invoice_id)
+        .where(function() {
+          this.where('invoice_type', 'DEBIT_NOTE')
+            .orWhere('invoice_type', 'RETURN')
+            .orWhere('invoice_number', 'like', 'DN-%');
+        })
+        .whereNot('status', 'CANCELLED')
+        .sum('total_amount as total_returned')
+        .first();
+
+      const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
+      const currentAllocated = Number(allocRes?.total_allocated || 0);
+      const invTotal = Number(invoice.total_amount || 0);
+      const netInvoiceTotal = invTotal - returnedTotal;
+      const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
+
+      if (remainingUnpaid <= 0 || Number(data.amount) > remainingUnpaid) {
+        throw new Error('PAYMENT_EXCEEDS_BALANCE');
+      }
+
+      const allocatedAmount = Number(data.amount);
+      if (allocatedAmount > 0) {
+        await trx('supplier_payment_allocations').insert({
+          payment_id: payment.id,
+          purchase_invoice_id: data.purchase_invoice_id,
+          allocated_amount: allocatedAmount,
+        });
+      }
+
+      const newPaidAmount = currentAllocated + allocatedAmount;
+      let newStatus = 'UNPAID';
+      if (newPaidAmount >= invTotal) {
+        newStatus = 'PAID';
+      } else if (newPaidAmount > 0) {
+        newStatus = 'PARTIAL';
+      }
+
+      await trx('purchase_invoices')
+        .where('id', invoice.id)
+        .update({
+          paid_amount: newPaidAmount,
+          status: newStatus,
+          updated_at: new Date()
+        });
     }
 
     return payment;
@@ -86,72 +147,129 @@ export async function findAllPayments(query: PaymentQuery) {
   const { page, limit, search, supplier_id, purchase_invoice_id } = query;
   const offset = (page - 1) * limit;
 
-  const baseQuery = db('supplier_payments as sp')
-    .join('suppliers as s', 'sp.supplier_id', 's.id')
-    .leftJoin('purchase_invoices as pi', 'sp.purchase_invoice_id', 'pi.id')
+  // 1. Fetch Purchase Invoices
+  const invoicesQuery = db('purchase_invoices as pi')
+    .join('suppliers as s', 'pi.supplier_id', 's.id')
+    .whereNot('pi.status', 'CANCELLED')
     .modify((qb: Knex.QueryBuilder) => {
+      if (supplier_id) qb.where('pi.supplier_id', supplier_id);
+      if (purchase_invoice_id) qb.where('pi.id', purchase_invoice_id);
       if (search) {
         qb.where((inner: Knex.QueryBuilder) => {
-          inner.whereILike('sp.payment_number', `%${search}%`)
-               .orWhereILike('s.name', `%${search}%`)
-               .orWhereILike('pi.invoice_number', `%${search}%`);
+          inner
+            .whereILike('pi.invoice_number', `%${search}%`)
+            .orWhereILike('s.name', `%${search}%`)
+            .orWhereILike('s.code', `%${search}%`);
         });
       }
-      if (supplier_id) qb.where('sp.supplier_id', supplier_id);
-      if (purchase_invoice_id) qb.where('sp.purchase_invoice_id', purchase_invoice_id);
-    });
-
-  // Count distinct invoice/payment groups for pagination
-  const [{ count }] = await baseQuery.clone()
-    .select(db.raw('COUNT(DISTINCT COALESCE(sp.purchase_invoice_id, sp.id)) as count'));
-  const total = parseInt(String(count || 0), 10);
-
-  const rows = await baseQuery
+    })
     .select(
-      db.raw('COALESCE(sp.purchase_invoice_id, sp.id) as group_id'),
-      'sp.supplier_id',
+      'pi.id as purchase_invoice_id',
+      'pi.parent_invoice_id',
+      'pi.invoice_number as purchase_invoice_number',
+      'pi.invoice_type',
+      'pi.total_amount as invoice_total_amount',
+      'pi.paid_amount',
+      'pi.status as invoice_status',
+      'pi.date as invoice_date',
+      'pi.created_at',
+      's.id as supplier_id',
       's.name as supplier_name',
       's.code as supplier_code',
       's.city as city',
-      's.city as supplier_city',
-      'sp.purchase_invoice_id',
-      'pi.invoice_number as purchase_invoice_number',
-      db.raw('COALESCE(pi.total_amount, SUM(sp.amount)) as invoice_total_amount'),
-      db.raw('SUM(sp.amount) as total_paid_against_invoice'),
-      'pi.status as invoice_status',
-      db.raw(`
-        json_agg(
-          json_build_object(
-            'id', sp.id,
-            'payment_no', sp.payment_number,
-            'payment_number', sp.payment_number,
-            'date', sp.payment_date,
-            'payment_date', sp.payment_date,
-            'method', sp.payment_method,
-            'payment_method', sp.payment_method,
-            'amount', sp.amount,
-            'notes', sp.notes,
-            'cheque_number', sp.cheque_number,
-            'cheque_bank_name', sp.cheque_bank_name,
-            'cheque_due_date', sp.cheque_due_date,
-            'cheque_status', sp.cheque_status
-          ) ORDER BY sp.payment_date DESC, sp.created_at DESC
-        ) as payment_history
-      `)
+      's.city as supplier_city'
     )
-    .groupByRaw('COALESCE(sp.purchase_invoice_id, sp.id), sp.supplier_id, s.name, s.code, s.city, sp.purchase_invoice_id, pi.invoice_number, pi.total_amount, pi.status')
-    .orderBy(db.raw('MAX(sp.payment_date)'), 'desc')
-    .limit(limit)
-    .offset(offset);
+    .orderBy('pi.created_at', 'desc');
 
-  const purchaseInvoiceIds = rows
-    .map((r: any) => r.purchase_invoice_id)
-    .filter(Boolean);
+  const invoices = await invoicesQuery;
+  const invoiceIds = invoices.map((inv: any) => inv.purchase_invoice_id);
 
-  const rawPurchaseItems = purchaseInvoiceIds.length > 0
+  // 1a. Fetch linked positive supplier payments
+  const rawPayments = invoiceIds.length > 0
+    ? await db('supplier_payments')
+        .whereIn('purchase_invoice_id', invoiceIds)
+        .where('amount', '>', 0)
+        .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+        .orderBy('created_at', 'asc')
+    : [];
+
+  const linkedPaymentsMap = new Map<string, any[]>();
+  for (const p of rawPayments) {
+    if (p.purchase_invoice_id) {
+      const list = linkedPaymentsMap.get(p.purchase_invoice_id) || [];
+      list.push({
+        id: p.id,
+        type: 'PAYMENT',
+        payment_no: p.payment_number,
+        payment_number: p.payment_number,
+        date: p.payment_date,
+        payment_date: p.payment_date,
+        method: p.payment_method || 'CASH',
+        payment_method: p.payment_method || 'CASH',
+        amount: Number(p.amount || 0),
+        notes: p.notes,
+        cheque_number: p.cheque_number,
+        cheque_bank_name: p.cheque_bank_name,
+        cheque_due_date: p.cheque_due_date,
+        cheque_status: p.cheque_status,
+        polarity: 'POSITIVE',
+        created_at: p.created_at,
+      });
+      linkedPaymentsMap.set(p.purchase_invoice_id, list);
+    }
+  }
+
+  // 1b. Fetch linked Debit Notes (purchase returns where parent_invoice_id IN invoiceIds)
+  const linkedDebitNotes = invoiceIds.length > 0
+    ? await db('purchase_invoices')
+        .whereIn('parent_invoice_id', invoiceIds)
+        .where('invoice_type', 'DEBIT_NOTE')
+        .whereNot('status', 'CANCELLED')
+        .select(
+          'id',
+          'parent_invoice_id',
+          'invoice_number',
+          'invoice_type',
+          'date',
+          'total_amount',
+          'return_reason',
+          'notes',
+          'created_at'
+        )
+        .orderBy('created_at', 'asc')
+    : [];
+
+  const linkedDebitNotesMap = new Map<string, any[]>();
+  for (const dn of linkedDebitNotes) {
+    if (dn.parent_invoice_id) {
+      const list = linkedDebitNotesMap.get(dn.parent_invoice_id) || [];
+      list.push({
+        id: dn.id,
+        type: 'DEBIT_NOTE',
+        debit_note_number: dn.invoice_number,
+        payment_no: dn.invoice_number,
+        payment_number: dn.invoice_number,
+        invoice_number: dn.invoice_number,
+        date: dn.date,
+        payment_date: dn.date,
+        method: 'DEBIT_NOTE',
+        payment_method: 'DEBIT_NOTE',
+        amount: Math.abs(Number(dn.total_amount || 0)),
+        notes: dn.notes || dn.return_reason || 'Goods Returned to Supplier',
+        return_reason: dn.return_reason,
+        polarity: 'NEGATIVE',
+        display_type: 'Goods Returned to Supplier',
+        created_at: dn.created_at,
+      });
+      linkedDebitNotesMap.set(dn.parent_invoice_id, list);
+    }
+  }
+
+  // 1c. Fetch purchased line items
+  const rawPurchaseItems = invoiceIds.length > 0
     ? await db('purchase_invoice_items as pii')
         .join('products as p', 'pii.product_id', 'p.id')
-        .whereIn('pii.purchase_invoice_id', purchaseInvoiceIds)
+        .whereIn('pii.purchase_invoice_id', invoiceIds)
         .select(
           'pii.id',
           'pii.purchase_invoice_id',
@@ -184,41 +302,140 @@ export async function findAllPayments(query: PaymentQuery) {
     lineItemsMap.set(item.purchase_invoice_id, list);
   }
 
-  const formattedRows = rows.map((r: any) => {
-    const totalPaid = Number(r.total_paid_against_invoice || 0);
-    const invoiceTotal = Number(r.invoice_total_amount || 0);
+  // Map invoices into Living Invoice rows
+  const invoiceResults = invoices.map((inv: any) => {
+    const payments = linkedPaymentsMap.get(inv.purchase_invoice_id) || [];
+    const debitNotes = linkedDebitNotesMap.get(inv.purchase_invoice_id) || [];
+    const lineItems = lineItemsMap.get(inv.purchase_invoice_id) || [];
 
-    let status = r.invoice_status;
+    const totalPaid = payments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const invoiceTotal = Math.abs(Number(inv.invoice_total_amount || 0));
+
+    // Combine mixed transactions into chronological timeline
+    const timeline = [...payments, ...debitNotes].sort((a: any, b: any) => {
+      const timeA = new Date(a.created_at || a.date || a.payment_date || 0).getTime();
+      const timeB = new Date(b.created_at || b.date || b.payment_date || 0).getTime();
+      return timeA - timeB;
+    });
+
+    let status = inv.invoice_status;
     if (!status) {
       status = totalPaid >= invoiceTotal ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID';
     }
 
-    const rawHistory = typeof r.payment_history === 'string'
-      ? JSON.parse(r.payment_history)
-      : r.payment_history;
-
     return {
-      id: r.group_id,
-      purchase_id: r.purchase_invoice_id || r.group_id,
-      purchase_invoice_id: r.purchase_invoice_id,
-      purchase_invoice_number: r.purchase_invoice_number || 'Direct Payment',
-      supplier_id: r.supplier_id,
-      supplier_name: r.supplier_name,
-      supplier_code: r.supplier_code,
-      city: r.city || null,
-      supplier_city: r.supplier_city || null,
+      id: inv.purchase_invoice_id,
+      purchase_id: inv.purchase_invoice_id,
+      purchase_invoice_id: inv.purchase_invoice_id,
+      parent_invoice_id: inv.parent_invoice_id || null,
+      purchase_invoice_number: inv.purchase_invoice_number,
+      invoice_number: inv.purchase_invoice_number,
+      invoice_type: inv.invoice_type || 'PURCHASE',
+      supplier_id: inv.supplier_id,
+      supplier_name: inv.supplier_name,
+      supplier_code: inv.supplier_code,
+      city: inv.city || null,
+      supplier_city: inv.supplier_city || null,
+      original_total: Math.round(invoiceTotal * 100) / 100,
       invoice_total_amount: Math.round(invoiceTotal * 100) / 100,
       total_paid_against_invoice: Math.round(totalPaid * 100) / 100,
+      total_paid: Math.round(totalPaid * 100) / 100,
       invoice_status: status,
-      line_items: r.purchase_invoice_id ? (lineItemsMap.get(r.purchase_invoice_id) || []) : [],
-      payment_history: Array.isArray(rawHistory) ? rawHistory.map((p: any) => ({
-        ...p,
-        amount: Number(p.amount)
-      })) : []
+      line_items: lineItems,
+      linked_debit_notes: debitNotes,
+      payment_history: timeline,
+      created_at: inv.created_at,
     };
   });
 
-  return { rows: formattedRows, total };
+  // 2. Fetch standalone Supplier Account Payments (where purchase_invoice_id IS NULL)
+  const standalonePayments = !purchase_invoice_id
+    ? await db('supplier_payments as sp')
+        .join('suppliers as s', 'sp.supplier_id', 's.id')
+        .whereNull('sp.purchase_invoice_id')
+        .whereNotIn('sp.cheque_status', ['BOUNCED', 'FAILED'])
+        .modify((qb: Knex.QueryBuilder) => {
+          if (supplier_id) qb.where('sp.supplier_id', supplier_id);
+          if (search) {
+            qb.where((inner: Knex.QueryBuilder) => {
+              inner
+                .whereILike('sp.payment_number', `%${search}%`)
+                .orWhereILike('s.name', `%${search}%`)
+                .orWhereILike('s.code', `%${search}%`);
+            });
+          }
+        })
+        .select(
+          'sp.id',
+          'sp.supplier_id',
+          's.name as supplier_name',
+          's.code as supplier_code',
+          's.city as city',
+          's.city as supplier_city',
+          'sp.payment_number',
+          'sp.payment_date',
+          'sp.payment_method',
+          'sp.amount',
+          'sp.notes',
+          'sp.cheque_number',
+          'sp.cheque_bank_name',
+          'sp.cheque_due_date',
+          'sp.cheque_status',
+          'sp.created_at'
+        )
+        .orderBy('sp.created_at', 'desc')
+    : [];
+
+  const standaloneResults = standalonePayments.map((p: any) => ({
+    id: p.id,
+    purchase_id: p.id,
+    purchase_invoice_id: null,
+    purchase_invoice_number: 'Account Payment',
+    invoice_number: 'Account Payment',
+    invoice_type: 'ACCOUNT_PAYMENT',
+    supplier_id: p.supplier_id,
+    supplier_name: p.supplier_name,
+    supplier_code: p.supplier_code,
+    city: p.city || null,
+    supplier_city: p.supplier_city || null,
+    original_total: 0,
+    invoice_total_amount: 0,
+    total_paid_against_invoice: Number(p.amount || 0),
+    total_paid: Number(p.amount || 0),
+    invoice_status: 'PAID',
+    line_items: [],
+    linked_debit_notes: [],
+    payment_history: [
+      {
+        id: p.id,
+        type: 'PAYMENT',
+        payment_no: p.payment_number,
+        payment_number: p.payment_number,
+        date: p.payment_date,
+        payment_date: p.payment_date,
+        method: p.payment_method || 'CASH',
+        payment_method: p.payment_method || 'CASH',
+        amount: Number(p.amount || 0),
+        notes: p.notes,
+        cheque_number: p.cheque_number,
+        cheque_bank_name: p.cheque_bank_name,
+        cheque_due_date: p.cheque_due_date,
+        cheque_status: p.cheque_status,
+        polarity: 'POSITIVE',
+        created_at: p.created_at,
+      },
+    ],
+    created_at: p.created_at,
+  }));
+
+  const combined = [...invoiceResults, ...standaloneResults].sort((a, b) => {
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  const total = combined.length;
+  const paginatedRows = combined.slice(offset, offset + limit);
+
+  return { rows: paginatedRows, total };
 }
 
 export async function findPaymentById(id: string) {

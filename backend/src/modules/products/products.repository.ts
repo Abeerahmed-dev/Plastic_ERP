@@ -5,7 +5,8 @@ export interface ProductRow {
   id: string;
   code: string;
   name: string;
-  size: string | null;
+  size: string;
+  low_stock_threshold: number;
   description: string | null;
   category_id: string;
   cost_price: number;
@@ -20,6 +21,7 @@ export interface ProductRow {
   created_at: Date;
   updated_at: Date;
 }
+
 
 export interface ProductWithStock extends ProductRow {
   current_stock: number;
@@ -191,7 +193,8 @@ export async function createProduct(
   const insertPayload: Record<string, any> = {
     code,
     name: data.name,
-    size: data.size ?? null,
+    size: (data.size && data.size.trim().length > 0) ? data.size.trim() : 'Standard',
+    low_stock_threshold: data.low_stock_threshold !== undefined ? Number(data.low_stock_threshold) : 0,
     description: data.description ?? null,
     category_id: data.category_id,
     category: categoryName,
@@ -222,6 +225,7 @@ export async function createProduct(
         original_qty: initialStock,
         remaining_qty: initialStock,
         status: 'ACTIVE',
+        size: row.size || 'Standard',
       });
     }
 

@@ -2,6 +2,7 @@ export interface InvoiceItem {
   id: string;
   invoice_id: string;
   product_id: string;
+  size?: string;
   quantity: string | number;
   unit_price: string | number;
   total_price: string | number;
@@ -34,8 +35,12 @@ export interface Invoice {
 
 export interface CreateInvoiceItemData {
   product_id: string;
+  size?: string;
   quantity: number;
   unit_price: number;
+  total?: number;
+  total_price?: number;
+  selected_unit?: string;
 }
 
 export interface CreateInvoiceData {

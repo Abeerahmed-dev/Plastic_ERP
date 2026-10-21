@@ -10,6 +10,8 @@ router.use(requireAuth);
 
 router.get('/cashier/shift-audit', getCashierShiftAuditController);
 router.get('/', invoicesController.listInvoices);
+router.get('/unpaid', invoicesController.getUnpaidInvoices);
+router.get('/pending-deliveries', invoicesController.getPendingDeliveries);
 router.get('/:id/returns/summary', invoicesController.getInvoiceReturnSummary);
 router.post('/:id/returns', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), invoicesController.createSalesReturn);
 router.get('/:id', invoicesController.getInvoice);

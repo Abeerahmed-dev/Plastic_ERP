@@ -6,6 +6,9 @@ export interface BankTransactionItem {
   date: string;
   description: string;
   type: 'INFLOW' | 'OUTFLOW';
+  transaction_type?: 'DEPOSIT' | 'WITHDRAWAL';
+  source?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
+  source_type?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
   amount: number;
   running_balance: number;
 }
@@ -21,15 +24,24 @@ export const bankAccountsService = {
     return response.data.data || [];
   },
 
+  getCashDrawerBalance: async (): Promise<{ balance: number }> => {
+    const response = await api.get('/bank-accounts/cash-drawer-balance');
+    return response.data.data;
+  },
+
   getBankAccount: async (id: string): Promise<BankAccount> => {
     const response = await api.get(`/bank-accounts/${id}`);
     return response.data.data;
   },
 
-  getBankAccountTransactions: async (accountId: string): Promise<BankAccountTransactionsData> => {
-    const response = await api.get(`/banks/${accountId}/transactions`);
+  getBankAccountTransactions: async (
+    accountId: string,
+    params?: { source?: string; transaction_type?: string }
+  ): Promise<BankAccountTransactionsData> => {
+    const response = await api.get(`/bank-accounts/${accountId}/transactions`, { params });
     return response.data.data;
   },
+
 
   createBankAccount: async (data: CreateBankAccountInput): Promise<BankAccount> => {
     const response = await api.post('/bank-accounts', data);
@@ -44,4 +56,16 @@ export const bankAccountsService = {
   deleteBankAccount: async (id: string): Promise<void> => {
     await api.delete(`/bank-accounts/${id}`);
   },
+
+  transferFunds: async (data: {
+    from_account_id: string;
+    to_account_id: string;
+    amount: number;
+    notes?: string;
+    date?: string;
+  }): Promise<{ success: boolean; message: string; from_balance: number; to_balance: number }> => {
+    const response = await api.post('/bank-accounts/transfer', data);
+    return response.data.data;
+  },
 };
+

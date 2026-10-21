@@ -112,7 +112,9 @@ export default function POSPage() {
       }
 
       const bagWeight = Number(product.bag_weight_kg || 25.0);
-      const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
+      const retailNum = Number(product.fixed_retail_price_per_kg || 0);
+      const saleNum = Number(product.sale_price || 0);
+      const fixedRetailKg = retailNum > 0 ? retailNum : (saleNum > 0 ? saleNum : 0);
       const initialUnitPrice = fixedRetailKg;
 
       const productName = product.size ? `${product.name} - ${product.size}` : product.name;
@@ -391,9 +393,11 @@ export default function POSPage() {
         <div className="flex-1 overflow-y-auto pr-1">
           <div className="flex flex-col gap-2.5">
             {products.map((p) => {
+              const retailNum = Number(p.fixed_retail_price_per_kg || 0);
+              const saleNum = Number(p.sale_price || 0);
               const displayPrice = isCashier
-                ? (p.fixed_retail_price_per_kg || p.sale_price)
-                : p.sale_price;
+                ? (retailNum > 0 ? retailNum : saleNum)
+                : (saleNum > 0 ? saleNum : retailNum);
 
               return (
                 <button

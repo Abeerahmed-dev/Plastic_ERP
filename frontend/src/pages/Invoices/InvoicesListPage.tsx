@@ -8,6 +8,8 @@ import { ProcessReturnModal } from './ProcessReturnModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
+import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
+import { getCustomers } from '../../services/customers.service';
 
 export default function InvoicesListPage() {
   const { user, hasPermission } = useAuthStore();
@@ -16,6 +18,7 @@ export default function InvoicesListPage() {
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
@@ -28,6 +31,13 @@ export default function InvoicesListPage() {
     queryKey: ['invoices'],
     queryFn: invoicesService.getInvoices,
   });
+
+  const { data: customersResponse } = useQuery({
+    queryKey: ['customers', { page: 1, limit: 100 }],
+    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    staleTime: 30000,
+  });
+  const customersList = customersResponse?.data || [];
 
   const handleOpenInvoice = async (id: string) => {
     try {
@@ -116,6 +126,10 @@ export default function InvoicesListPage() {
       return <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-black text-red-800 border border-red-300">CREDIT NOTE</span>;
     }
 
+    if (invoice.balance_due !== undefined && Number(invoice.balance_due) < 0) {
+      return <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 border border-amber-300">OVERPAID</span>;
+    }
+
     const totalAmt = Number(invoice.total_amount || 0);
     const paidAmt = Number(invoice.paid_amount || 0);
     if (totalAmt > 0 && paidAmt >= totalAmt) {
@@ -144,15 +158,26 @@ export default function InvoicesListPage() {
             Create sales invoices and process strict invoice-anchored returns (Credit Notes).
           </p>
         </div>
-        {canWrite && (
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setIsModalOpen(true)}
-            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all"
+            type="button"
+            onClick={() => setIsPaymentModalOpen(true)}
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all cursor-pointer"
           >
             <Plus className="-ml-1 mr-2 h-5 w-5" />
-            Create Invoice
+            Record Payment
           </button>
-        )}
+          {canWrite && (
+            <button
+              type="button"
+              onClick={() => setIsModalOpen(true)}
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all"
+            >
+              <Plus className="-ml-1 mr-2 h-5 w-5" />
+              Create Invoice
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Cascading Filter Bar */}
@@ -347,6 +372,17 @@ export default function InvoicesListPage() {
           }}
         />
       )}
+
+      <RecordPaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        type="CUSTOMER"
+        entityType="customer"
+        customers={customersList}
+        onSuccess={() => {
+          refetch();
+        }}
+      />
     </div>
   );
 }

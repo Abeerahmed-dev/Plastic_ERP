@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Search, Filter, Receipt, Loader2, Calendar, DollarSign, Wallet, Building2 } from 'lucide-react';
 import { expensesService, Expense, ExpenseFilters } from '../../services/expenses.service';
+import { bankAccountsService } from '../../services/bank-accounts.service';
 import { useAuthStore } from '../../store/auth.store';
 import { ExpenseFormModal } from './ExpenseFormModal';
 
@@ -28,18 +29,24 @@ export default function ExpensesListPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('All');
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+
+  // Fetch active bank accounts for filtering
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bankAccounts'],
+    queryFn: bankAccountsService.getBankAccounts,
+  });
 
   const filters: ExpenseFilters = useMemo(() => {
     const f: ExpenseFilters = {};
     if (selectedCategory !== 'All') f.category = selectedCategory;
-    if (selectedPaymentMethod !== 'All') f.payment_method = selectedPaymentMethod;
+    if (selectedBankAccountId !== 'All') f.bank_account_id = selectedBankAccountId;
     if (startDate) f.startDate = startDate;
     if (endDate) f.endDate = endDate;
     return f;
-  }, [selectedCategory, selectedPaymentMethod, startDate, endDate]);
+  }, [selectedCategory, selectedBankAccountId, startDate, endDate]);
 
   const { data: expenses = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['expenses', filters],
@@ -50,6 +57,8 @@ export default function ExpensesListPage() {
     mutationFn: (id: string) => expensesService.deleteExpense(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
+      queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
     },
     onError: (err: any) => {
       alert(err?.response?.data?.error || err.message || 'Failed to delete expense record.');
@@ -64,6 +73,8 @@ export default function ExpensesListPage() {
         e.description?.toLowerCase().includes(term) ||
         e.category?.toLowerCase().includes(term) ||
         e.payment_method?.toLowerCase().includes(term) ||
+        e.account_title?.toLowerCase().includes(term) ||
+        e.bank_name?.toLowerCase().includes(term) ||
         e.created_by_name?.toLowerCase().includes(term)
     );
   }, [expenses, searchTerm]);
@@ -208,15 +219,18 @@ export default function ExpensesListPage() {
             </select>
           </div>
 
-          {/* Payment Method Filter */}
+          {/* Outflow Account Filter */}
           <select
-            value={selectedPaymentMethod}
-            onChange={(e) => setSelectedPaymentMethod(e.target.value)}
+            value={selectedBankAccountId}
+            onChange={(e) => setSelectedBankAccountId(e.target.value)}
             className="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
           >
-            <option value="All">Method: All</option>
-            <option value="Cash in Drawer">Cash in Drawer</option>
-            <option value="Bank Account">Bank Account</option>
+            <option value="All">Account: All Accounts</option>
+            {bankAccounts.map((acc: any) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.name || acc.account_title || acc.bank_name} (Balance: Rs. {acc.current_balance})
+              </option>
+            ))}
           </select>
 
           {/* Date Pickers */}
@@ -248,7 +262,7 @@ export default function ExpensesListPage() {
                   <th className="py-3.5 px-4">Category</th>
                   <th className="py-3.5 px-4">Description</th>
                   <th className="py-3.5 px-4 text-right">Amount</th>
-                  <th className="py-3.5 px-4">Payment Method</th>
+                  <th className="py-3.5 px-4">Outflow Account</th>
                   <th className="py-3.5 px-4">Logged By</th>
                   {isOwner && <th className="py-3.5 px-4 text-center">Actions</th>}
                 </tr>
@@ -321,18 +335,10 @@ export default function ExpensesListPage() {
 
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                              isCash
-                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                : 'bg-blue-100 text-blue-800 border border-blue-200'
-                            }`}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-800 border border-blue-200"
                           >
-                            {isCash ? (
-                              <Wallet className="h-3 w-3 text-amber-600" />
-                            ) : (
-                              <Building2 className="h-3 w-3 text-blue-600" />
-                            )}
-                            {expense.payment_method || 'Cash in Drawer'}
+                            <Building2 className="h-3 w-3 text-blue-600" />
+                            {expense.account_title || expense.bank_name || expense.payment_method || 'Bank Account'}
                           </span>
                         </td>
 

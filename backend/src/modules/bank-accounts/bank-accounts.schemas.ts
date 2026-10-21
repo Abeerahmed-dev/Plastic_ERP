@@ -21,3 +21,14 @@ export const updateBankAccountSchema = createBankAccountSchema.partial().extend(
 
 export type CreateBankAccountInput = z.infer<typeof createBankAccountSchema>;
 export type UpdateBankAccountInput = z.infer<typeof updateBankAccountSchema>;
+
+export const transferFundsSchema = z.object({
+  from_account_id: z.string().min(1, 'Source account is required'),
+  to_account_id: z.string().min(1, 'Destination account is required'),
+  amount: z.preprocess((val) => Number(val), z.number().positive('Transfer amount must be greater than 0')),
+  notes: z.string().optional().nullable(),
+  date: z.string().optional().nullable(),
+});
+
+export type TransferFundsInput = z.infer<typeof transferFundsSchema>;
+

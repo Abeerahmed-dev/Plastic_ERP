@@ -25,16 +25,24 @@ export interface SupplierWithBalance extends SupplierRow {
   advance_payable: number;
   net_balance: number;
   outstanding_balance: number;
+  total_billed_liability?: number;
+  sum_purchase_invoice?: number;
+  sum_debit_note?: number;
 }
 
 export interface SupplierLedgerEntry {
   id: string;
+  source_id?: string;
   date: string;
-  type: 'OPENING_BALANCE' | 'INVOICE' | 'PAYMENT' | 'RETURN';
+  type: 'OPENING_BALANCE' | 'INVOICE' | 'PAYMENT' | 'RETURN' | 'CREDIT_NOTE' | 'ADVANCE_DEPOSIT' | 'CASH_REFUND';
+  reference_no?: string;
   reference: string;
   debit: number; // For suppliers, paying them is a debit
   credit: number; // For suppliers, getting an invoice is a credit
+  running_balance?: number;
   balance: number;
+  payment_method?: string | null;
+  notes?: string | null;
 }
 
 /**
@@ -62,6 +70,9 @@ export async function generateSupplierCode(trx: Knex.Transaction | Knex = db): P
 export interface SupplierBalanceDetails {
   opening_payable: number;
   total_billed: number;
+  total_billed_liability: number;
+  sum_purchase_invoice: number;
+  sum_debit_note: number;
   total_paid: number;
   total_allocated_to_invoices: number;
   total_allocated_from_payments: number;
@@ -71,9 +82,10 @@ export interface SupplierBalanceDetails {
 }
 
 /**
- * Compute decoupled balance for a single supplier using explicit allocation sums.
- * Outstanding = total_billed - total_allocated_to_invoices
- * Advance = total_paid - total_allocated_from_payments
+ * Global Netting Formula for Supplier Balance:
+ * total_billed_liability = SUM(PURCHASE_INVOICE) - SUM(DEBIT_NOTE) + opening_payable.
+ * The supplier's outstanding balance drops.
+ * If the supplier was already fully paid, this dynamically pushes the excess cash into the Supplier's Advance Wallet.
  */
 export async function computeSupplierNetBalance(
   supplierId: string,
@@ -88,6 +100,9 @@ export async function computeSupplierNetBalance(
     return {
       opening_payable: 0,
       total_billed: 0,
+      total_billed_liability: 0,
+      sum_purchase_invoice: 0,
+      sum_debit_note: 0,
       total_paid: 0,
       total_allocated_to_invoices: 0,
       total_allocated_from_payments: 0,
@@ -100,19 +115,26 @@ export async function computeSupplierNetBalance(
   const opening_payable = Number(supplier.opening_payable || 0);
 
   const [billedRes, returnsRes, paidRes, allocToInvoicesRes, allocFromPaymentsRes] = await Promise.all([
-    // Query 1 (Total Billed Purchase Invoices):
+    // Query 1 (SUM(PURCHASE_INVOICE)): Total Billed Standard Purchase Invoices
     trx('purchase_invoices')
       .where('supplier_id', supplierId)
       .whereNot('status', 'CANCELLED')
-      .where('total_amount', '>=', 0)
+      .where((qb) => {
+        qb.whereNull('invoice_type')
+          .orWhereNotIn('invoice_type', ['DEBIT_NOTE', 'RETURN']);
+      })
+      .where('total_amount', '>', 0)
       .select(trx.raw('SUM(ABS(total_amount)) as total'))
       .first<{ total: string | number | null }>(),
 
-    // Query 2 (Total Returns / Debit Notes):
+    // Query 2 (SUM(DEBIT_NOTE)): Total Debit Notes / Returns
     trx('purchase_invoices')
       .where('supplier_id', supplierId)
       .whereNot('status', 'CANCELLED')
-      .where('total_amount', '<', 0)
+      .where((qb) => {
+        qb.whereIn('invoice_type', ['DEBIT_NOTE', 'RETURN'])
+          .orWhere('total_amount', '<', 0);
+      })
       .select(trx.raw('SUM(ABS(total_amount)) as total'))
       .first<{ total: string | number | null }>(),
 
@@ -144,26 +166,42 @@ export async function computeSupplierNetBalance(
       .first<{ total_allocated: string | number | null }>(),
   ]);
 
-  const total_invoiced = Number(billedRes?.total || 0);
-  const total_returns = Number(returnsRes?.total || 0);
+  const sum_purchase_invoice = Number(billedRes?.total || 0);
+  const sum_debit_note = Number(returnsRes?.total || 0);
   const total_paid = Math.round(Number(paidRes?.total || 0) * 100) / 100;
 
-  const net_invoiced = Math.max(0, total_invoiced - total_returns);
-  const total_billed = Math.round((opening_payable + net_invoiced) * 100) / 100;
+  // ── Global Netting Formula ──
+  // total_billed_liability = SUM(PURCHASE_INVOICE) - SUM(DEBIT_NOTE)
+  const net_invoiced = Math.max(0, sum_purchase_invoice - sum_debit_note);
+  const total_billed_liability = Math.round((opening_payable + net_invoiced) * 100) / 100;
 
   const total_allocated_to_invoices = Number(allocToInvoicesRes?.total_allocated || 0);
   const total_allocated_from_payments = Number(allocFromPaymentsRes?.total_allocated || 0);
 
-  // The New Split Math:
-  // supplier.outstanding_payable = total_billed - total_allocated_to_invoices
-  // supplier.advance_payable = total_paid - total_allocated_from_payments
-  const outstanding_payable = Math.max(0, Math.round((total_billed - total_allocated_to_invoices) * 100) / 100);
-  const advance_payable = Math.max(0, Math.round((total_paid - total_allocated_from_payments) * 100) / 100);
+  // ── Dynamic Advance Push & Outstanding Reduction ──
+  // The supplier's outstanding balance drops.
+  // If the supplier was already fully paid, this dynamically pushes the excess cash into the Supplier's Advance Wallet.
+  let outstanding_payable = 0;
+  let advance_payable = 0;
+
+  if (total_paid >= total_billed_liability) {
+    outstanding_payable = 0;
+    advance_payable = Math.round((total_paid - total_billed_liability) * 100) / 100;
+  } else {
+    outstanding_payable = Math.round((total_billed_liability - total_paid) * 100) / 100;
+    // Check if any unallocated advance payments exist
+    const unallocated_from_payments = Math.max(0, total_paid - total_allocated_from_payments);
+    advance_payable = Math.round(unallocated_from_payments * 100) / 100;
+  }
+
   const net_balance = Math.round((outstanding_payable - advance_payable) * 100) / 100;
 
   return {
     opening_payable,
-    total_billed,
+    total_billed: total_billed_liability,
+    total_billed_liability,
+    sum_purchase_invoice,
+    sum_debit_note,
     total_paid,
     total_allocated_to_invoices,
     total_allocated_from_payments,
@@ -218,6 +256,9 @@ export async function findAllSuppliers(query: SupplierQuery): Promise<{
       const details = await computeSupplierNetBalance(r.id);
       return {
         ...r,
+        total_billed_liability: details.total_billed_liability,
+        sum_purchase_invoice: details.sum_purchase_invoice,
+        sum_debit_note: details.sum_debit_note,
         outstanding_payable: details.outstanding_payable,
         advance_payable: details.advance_payable,
         net_balance: details.net_balance,
@@ -235,6 +276,9 @@ export async function findSupplierById(id: string): Promise<SupplierWithBalance 
   const details = await computeSupplierNetBalance(id);
   return {
     ...row,
+    total_billed_liability: details.total_billed_liability,
+    sum_purchase_invoice: details.sum_purchase_invoice,
+    sum_debit_note: details.sum_debit_note,
     outstanding_payable: details.outstanding_payable,
     advance_payable: details.advance_payable,
     net_balance: details.net_balance,
@@ -244,7 +288,7 @@ export async function findSupplierById(id: string): Promise<SupplierWithBalance 
 
 export async function createSupplier(
   data: CreateSupplierInput,
-  createdBy: string,
+  createdBy?: string,
 ): Promise<SupplierWithBalance> {
   return await db.transaction(async (trx) => {
     const code = await generateSupplierCode(trx);
@@ -335,63 +379,353 @@ export async function softDeleteSupplier(id: string): Promise<boolean> {
   return count > 0;
 }
 
-export async function getSupplierLedger(id: string): Promise<SupplierLedgerEntry[]> {
+export async function getSupplierStatement(id: string): Promise<SupplierLedgerEntry[]> {
   const supplier = await db('suppliers').where({ id }).first();
   if (!supplier) return [];
 
-  const ledger: SupplierLedgerEntry[] = [];
-  let runningBalance = Number(supplier.opening_payable);
+  const rawEntries: Array<{
+    id: string;
+    source_id: string;
+    raw_date: Date;
+    date: string;
+    type: 'INVOICE' | 'CREDIT_NOTE' | 'PAYMENT' | 'ADVANCE_DEPOSIT' | 'CASH_REFUND' | 'OPENING_BALANCE';
+    reference_no: string;
+    reference: string;
+    debit: number;
+    credit: number;
+    payment_method: string | null;
+    notes: string | null;
+  }> = [];
 
-  // 1. Opening Payable Entry
-  ledger.push({
-    id: 'opening',
-    date: supplier.created_at.toISOString(),
-    type: 'OPENING_BALANCE',
-    reference: 'Opening Payable',
-    debit: 0,
-    credit: runningBalance > 0 ? runningBalance : 0,
-    balance: runningBalance
-  });
-
-  // 2. Fetch Purchase Invoices
+  // 1. Purchase Invoices & Debit Notes (Returns)
   const invoices = await db('purchase_invoices')
     .where('supplier_id', id)
-    .select('id', 'date', 'invoice_number', 'total_amount');
-    
-  const invoiceEntries = invoices.map(inv => ({
-    id: inv.id,
-    date: new Date(inv.date).toISOString(),
-    type: 'INVOICE' as const,
-    reference: inv.invoice_number,
-    debit: 0,
-    credit: Number(inv.total_amount)
-  }));
+    .whereNot('status', 'CANCELLED')
+    .select('id', 'date', 'invoice_number', 'total_amount', 'invoice_type', 'notes', 'created_at');
 
-  // 3. Fetch Supplier Payments
+  for (const inv of invoices) {
+    const total = Number(inv.total_amount);
+    const isDebitNote = inv.invoice_type === 'DEBIT_NOTE' || total < 0;
+    const invDate = inv.date ? new Date(inv.date) : (inv.created_at ? new Date(inv.created_at) : new Date());
+
+    if (isDebitNote) {
+      const positiveAmt = Math.abs(total);
+      rawEntries.push({
+        id: inv.id,
+        source_id: inv.id,
+        raw_date: invDate,
+        date: invDate.toISOString(),
+        type: 'CREDIT_NOTE',
+        reference_no: inv.invoice_number,
+        reference: inv.invoice_number,
+        debit: positiveAmt, // Reduces liability
+        credit: 0,
+        payment_method: null,
+        notes: inv.notes || 'Purchase Return / Debit Note',
+      });
+    } else {
+      rawEntries.push({
+        id: inv.id,
+        source_id: inv.id,
+        raw_date: invDate,
+        date: invDate.toISOString(),
+        type: 'INVOICE',
+        reference_no: inv.invoice_number,
+        reference: inv.invoice_number,
+        debit: 0,
+        credit: total, // Increases liability
+        payment_method: null,
+        notes: inv.notes || null,
+      });
+    }
+  }
+
+  // 2. Supplier Payments, Advances & Cash Refunds
   const payments = await db('supplier_payments')
     .where('supplier_id', id)
-    .select('id', 'payment_date', 'payment_number', 'amount');
+    .select('id', 'payment_date', 'payment_number', 'amount', 'payment_type', 'payment_method', 'notes', 'created_at');
 
-  const paymentEntries = payments.map(pay => ({
-    id: pay.id,
-    date: new Date(pay.payment_date).toISOString(),
-    type: 'PAYMENT' as const,
-    reference: pay.payment_number,
-    debit: Number(pay.amount),
-    credit: 0
-  }));
+  for (const pay of payments) {
+    const amt = Number(pay.amount);
+    const payDate = pay.payment_date ? new Date(pay.payment_date) : (pay.created_at ? new Date(pay.created_at) : new Date());
 
-  const transactions = [...invoiceEntries, ...paymentEntries].sort((a, b) => {
-    return new Date(a.date).getTime() - new Date(b.date).getTime();
+    if (pay.payment_type === 'CASH_REFUND' || amt < 0) {
+      // Cash Refund from supplier: increases our liability / decreases advance
+      rawEntries.push({
+        id: pay.id,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'CASH_REFUND',
+        reference_no: pay.payment_number,
+        reference: pay.payment_number,
+        debit: 0,
+        credit: Math.abs(amt),
+        payment_method: pay.payment_method || null,
+        notes: pay.notes || 'Cash Refund from Supplier',
+      });
+    } else if (pay.payment_type === 'ADVANCE_DEPOSIT') {
+      // Advance to Supplier: reduces liability / creates advance credit
+      rawEntries.push({
+        id: pay.id,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'ADVANCE_DEPOSIT',
+        reference_no: pay.payment_number,
+        reference: pay.payment_number,
+        debit: amt,
+        credit: 0,
+        payment_method: pay.payment_method || null,
+        notes: pay.notes || 'Advance Deposit to Supplier',
+      });
+    } else {
+      // Supplier Payment
+      rawEntries.push({
+        id: pay.id,
+        source_id: pay.id,
+        raw_date: payDate,
+        date: payDate.toISOString(),
+        type: 'PAYMENT',
+        reference_no: pay.payment_number,
+        reference: pay.payment_number,
+        debit: amt,
+        credit: 0,
+        payment_method: pay.payment_method || null,
+        notes: pay.notes || null,
+      });
+    }
+  }
+
+  // 3. Chronological Sorting: sort by date ASC
+  const sortedTransactions = rawEntries.sort((a, b) => {
+    const diff = a.raw_date.getTime() - b.raw_date.getTime();
+    if (diff !== 0) return diff;
+    if (a.type === 'INVOICE' && b.type !== 'INVOICE') return -1;
+    if (a.type !== 'INVOICE' && b.type === 'INVOICE') return 1;
+    return 0;
   });
 
-  for (const t of transactions) {
-    runningBalance = runningBalance + t.credit - t.debit;
-    ledger.push({
-      ...t,
-      balance: runningBalance
+  // 4. Opening Payable row (if exists) & running balance math engine
+  const statement: SupplierLedgerEntry[] = [];
+  let running_balance = 0;
+
+  const openingPayable = Number(supplier.opening_payable || 0);
+  if (openingPayable !== 0) {
+    const suppDate = supplier.created_at ? new Date(supplier.created_at) : new Date();
+    const firstTxDate = sortedTransactions.length > 0 ? sortedTransactions[0].raw_date : null;
+    const openingDate = firstTxDate && firstTxDate.getTime() < suppDate.getTime() ? firstTxDate : suppDate;
+    const credit = openingPayable > 0 ? openingPayable : 0;
+    const debit = openingPayable < 0 ? Math.abs(openingPayable) : 0;
+    running_balance = credit - debit;
+
+    statement.push({
+      id: 'opening',
+      source_id: 'opening',
+      date: openingDate.toISOString(),
+      type: 'OPENING_BALANCE',
+      reference_no: 'OPENING-PAY',
+      reference: 'Opening Payable',
+      debit,
+      credit,
+      running_balance,
+      balance: running_balance,
+      payment_method: null,
+      notes: 'Initial opening payable',
     });
   }
 
-  return ledger;
+  // Loop through array to calculate running_balance: (Previous Balance + Credit - Debit)
+  for (const t of sortedTransactions) {
+    running_balance = running_balance + t.credit - t.debit;
+    statement.push({
+      id: t.id,
+      source_id: t.source_id,
+      date: t.date,
+      type: t.type,
+      reference_no: t.reference_no,
+      reference: t.reference,
+      debit: t.debit,
+      credit: t.credit,
+      running_balance,
+      balance: running_balance,
+      payment_method: t.payment_method,
+      notes: t.notes,
+    });
+  }
+
+  return statement;
 }
+
+export async function getSupplierLedger(id: string): Promise<SupplierLedgerEntry[]> {
+  return await getSupplierStatement(id);
+}
+
+export interface RefundableCreditSource {
+  id: string;
+  type: 'OVERPAID_INVOICE' | 'ADVANCE';
+  reference: string;
+  available_credit: number;
+  date: string;
+}
+
+export async function getSupplierRefundableCredits(supplierId: string): Promise<RefundableCreditSource[]> {
+  const supplier = await db('suppliers').where({ id: supplierId }).first();
+  if (!supplier) return [];
+
+  const creditSources: RefundableCreditSource[] = [];
+
+  // 1. Query Overpaid Invoices: Fetch purchase invoices where (amount_paid - net_total) > 0
+  const purchaseInvoices = await db('purchase_invoices as pi')
+    .where('pi.supplier_id', supplierId)
+    .whereNot('pi.status', 'CANCELLED')
+    .where((qb) => {
+      qb.whereNull('pi.invoice_type')
+        .orWhereNotIn('pi.invoice_type', ['DEBIT_NOTE', 'RETURN']);
+    })
+    .where('pi.total_amount', '>', 0)
+    .select('pi.id', 'pi.invoice_number', 'pi.total_amount', 'pi.paid_amount', 'pi.amount_paid', 'pi.date', 'pi.created_at');
+
+  const invoiceIds = purchaseInvoices.map((inv) => inv.id);
+
+  if (invoiceIds.length > 0) {
+    const debitNotes = await db('purchase_invoices')
+      .whereIn('parent_invoice_id', invoiceIds)
+      .where(function() {
+        this.whereIn('invoice_type', ['DEBIT_NOTE', 'RETURN'])
+          .orWhere('invoice_number', 'like', 'DN-%');
+      })
+      .whereNot('status', 'CANCELLED')
+      .select('parent_invoice_id', 'total_amount');
+
+    const returnedByInvoice = new Map<string, number>();
+    for (const dn of debitNotes) {
+      if (dn.parent_invoice_id) {
+        const prev = returnedByInvoice.get(dn.parent_invoice_id) || 0;
+        returnedByInvoice.set(dn.parent_invoice_id, prev + Math.abs(Number(dn.total_amount || 0)));
+      }
+    }
+
+    const linkedRefunds = await db('supplier_payments')
+      .whereIn('purchase_invoice_id', invoiceIds)
+      .where((qb) => {
+        qb.where('payment_type', 'CASH_REFUND')
+          .orWhere('payment_method', 'CASH_REFUND')
+          .orWhere('amount', '<', 0);
+      })
+      .select('purchase_invoice_id', 'amount');
+
+    const refundedByInvoice = new Map<string, number>();
+    for (const rf of linkedRefunds) {
+      if (rf.purchase_invoice_id) {
+        const prev = refundedByInvoice.get(rf.purchase_invoice_id) || 0;
+        refundedByInvoice.set(rf.purchase_invoice_id, prev + Math.abs(Number(rf.amount || 0)));
+      }
+    }
+
+    for (const inv of purchaseInvoices) {
+      const originalTotal = Number(inv.total_amount || 0);
+      const returnedTotal = returnedByInvoice.get(inv.id) || 0;
+      const netTotal = Math.round((originalTotal - returnedTotal) * 100) / 100;
+      const alreadyRefunded = refundedByInvoice.get(inv.id) || 0;
+      const amountPaid = Math.max(0, Number(inv.paid_amount || inv.amount_paid || 0) - alreadyRefunded);
+
+      const overpayment = Math.round((amountPaid - netTotal) * 100) / 100;
+      if (overpayment > 0) {
+        const invDate = inv.date ? new Date(inv.date) : (inv.created_at ? new Date(inv.created_at) : new Date());
+        creditSources.push({
+          id: inv.id,
+          type: 'OVERPAID_INVOICE',
+          reference: inv.invoice_number,
+          available_credit: overpayment,
+          date: invDate.toISOString().split('T')[0],
+        });
+      }
+    }
+  }
+
+  // 2. Query Advance Deposits: Fetch payments where payment_type = 'ADVANCE_DEPOSIT' or purchase_invoice_id is null that have not been fully consumed
+  const advancePayments = await db('supplier_payments')
+    .where('supplier_id', supplierId)
+    .where((qb) => {
+      qb.where('payment_type', 'ADVANCE_DEPOSIT')
+        .orWhere('payment_type', 'ADVANCE')
+        .orWhereNull('purchase_invoice_id');
+    })
+    .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+    .where('amount', '>', 0)
+    .where((qb) => {
+      qb.whereNull('payment_method')
+        .orWhereNot('payment_method', 'WALLET_ADVANCE');
+    })
+    .select('id', 'payment_number', 'amount', 'payment_date', 'notes', 'created_at');
+
+  const advancePaymentIds = advancePayments.map((p) => p.id);
+
+  const hasAllocationsTable = await db.schema.hasTable('supplier_payment_allocations');
+  const allocations = (hasAllocationsTable && advancePaymentIds.length > 0)
+    ? await db('supplier_payment_allocations')
+        .whereIn('payment_id', advancePaymentIds)
+        .select('payment_id', 'allocated_amount')
+    : [];
+
+  const allocatedByPayment = new Map<string, number>();
+  for (const alloc of allocations) {
+    const prev = allocatedByPayment.get(alloc.payment_id) || 0;
+    allocatedByPayment.set(alloc.payment_id, prev + Number(alloc.allocated_amount || 0));
+  }
+
+  const advanceRefunds = await db('supplier_payments')
+    .where('supplier_id', supplierId)
+    .where((qb) => {
+      qb.where('payment_type', 'CASH_REFUND')
+        .orWhere('payment_method', 'CASH_REFUND')
+        .orWhere('amount', '<', 0);
+    })
+    .select('notes', 'amount');
+
+  for (const pay of advancePayments) {
+    const totalAmount = Number(pay.amount || 0);
+    const allocatedAmount = allocatedByPayment.get(pay.id) || 0;
+
+    let refundedFromPay = 0;
+    if (pay.payment_number) {
+      for (const rf of advanceRefunds) {
+        if (rf.notes && rf.notes.includes(pay.payment_number)) {
+          refundedFromPay += Math.abs(Number(rf.amount || 0));
+        }
+      }
+    }
+
+    const unallocated = Math.round((totalAmount - allocatedAmount - refundedFromPay) * 100) / 100;
+    if (unallocated > 0) {
+      const payDate = pay.payment_date ? new Date(pay.payment_date) : (pay.created_at ? new Date(pay.created_at) : new Date());
+      creditSources.push({
+        id: pay.id,
+        type: 'ADVANCE',
+        reference: pay.payment_number || 'Advance Payment',
+        available_credit: unallocated,
+        date: payDate.toISOString().split('T')[0],
+      });
+    }
+  }
+
+  // 3. Fallback: If supplier has advance_payable in balance not covered by individual records, include it as general wallet advance
+  const balanceDetails = await computeSupplierNetBalance(supplierId);
+  const currentTotal = creditSources.reduce((sum, s) => sum + s.available_credit, 0);
+  const leftoverAdvance = Math.round((balanceDetails.advance_payable - currentTotal) * 100) / 100;
+  if (leftoverAdvance > 0 && creditSources.length === 0) {
+    const suppDate = supplier.created_at ? new Date(supplier.created_at) : new Date();
+    creditSources.push({
+      id: 'supplier-wallet-advance',
+      type: 'ADVANCE',
+      reference: 'Advance Wallet Deposit',
+      available_credit: leftoverAdvance,
+      date: suppDate.toISOString().split('T')[0],
+    });
+  }
+
+  // Return combined array sorted by date (chronological ASC)
+  return creditSources.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+

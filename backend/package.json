@@ -17,7 +17,8 @@
     "migrate:latest": "knex migrate:latest --knexfile knexfile.ts",
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.ts",
     "migrate:make": "knex migrate:make --knexfile knexfile.ts",
-    "seed:run": "knex seed:run --knexfile knexfile.ts"
+    "seed:run": "knex seed:run --knexfile knexfile.ts",
+    "db:clean": "ts-node prisma/reset-db.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

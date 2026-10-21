@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Building2, Plus, Edit2, Loader2, DollarSign, CreditCard, ShieldCheck, ArrowRight } from 'lucide-react';
+import { X, Building2, Plus, Edit2, Loader2, DollarSign, CreditCard, ShieldCheck, ArrowRight, ArrowRightLeft } from 'lucide-react';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { BankAccount } from '../../types/bank-account.types';
 import { BankAccountDetailView } from './BankAccountDetailView';
+import { TransferFundsModal } from '../Modals/TransferFundsModal';
 
 interface BankAccountsModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface BankAccountsModalProps {
 export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) => {
   const queryClient = useQueryClient();
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
@@ -161,13 +163,24 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
               </p>
             </div>
             {!isFormOpen && (
-              <button
-                onClick={handleOpenCreate}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white text-emerald-800 font-bold text-xs hover:bg-emerald-50 transition shadow-sm active:scale-95 shrink-0"
-              >
-                <Plus className="w-4 h-4 text-emerald-600" />
-                + Add Bank Account
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-800/80 border border-emerald-400/30 text-white font-bold text-xs hover:bg-emerald-800 transition shadow-sm active:scale-95 shrink-0"
+                  title="Move funds between Bank Accounts and Cash Drawer"
+                >
+                  <ArrowRightLeft className="w-4 h-4 text-emerald-200" />
+                  ⇄ Transfer Funds
+                </button>
+                <button
+                  onClick={handleOpenCreate}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white text-emerald-800 font-bold text-xs hover:bg-emerald-50 transition shadow-sm active:scale-95 shrink-0"
+                >
+                  <Plus className="w-4 h-4 text-emerald-600" />
+                  + Add Bank Account
+                </button>
+              </div>
             )}
           </div>
 
@@ -380,6 +393,12 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
           </button>
         </div>
       </div>
+
+      <TransferFundsModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['bank-accounts'] })}
+      />
     </div>
   );
 };

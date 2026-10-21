@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Wallet, Building2, Clock, TrendingUp, DollarSign,
-  Boxes, CreditCard, ExternalLink, X,
+  Boxes, CreditCard, ExternalLink, X, ArrowRightLeft,
 } from 'lucide-react';
 import { useReportStore } from '../../store/useReportStore';
 import api from '../../services/api';
@@ -9,6 +9,7 @@ import { CashBookModal } from './CashBookModal';
 import { PdcLedgerModal } from './PdcLedgerModal';
 import { IssuedPdcLedgerModal } from './IssuedPdcLedgerModal';
 import { BankAccountsModal } from './BankAccountsModal';
+import { TransferFundsModal } from '../Modals/TransferFundsModal';
 
 interface LiquidityModalData {
   type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances';
@@ -39,6 +40,7 @@ export function LiquidityLedger() {
   const [isPdcModalOpen, setIsPdcModalOpen] = useState(false);
   const [isIssuedPdcModalOpen, setIsIssuedPdcModalOpen] = useState(false);
   const [isBankAccountsModalOpen, setIsBankAccountsModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
 
   useEffect(() => {
     // Fetch if data not already loaded
@@ -102,9 +104,20 @@ export function LiquidityLedger() {
               Real-time cash balances, receivables, payables &amp; net working capital (click cards to drill down)
             </p>
           </div>
-          {isLoadingLiquidity && (
-            <span className="text-xs text-blue-600 animate-pulse font-medium">Loading...</span>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsTransferModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-xs active:scale-95 shrink-0"
+              title="Move funds between Bank Accounts and Cash Drawer"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              ⇄ Transfer Funds
+            </button>
+            {isLoadingLiquidity && (
+              <span className="text-xs text-blue-600 animate-pulse font-medium">Loading...</span>
+            )}
+          </div>
         </div>
 
         {/* 8 Grid Cards */}
@@ -490,6 +503,11 @@ export function LiquidityLedger() {
       <PdcLedgerModal isOpen={isPdcModalOpen} onClose={() => setIsPdcModalOpen(false)} />
       <IssuedPdcLedgerModal isOpen={isIssuedPdcModalOpen} onClose={() => setIsIssuedPdcModalOpen(false)} />
       <BankAccountsModal isOpen={isBankAccountsModalOpen} onClose={() => setIsBankAccountsModalOpen(false)} />
+      <TransferFundsModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        onSuccess={() => fetchAllReports()}
+      />
     </>
   );
 }

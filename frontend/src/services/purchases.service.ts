@@ -6,6 +6,7 @@ export interface PurchaseInvoiceItem {
   purchase_invoice_id?: string;
   product_id: string;
   product_name?: string;
+  size?: string;
   quantity: number | string;
   unit_price: number | string;
   total_price?: number | string;
@@ -26,6 +27,10 @@ export interface PurchaseInvoice {
   notes: string | null;
   created_at: string;
   items?: PurchaseInvoiceItem[];
+  payments?: any[];
+  linked_returns_total?: number | string;
+  net_invoice_total?: number | string;
+  balance_due?: number | string;
 }
 
 export interface PurchaseInvoiceQuery {
@@ -58,4 +63,20 @@ export const purchasesService = {
     const response = await api.patch<ApiSuccess<PurchaseInvoice>>(`/purchases/${id}/status`, data);
     return response.data.data;
   },
+
+  createPurchaseReturn: async (data: {
+    parent_invoice_id: string;
+    items?: { product_id: string; return_quantity: number }[];
+    line_items?: { product_id: string; return_quantity: number }[];
+    return_reason?: string;
+  }): Promise<any> => {
+    const response = await api.post('/purchase-returns', data);
+    return response.data.data;
+  },
+
+  getInvoiceReturnSummary: async (parentInvoiceId: string): Promise<any> => {
+    const response = await api.get(`/purchases/${parentInvoiceId}/returns/summary`);
+    return response.data.data;
+  },
 };
+

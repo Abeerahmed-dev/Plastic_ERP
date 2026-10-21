@@ -41,17 +41,73 @@ export async function updateSupplierController(req: Request, res: Response, next
 export async function deleteSupplierController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     await suppliersService.deactivateSupplier(req.params.id);
-    res.json(ok({ deleted: true }));
+    res.json(ok({ deleted: true, message: 'Supplier deactivated successfully' }));
   } catch (error: any) {
     next(error);
   }
 }
 
-export async function getSupplierLedgerController(req: Request, res: Response) {
+export async function getSupplierStatementController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const ledger = await suppliersService.getSupplierLedger(req.params.id);
-    res.json({ success: true, data: ledger });
+    const statement = await suppliersService.getSupplierStatement(req.params.id);
+    res.json(ok(statement));
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    next(error);
   }
 }
+
+export async function getSupplierLedgerController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const ledger = await suppliersService.getSupplierStatement(req.params.id);
+    res.json(ok(ledger));
+  } catch (error: any) {
+    next(error);
+  }
+}
+
+export async function getSupplierRefundableCreditsController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const credits = await suppliersService.getSupplierRefundableCredits(req.params.id);
+    res.json(ok(credits));
+  } catch (error: any) {
+    next(error);
+  }
+}
+
+export async function recordSupplierPaymentController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const payload = req.body;
+    if (req.params.id && !payload.supplier_id) {
+      payload.supplier_id = req.params.id;
+    }
+
+    const db = (await import('../../db/knex')).default;
+    const trx = db;
+
+    if (!payload.bank_account_id) {
+      throw new Error('VALIDATION_ERROR: No bank_account_id provided in the request payload.');
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.bank_account_id);
+    const account = isUuid ? await trx('bank_accounts').where('id', payload.bank_account_id).first() : null;
+
+    if (!account) {
+      throw new Error(`NOT_FOUND: Bank account with ID ${payload.bank_account_id} does not exist.`);
+    }
+
+    const availableBalance = parseFloat(account.current_balance || 0);
+    const requestedAmount = parseFloat((payload.amount as any) || 0);
+
+    if (availableBalance < requestedAmount) {
+      throw new Error(`INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`);
+    }
+
+    const { createSupplierPayment } = await import('../supplier-payments/supplier-payments.service');
+    const payment = await createSupplierPayment(payload, req.user!.id);
+    res.status(201).json(ok(payment));
+  } catch (error: any) {
+    next(error);
+  }
+}
+
+

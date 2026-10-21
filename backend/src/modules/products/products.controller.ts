@@ -62,6 +62,10 @@ export async function getProductController(req: Request, res: Response, next: Ne
 
 export async function createProductController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const rawSize = req.body?.size;
+    if (rawSize === undefined || rawSize === null || String(rawSize).trim() === '') {
+      throw new ValidationError('Size/Variant is compulsory');
+    }
     const parsed = createProductSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
@@ -71,6 +75,7 @@ export async function createProductController(req: Request, res: Response, next:
     res.status(201).json(ok(product));
   } catch (err) { next(err); }
 }
+
 
 export async function updateProductController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

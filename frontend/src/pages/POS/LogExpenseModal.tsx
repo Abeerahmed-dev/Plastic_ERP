@@ -39,7 +39,6 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
   const [amount, setAmount] = useState<number | ''>('');
   const [category, setCategory] = useState<string>('Tea & Refreshments');
   const [description, setDescription] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [selectedBankId, setSelectedBankId] = useState<string>('');
   const [expenseDate, setExpenseDate] = useState<string>(getTodayLocalDate());
 
@@ -64,8 +63,16 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
       return;
     }
 
-    if (paymentMethod === 'BANK' && !selectedBankId) {
-      const err = 'Bank Account ID is required';
+    if (!selectedBankId) {
+      const err = 'Outflow Account is required';
+      setError(err);
+      toast.error(err);
+      return;
+    }
+
+    const selectedAcc = bankAccounts.find((a: any) => a.id === selectedBankId);
+    if (selectedAcc && Number(selectedAcc.current_balance) < Number(amount)) {
+      const err = 'INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.';
       setError(err);
       toast.error(err);
       return;
@@ -80,8 +87,8 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
         category,
         description: description.trim() || undefined,
         expense_date: expenseDate,
-        payment_method: paymentMethod,
-        bank_account_id: paymentMethod === 'BANK' ? selectedBankId : null,
+        payment_method: selectedAcc?.account_title || selectedAcc?.bank_name || 'BANK',
+        bank_account_id: selectedBankId,
       });
 
       // Invalidate all related financial and ledger queries
@@ -185,21 +192,20 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Payment Method
+                Outflow Account <span className="text-red-500">*</span>
               </label>
               <select
-                value={paymentMethod}
-                onChange={(e) => {
-                  setPaymentMethod(e.target.value);
-                  if (e.target.value !== 'BANK') {
-                    setSelectedBankId('');
-                  }
-                }}
+                value={selectedBankId}
+                onChange={(e) => setSelectedBankId(e.target.value)}
                 className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                required
               >
-                <option value="CASH">Cash in Drawer</option>
-                <option value="BANK">Bank Transfer</option>
-                <option value="CHEQUE">Cheque</option>
+                <option value="">-- Choose Account --</option>
+                {bankAccounts.map((acc: any) => (
+                  <option key={acc.id} value={acc.id} disabled={acc.current_balance <= 0}>
+                    {acc.name || acc.account_title || acc.bank_name} (Balance: Rs. {acc.current_balance})
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -215,28 +221,6 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
               />
             </div>
           </div>
-
-          {/* Conditional Bank Account Dropdown */}
-          {paymentMethod === 'BANK' && (
-            <div className="mt-2">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Select Bank Account <span className="text-red-500">*</span>
-              </label>
-              <select 
-                value={selectedBankId} 
-                onChange={(e) => setSelectedBankId(e.target.value)}
-                className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
-                required
-              >
-                <option value="">-- Choose a Bank --</option>
-                {bankAccounts.map((bank: any) => (
-                  <option key={bank.id} value={bank.id}>
-                    {bank.bank_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">

@@ -2,7 +2,8 @@ import type { Knex } from 'knex';
 import db from '../../db/knex';
 import { CreateCustomerRefundInput } from './customer-refunds.schemas';
 import { computeCustomerNetBalance } from '../customers/customers.repository';
-import { ValidationError, NotFoundError } from '../../shared/errors';
+import { ValidationError, NotFoundError, InsufficientLiquidityError } from '../../shared/errors';
+import { getBankAccountBalance, getCashDrawerBalance } from '../bank-accounts/bank-accounts.repository';
 
 export async function generateNextRefundNumber(trx: Knex.Transaction | Knex = db): Promise<string> {
   const rows = await trx('customer_payments')
@@ -49,14 +50,31 @@ export async function createCustomerRefund(
     let bankAccountId: string | null = null;
     let paymentMethod = 'CASH_REFUND';
 
-    if (!isCashDrawer) {
+    // ── Liquidity Wall: Intercept outgoing customer refund ──
+    if (isCashDrawer) {
+      const cashBalance = await getCashDrawerBalance(trx);
+      if (cashBalance < refundAmount) {
+        throw new InsufficientLiquidityError(
+          'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.'
+        );
+      }
+    } else {
       const bank = await trx('bank_accounts').where({ id: input.source }).first();
       if (!bank) {
         throw new NotFoundError('Selected bank account');
       }
       bankAccountId = bank.id;
       paymentMethod = 'BANK_TRANSFER';
+      const bankBalance = bank.current_balance !== undefined
+        ? Number(bank.current_balance)
+        : await getBankAccountBalance(bank.id, trx);
+      if (bankBalance < refundAmount) {
+        throw new InsufficientLiquidityError(
+          'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.'
+        );
+      }
     }
+
 
     // 2. Customer Ledger: Insert negative payment row
     const [payment] = await trx('customer_payments')
@@ -101,6 +119,7 @@ export async function createCustomerRefund(
           created_by: userId || null,
         });
       }
+      await trx('bank_accounts').where('id', bankAccountId).decrement('current_balance', Math.abs(refundAmount));
     }
 
     // 4. Return new balance details

@@ -11,7 +11,8 @@ export interface Product {
   id: string;
   code: string;
   name: string;
-  size?: string | null;
+  size: string;
+  low_stock_threshold?: number;
   description: string | null;
   category_id: string;
   category_name?: string;
@@ -32,7 +33,8 @@ export interface Product {
 export interface CreateProductData {
   code?: string;
   name: string;
-  size?: string;
+  size: string;
+  low_stock_threshold?: number;
   description?: string;
   category_id: string;
   cost_price: number;
@@ -47,6 +49,7 @@ export interface UpdateProductData {
   code?: string;
   name?: string;
   size?: string;
+  low_stock_threshold?: number;
   description?: string;
   category_id?: string;
   cost_price?: number;
@@ -54,3 +57,4 @@ export interface UpdateProductData {
   is_active?: boolean;
   notes?: string;
 }
+

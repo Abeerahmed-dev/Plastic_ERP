@@ -1,12 +1,16 @@
 import { z } from 'zod';
 
 export const invoiceItemSchema = z.object({
-  product_id: z.string().uuid(),
+  product_id: z.string().uuid('Invalid product ID'),
+  size: z.string().optional().nullable(),
   quantity: z.number().refine((v) => v !== 0, 'Quantity cannot be 0'),
   selected_unit: z.string().optional().default('KG'),
   unit_price: z.number().min(0, 'Unit price cannot be negative'),
   actual_weight_per_unit: z.number().min(0).optional().nullable(),
+  total: z.number().optional(),
+  total_price: z.number().optional(),
 });
+
 
 export const createInvoiceSchema = z.object({
   customer_id: z.string().uuid('Invalid customer ID'),

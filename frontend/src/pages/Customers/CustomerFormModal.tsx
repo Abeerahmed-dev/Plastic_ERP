@@ -3,14 +3,16 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Loader2, ArrowDownLeft } from 'lucide-react';
+import { X, Loader2, ArrowDownLeft, ArrowUpRight, Wallet, Plus } from 'lucide-react';
 import { createCustomer, updateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 
 import { useAuthStore } from '../../store/auth.store';
 
 import { CustomerLedger } from './CustomerLedger';
-import { CustomerRefundModal } from './CustomerRefundModal';
+import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
+import { ProcessCashRefundModal } from '../../components/Modals/ProcessCashRefundModal';
+import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 
 const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
 
@@ -42,7 +44,9 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
   const qc = useQueryClient();
   const [serverError, setServerError] = useState('');
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'LEDGER'>('DETAILS');
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [advanceOpen, setAdvanceOpen] = useState(false);
   const advanceCredit = Number(customer?.advance_credit || customer?.advance || 0);
 
   const {
@@ -130,17 +134,37 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3">
-            {isEdit && advanceCredit > 0 && (
-              <button
-                type="button"
-                onClick={() => setRefundOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 text-xs font-bold transition shadow-2xs cursor-pointer"
-                title="Issue Cash Refund"
-              >
-                <ArrowDownLeft className="w-3.5 h-3.5 text-red-600" />
-                Issue Cash Refund (PKR {advanceCredit.toLocaleString()})
-              </button>
+          <div className="flex items-center gap-2.5">
+            {isEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsPaymentModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-bold transition shadow-2xs cursor-pointer"
+                  title="Record Payment against Invoice"
+                >
+                  <Plus className="w-3.5 h-3.5 text-white" />
+                  + Record Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdvanceOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 text-xs font-bold transition shadow-2xs cursor-pointer"
+                  title="Log Advance Deposit"
+                >
+                  <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
+                  Log Advance Deposit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRefundOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-1.5 text-xs font-bold transition shadow-2xs cursor-pointer"
+                  title="Process Cash Refund"
+                >
+                  <ArrowDownLeft className="w-3.5 h-3.5 text-red-600" />
+                  Process Cash Refund {advanceCredit > 0 ? `(PKR ${advanceCredit.toLocaleString()})` : ''}
+                </button>
+              </>
             )}
             <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition">
               <X className="h-5 w-5" />
@@ -283,19 +307,55 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
             </form>
           ) : (
             <div className="p-6">
-              {customer && <CustomerLedger customerId={customer.id} />}
+              {customer && (
+                <CustomerLedger
+                  customerId={customer.id}
+                  customerName={customer.name}
+                  customerCode={customer.code}
+                />
+              )}
             </div>
           )}
         </div>
       </div>
 
-      <CustomerRefundModal
+      <LogAdvanceDepositModal
+        isOpen={advanceOpen}
+        entityType="customer"
+        customer={customer}
+        onClose={() => setAdvanceOpen(false)}
+        onSuccess={() => {
+          qc.invalidateQueries({ queryKey: ['customers'] });
+          if (customer?.id) {
+            qc.invalidateQueries({ queryKey: ['customers', customer.id, 'ledger'] });
+          }
+        }}
+      />
+
+      <ProcessCashRefundModal
         isOpen={refundOpen}
+        entityType="customer"
         customer={customer}
         onClose={() => setRefundOpen(false)}
         onSuccess={() => {
           qc.invalidateQueries({ queryKey: ['customers'] });
           if (customer?.id) {
+            qc.invalidateQueries({ queryKey: ['customers', customer.id, 'ledger'] });
+          }
+        }}
+      />
+
+      <RecordPaymentModal
+        isOpen={isPaymentModalOpen}
+        entityType="customer"
+        customerId={customer?.id}
+        onClose={() => setIsPaymentModalOpen(false)}
+        onSuccess={() => {
+          qc.invalidateQueries({ queryKey: ['customers'] });
+          qc.invalidateQueries({ queryKey: ['payments'] });
+          qc.invalidateQueries({ queryKey: ['invoices'] });
+          if (customer?.id) {
+            qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
             qc.invalidateQueries({ queryKey: ['customers', customer.id, 'ledger'] });
           }
         }}

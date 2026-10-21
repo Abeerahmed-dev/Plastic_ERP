@@ -35,7 +35,6 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
 
   const [amount, setAmount] = useState<string>('');
   const [category, setCategory] = useState<string>('General/Other');
-  const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [selectedBankId, setSelectedBankId] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [expenseDate, setExpenseDate] = useState<string>(today);
@@ -52,7 +51,6 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
     if (isOpen) {
       setAmount('');
       setCategory('General/Other');
-      setPaymentMethod('CASH');
       setSelectedBankId('');
       setDescription('');
       setExpenseDate(new Date().toISOString().split('T')[0]);
@@ -89,16 +87,23 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
       return;
     }
 
-    if (!description.trim()) {
-      const err = 'Description is required (e.g. Lunch for workers, Monthly bill).';
+    if (!selectedBankId) {
+      const err = 'Outflow Account is required.';
       setErrorMsg(err);
       toast.error(err);
       return;
     }
 
-    // Strict validation: enforce selectedBankId being present if paymentMethod === 'BANK'
-    if (paymentMethod === 'BANK' && !selectedBankId) {
-      const err = 'Bank Account ID is required';
+    const selectedAcc = bankAccounts.find((a: any) => a.id === selectedBankId);
+    if (selectedAcc && Number(selectedAcc.current_balance) < numAmount) {
+      const err = 'INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.';
+      setErrorMsg(err);
+      toast.error(err);
+      return;
+    }
+
+    if (!description.trim()) {
+      const err = 'Description is required (e.g. Lunch for workers, Monthly bill).';
       setErrorMsg(err);
       toast.error(err);
       return;
@@ -107,8 +112,8 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
     createMutation.mutate({
       amount: numAmount,
       category,
-      payment_method: paymentMethod,
-      bank_account_id: paymentMethod === 'BANK' ? selectedBankId : null,
+      payment_method: selectedAcc?.account_title || selectedAcc?.bank_name || 'BANK',
+      bank_account_id: selectedBankId,
       description: description.trim(),
       expense_date: expenseDate || today,
     });
@@ -177,7 +182,7 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
             </div>
           </div>
 
-          {/* Category & Payment Method Grid */}
+          {/* Category & Outflow Account Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -198,48 +203,23 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Payment Method <span className="text-red-500">*</span>
+                Outflow Account <span className="text-red-500">*</span>
               </label>
               <select
-                value={paymentMethod}
-                onChange={(e) => {
-                  setPaymentMethod(e.target.value);
-                  if (e.target.value !== 'BANK') {
-                    setSelectedBankId('');
-                  }
-                }}
+                value={selectedBankId}
+                onChange={(e) => setSelectedBankId(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+                required
               >
-                {PAYMENT_METHODS.map((pm) => (
-                  <option key={pm.value} value={pm.value}>
-                    {pm.label}
+                <option value="">-- Choose an Outflow Account --</option>
+                {bankAccounts.map((acc: any) => (
+                  <option key={acc.id} value={acc.id} disabled={acc.current_balance <= 0}>
+                    {acc.name || acc.account_title || acc.bank_name} (Balance: Rs. {acc.current_balance})
                   </option>
                 ))}
               </select>
             </div>
           </div>
-
-          {/* Conditional Bank Account Dropdown */}
-          {paymentMethod === 'BANK' && (
-            <div className="mt-4">
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Select Bank Account <span className="text-red-500">*</span>
-              </label>
-              <select 
-                value={selectedBankId} 
-                onChange={(e) => setSelectedBankId(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
-                required
-              >
-                <option value="">-- Choose a Bank --</option>
-                {bankAccounts.map((bank: any) => (
-                  <option key={bank.id} value={bank.id}>
-                    {bank.bank_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Description */}
           <div>
@@ -256,19 +236,38 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
             />
           </div>
 
-          {/* Liquidity Warning Banner */}
-          {(paymentMethod === 'CASH' || paymentMethod === 'Cash in Drawer') && (
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3.5 flex items-start gap-3 text-xs text-amber-800">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold block text-amber-900 mb-0.5">Liquidity Impact Warning</span>
-                Logging this expense as <span className="font-semibold underline">Cash in Drawer</span> will deduct{' '}
-                <span className="font-bold text-amber-950">
-                  Rs. {parseFloat(amount) > 0 ? parseFloat(amount).toLocaleString() : '0'}
-                </span>{' '}
-                from today's physical cash tally during shift-end audit.
-              </div>
-            </div>
+          {/* Liquidity Wall Status Banner */}
+          {selectedBankId && (
+            (() => {
+              const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
+              if (!acc) return null;
+              const bal = Number(acc.current_balance || 0);
+              const isInsufficient = parseFloat(amount) > bal;
+              return (
+                <div className={`rounded-xl border p-3.5 flex items-start gap-3 text-xs ${
+                  isInsufficient 
+                    ? 'bg-red-50 border-red-200 text-red-800' 
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                }`}>
+                  <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${isInsufficient ? 'text-red-600' : 'text-emerald-600'}`} />
+                  <div>
+                    <span className={`font-bold block mb-0.5 ${isInsufficient ? 'text-red-900' : 'text-emerald-900'}`}>
+                      {isInsufficient ? 'Insufficient Liquidity Warning' : 'Account Balance Available'}
+                    </span>
+                    Available balance in <span className="font-semibold">{acc.account_title || acc.bank_name}</span> is{' '}
+                    <span className="font-bold">Rs. {bal.toLocaleString()}</span>.
+                    {parseFloat(amount) > 0 && !isInsufficient && (
+                      <span> Balance after expense: <span className="font-bold">Rs. {(bal - parseFloat(amount)).toLocaleString()}</span>.</span>
+                    )}
+                    {isInsufficient && (
+                      <span className="block mt-1 font-semibold text-red-700">
+                        INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()
           )}
 
           {/* Modal Actions */}

@@ -62,3 +62,11 @@ export class InsufficientStockError extends AppError {
     this.remainingStock = remainingStock;
   }
 }
+
+export class InsufficientLiquidityError extends AppError {
+  constructor(message = 'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.') {
+    super(message, 400);
+    this.name = 'InsufficientLiquidityError';
+  }
+}
+

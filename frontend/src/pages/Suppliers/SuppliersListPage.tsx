@@ -1,10 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { getSuppliers, deactivateSupplier } from '../../services/suppliers.service';
 import { Supplier } from '../../types/supplier.types';
 import { useAuthStore } from '../../store/auth.store';
 import SupplierFormModal from './SupplierFormModal';
+import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
+import { ProcessCashRefundModal } from '../../components/Modals/ProcessCashRefundModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
@@ -25,6 +27,10 @@ export default function SuppliersListPage() {
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Supplier | undefined>();
+  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
+  const [advanceTargetSupplier, setAdvanceTargetSupplier] = useState<Supplier | null>(null);
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [refundTargetSupplier, setRefundTargetSupplier] = useState<Supplier | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['suppliers', page],
@@ -90,10 +96,37 @@ export default function SuppliersListPage() {
               <RefreshCw className="h-4 w-4" />
             </button>
             {canWrite && (
-              <button onClick={openCreate} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm">
-                <Plus className="h-4 w-4" />
-                Add Supplier
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    setAdvanceTargetSupplier(null);
+                    setAdvanceModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition shadow-sm"
+                  title="Log Advance Deposit"
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                  Log Advance
+                </button>
+                <button
+                  onClick={() => {
+                    setRefundTargetSupplier(null);
+                    setRefundModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-700 transition shadow-sm"
+                  title="Process Cash Refund"
+                >
+                  <ArrowDownLeft className="h-4 w-4" />
+                  Process Refund
+                </button>
+                <button
+                  onClick={openCreate}
+                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Supplier
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -155,9 +188,25 @@ export default function SuppliersListPage() {
                 return (
                   <tr key={s.id} className={`border-b border-gray-50 hover:bg-blue-50/40 transition ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                     <td className="px-4 py-3">
-                      <span className="inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-mono font-semibold text-emerald-700">{s.code}</span>
+                      <button
+                        type="button"
+                        onClick={() => openEdit(s)}
+                        className="inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-mono font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900 transition cursor-pointer"
+                        title="View Supplier Profile & Statement of Account"
+                      >
+                        {s.code}
+                      </button>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{s.name}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(s)}
+                        className="font-semibold text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left transition"
+                        title="View Supplier Profile & Statement of Account"
+                      >
+                        {s.name}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-gray-600">{s.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{s.city ?? '—'}</td>
                     <td className="px-4 py-3 text-center text-gray-600">{s.payment_terms}d</td>
@@ -169,9 +218,24 @@ export default function SuppliersListPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <span className={`font-semibold ${displayAdvance > 0 ? 'text-teal-600 font-bold' : 'text-gray-400'}`}>
-                            {formatRs(displayAdvance)}
-                          </span>
+                          <div className="flex items-center justify-end gap-2">
+                            <span className={`font-semibold ${displayAdvance > 0 ? 'text-teal-600 font-bold' : 'text-gray-400'}`}>
+                              {formatRs(displayAdvance)}
+                            </span>
+                            {displayAdvance > 0 && canWrite && (
+                              <button
+                                onClick={() => {
+                                  setRefundTargetSupplier(s);
+                                  setRefundModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 text-xs font-bold transition shadow-2xs cursor-pointer"
+                                title="Issue Cash Refund from Advance Wallet"
+                              >
+                                <ArrowDownLeft className="w-3.5 h-3.5 text-red-600" />
+                                Refund
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </>
                     )}
@@ -184,9 +248,21 @@ export default function SuppliersListPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
                         {canWrite && (
-                          <button onClick={() => openEdit(s)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition" title="Edit">
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => {
+                                setAdvanceTargetSupplier(s);
+                                setAdvanceModalOpen(true);
+                              }}
+                              className="rounded-lg border border-gray-200 p-1.5 text-emerald-600 hover:border-emerald-400 hover:bg-emerald-50 transition"
+                              title="Log Advance Deposit"
+                            >
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => openEdit(s)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition" title="Edit">
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
                         )}
                         {canDelete && s.is_active && (
                           <button
@@ -223,6 +299,28 @@ export default function SuppliersListPage() {
       </div>
 
       {modalOpen && <SupplierFormModal supplier={editTarget} onClose={closeModal} />}
+
+      <LogAdvanceDepositModal
+        isOpen={advanceModalOpen}
+        entityType="supplier"
+        supplier={advanceTargetSupplier}
+        onClose={() => {
+          setAdvanceModalOpen(false);
+          setAdvanceTargetSupplier(null);
+        }}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['suppliers'] })}
+      />
+
+      <ProcessCashRefundModal
+        isOpen={refundModalOpen}
+        entityType="supplier"
+        supplier={refundTargetSupplier}
+        onClose={() => {
+          setRefundModalOpen(false);
+          setRefundTargetSupplier(null);
+        }}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['suppliers'] })}
+      />
     </div>
   );
 }

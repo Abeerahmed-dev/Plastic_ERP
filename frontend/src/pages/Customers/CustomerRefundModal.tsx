@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, ArrowDownLeft, Wallet, AlertCircle, Loader2 } from 'lucide-react';
+import { X, ArrowDownLeft, Wallet, AlertCircle, Loader2, Link2 } from 'lucide-react';
 import { paymentsService } from '../../services/payments.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
-import { getCustomers } from '../../services/customers.service';
-import { invoicesService } from '../../services/invoices.service';
+import { getCustomers, getCustomerRefundableCredits } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
+import { RefundableCreditSource } from '../../types/payment.types';
 
 interface CustomerRefundModalProps {
   isOpen: boolean;
@@ -26,8 +26,11 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
 }) => {
   const queryClient = useQueryClient();
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(customer?.id || '');
-  const [linkedInvoiceId, setLinkedInvoiceId] = useState<string>(invoiceId || '');
+  const [selectedSourceId, setSelectedSourceId] = useState<string>('');
   const [amount, setAmount] = useState<string>('');
+  const [refundDate, setRefundDate] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
   const [source, setSource] = useState<string>('CASH_DRAWER');
   const [notes, setNotes] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +42,7 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
   });
 
   const availableCustomers = (customersData?.data || []).filter(
-    (c) => Number(c.advance_credit || c.advance || 0) > 0
+    (c) => Number(c.advance_credit || (c as any).advance || 0) > 0
   );
 
   useEffect(() => {
@@ -50,33 +53,61 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
     }
   }, [customer, availableCustomers]);
 
-  useEffect(() => {
-    if (invoiceId) {
-      setLinkedInvoiceId(invoiceId);
-    }
-  }, [invoiceId]);
-
   const activeCustomer =
     customer ||
     availableCustomers.find((c) => c.id === selectedCustomerId) ||
     availableCustomers[0] ||
     null;
 
-  const advanceCredit = Number(activeCustomer?.advance_credit || activeCustomer?.advance || 0);
+  const targetCustomerId = activeCustomer?.id || selectedCustomerId;
+  const advanceCredit = Number(activeCustomer?.advance_credit || (activeCustomer as any)?.advance || 0);
 
-  const { data: customerInvoices = [] } = useQuery({
-    queryKey: ['customer-invoices-for-refund', activeCustomer?.id],
-    queryFn: async () => {
-      const all = await invoicesService.getInvoices();
-      return (all || []).filter(
-        (inv: any) =>
-          inv.customer_id === activeCustomer?.id &&
-          inv.invoice_type !== 'CREDIT_NOTE' &&
-          inv.status !== 'CANCELLED'
-      );
-    },
-    enabled: isOpen && !!activeCustomer?.id,
+  // Fetch refundable credit sources
+  const { data: creditSources = [], isLoading: isLoadingCredits } = useQuery({
+    queryKey: ['refundable-credits', 'customer', targetCustomerId],
+    queryFn: () => getCustomerRefundableCredits(targetCustomerId),
+    enabled: isOpen && !!targetCustomerId,
   });
+
+  useEffect(() => {
+    if (creditSources.length > 0) {
+      // If invoiceId was passed via props, prioritize matching it
+      if (invoiceId) {
+        const matchingInv = creditSources.find((s) => s.id === invoiceId);
+        if (matchingInv) {
+          setSelectedSourceId(matchingInv.id);
+          setAmount(matchingInv.available_credit.toString());
+          return;
+        }
+      }
+      const existing = creditSources.find((s) => s.id === selectedSourceId);
+      if (!existing) {
+        setSelectedSourceId(creditSources[0].id);
+        setAmount(creditSources[0].available_credit.toString());
+      }
+    } else {
+      setSelectedSourceId('');
+      if (advanceCredit > 0) {
+        setAmount(advanceCredit.toString());
+      } else {
+        setAmount('');
+      }
+    }
+  }, [creditSources, targetCustomerId, invoiceId]);
+
+  const selectedSource = creditSources.find((s) => s.id === selectedSourceId) || null;
+  const effectiveMaxCredit = selectedSource ? selectedSource.available_credit : advanceCredit;
+
+  const handleSourceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const sourceId = e.target.value;
+    setSelectedSourceId(sourceId);
+    const found = creditSources.find((s) => s.id === sourceId);
+    if (found) {
+      setAmount(found.available_credit.toString());
+    } else {
+      setAmount('');
+    }
+  };
 
   const { data: bankAccounts = [] } = useQuery({
     queryKey: ['bank-accounts'],
@@ -84,12 +115,34 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
     enabled: isOpen,
   });
 
+  const formatSourceDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const formatCreditOptionText = (src: RefundableCreditSource) => {
+    const formattedAmt = Number(src.available_credit || 0).toLocaleString('en-PK');
+    if (src.type === 'OVERPAID_INVOICE') {
+      return `Overpayment on ${src.reference} — Rs. ${formattedAmt} available`;
+    }
+    const dateFormatted = formatSourceDate(src.date);
+    return `Advance Deposit (${dateFormatted}) — Rs. ${formattedAmt} available`;
+  };
+
   const refundMutation = useMutation({
     mutationFn: (data: {
       customer_id: string;
       amount: number;
+      refund_date: string;
       source: string;
       notes: string;
+      source_id?: string | null;
+      source_type?: string | null;
       linked_invoice_id?: string | null;
     }) => paymentsService.createRefund(data),
     onSuccess: () => {
@@ -97,6 +150,7 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
       queryClient.invalidateQueries({ queryKey: ['payments'] });
       queryClient.invalidateQueries({ queryKey: ['liquidity-ledger'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['refundable-credits'] });
       if (activeCustomer?.id) {
         queryClient.invalidateQueries({ queryKey: ['customers', activeCustomer.id, 'ledger'] });
       }
@@ -126,9 +180,11 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
       return;
     }
 
-    if (numAmount > advanceCredit) {
+    if (numAmount > effectiveMaxCredit) {
       setError(
-        `Refund amount cannot exceed available Advance Wallet credit of PKR ${advanceCredit.toLocaleString()}.`
+        `Refund amount cannot exceed available credit of PKR ${effectiveMaxCredit.toLocaleString()}${
+          selectedSource ? ` on ${selectedSource.reference}` : ''
+        }.`
       );
       return;
     }
@@ -136,9 +192,12 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
     refundMutation.mutate({
       customer_id: activeCustomer.id,
       amount: numAmount,
+      refund_date: refundDate,
       source,
-      notes: notes.trim() || 'Refunded cash to customer from Advance Wallet',
-      linked_invoice_id: linkedInvoiceId || null,
+      notes: notes.trim(),
+      source_id: selectedSource?.id || null,
+      source_type: selectedSource?.type || null,
+      linked_invoice_id: selectedSource?.type === 'OVERPAID_INVOICE' && selectedSource?.id ? selectedSource.id : (invoiceId || null),
     });
   };
 
@@ -159,8 +218,10 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
               <ArrowDownLeft className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">Issue Cash Refund</h3>
-              <p className="text-xs text-slate-500">Deduct cash from Customer Advance Wallet</p>
+              <h3 className="text-base font-bold text-slate-900">Process Customer Refund</h3>
+              <p className="text-xs text-slate-500">
+                Traceable refund locked to specific invoice or advance credit
+              </p>
             </div>
           </div>
           <button
@@ -180,11 +241,11 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
             </div>
           )}
 
-          {/* Customer Selection or Banner */}
+          {/* Customer Selection or Card */}
           {!customer ? (
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Select Customer (with Wallet Credit)
+                Select Customer (with Wallet Balance)
               </label>
               <select
                 value={selectedCustomerId}
@@ -195,11 +256,11 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
                 className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
               >
                 {availableCustomers.length === 0 ? (
-                  <option value="">No customers currently have advance credit</option>
+                  <option value="">No customers currently have advance wallet credit</option>
                 ) : (
                   availableCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.code}) — Wallet: {formatCurrency(Number(c.advance_credit || c.advance || 0))}
+                      {c.name} ({c.code}) — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
                     </option>
                   ))
                 )}
@@ -210,8 +271,8 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold text-slate-600">Customer</p>
-                  <p className="text-sm font-bold text-slate-900">{activeCustomer.name}</p>
-                  {activeCustomer.code && (
+                  <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
+                  {activeCustomer?.code && (
                     <p className="text-xs text-slate-400 font-mono">({activeCustomer.code})</p>
                   )}
                 </div>
@@ -228,52 +289,107 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
             </div>
           )}
 
-          {/* Wallet Balance Display if selected via dropdown */}
-          {!customer && activeCustomer && (
-            <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-3.5 flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
-                <Wallet className="w-4 h-4 text-amber-700" />
-                Available Wallet Balance:
-              </span>
-              <span className="text-sm font-extrabold text-amber-900 font-mono">
-                {formatCurrency(advanceCredit)}
-              </span>
+          {/* Refund Source Dropdown (Traceable Credit Source) */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                <Link2 className="w-3.5 h-3.5 text-blue-600" />
+                Select Credit Source to Refund <span className="text-red-500">*</span>
+              </label>
+              {isLoadingCredits && (
+                <span className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Scanning ledger...
+                </span>
+              )}
             </div>
-          )}
+            <select
+              value={selectedSourceId}
+              onChange={handleSourceChange}
+              disabled={isLoadingCredits || creditSources.length === 0}
+              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white disabled:bg-slate-50 disabled:text-slate-400 font-medium"
+              required
+            >
+              {creditSources.length === 0 ? (
+                <option value="">
+                  {isLoadingCredits
+                    ? 'Scanning ledger for refundable credits...'
+                    : 'No specific refundable credits found'}
+                </option>
+              ) : (
+                creditSources.map((src) => (
+                  <option key={src.id} value={src.id}>
+                    {formatCreditOptionText(src)}
+                  </option>
+                ))
+              )}
+            </select>
+            {selectedSource && (
+              <div className="mt-1.5 px-2.5 py-1.5 bg-blue-50/70 border border-blue-100 rounded-lg flex items-center justify-between text-[11px]">
+                <span className="text-blue-900">
+                  Locked to: <strong className="font-semibold">{selectedSource.type === 'OVERPAID_INVOICE' ? 'Invoice' : 'Advance'} ({selectedSource.reference})</strong>
+                </span>
+                <span className="font-mono font-bold text-blue-700">
+                  Cap: Rs. {Number(selectedSource.available_credit).toLocaleString('en-PK')}
+                </span>
+              </div>
+            )}
+          </div>
 
-          {/* Refund Amount (Rs) */}
+          {/* Amount (PKR) with auto-fill & max check */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-bold text-slate-700">
                 Refund Amount (PKR) <span className="text-red-500">*</span>
               </label>
-              {advanceCredit > 0 && (
+              {effectiveMaxCredit > 0 && (
                 <button
                   type="button"
-                  onClick={() => setAmount(advanceCredit.toString())}
+                  onClick={() => setAmount(effectiveMaxCredit.toString())}
                   className="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
                 >
-                  Max ({formatCurrency(advanceCredit)})
+                  Max ({formatCurrency(effectiveMaxCredit)})
                 </button>
               )}
             </div>
             <div className="relative">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                <span className="text-slate-400 font-bold sm:text-xs">Rs.</span>
+              </div>
               <input
                 type="number"
                 step="any"
                 min="1"
-                max={advanceCredit}
+                max={effectiveMaxCredit}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
-                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3.5 text-sm font-mono font-bold text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition"
+                className="block w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3.5 text-sm font-mono font-bold text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition"
                 required
                 autoFocus
               />
             </div>
+            {selectedSource && parseFloat(amount) > selectedSource.available_credit && (
+              <p className="mt-1 text-xs text-red-600 font-medium">
+                Amount cannot exceed the selected source balance of Rs. {Number(selectedSource.available_credit).toLocaleString('en-PK')}.
+              </p>
+            )}
           </div>
 
-          {/* Source Dropdown */}
+          {/* Date */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              Refund Date <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              value={refundDate}
+              onChange={(e) => setRefundDate(e.target.value)}
+              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
+              required
+            />
+          </div>
+
+          {/* Bank / Cash Source */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
               Source (Outflow Drawer / Account)
@@ -292,44 +408,16 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
             </select>
           </div>
 
-          {/* Link to Parent Sales Invoice (Optional) */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Link to Parent Sales Invoice (Optional)
-            </label>
-            {invoiceId ? (
-              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold text-slate-800">
-                Linked to: {invoiceNumber || invoiceId}
-              </div>
-            ) : (
-              <select
-                value={linkedInvoiceId}
-                onChange={(e) => setLinkedInvoiceId(e.target.value)}
-                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
-              >
-                <option value="">-- General Advance Refund (No specific invoice) --</option>
-                {customerInvoices.map((inv: any) => (
-                  <option key={inv.id} value={inv.id}>
-                    {inv.invoice_number} (Invoice Total: PKR {Number(inv.total_amount || 0).toLocaleString()})
-                  </option>
-                ))}
-              </select>
-            )}
-            <p className="mt-1 text-[11px] text-slate-400">
-              When linked, this cash refund nests directly under the invoice partial payment timeline.
-            </p>
-          </div>
-
           {/* Notes */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Notes
+              Notes (Optional)
             </label>
             <textarea
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Refunded cash for returned Korean newspaper"
+              placeholder="e.g. Cash refund from customer advance"
               className="block w-full rounded-xl border border-slate-300 py-2 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition resize-none"
             />
           </div>
@@ -350,8 +438,9 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
                 refundMutation.isPending ||
                 !amount ||
                 parseFloat(amount) <= 0 ||
-                !activeCustomer ||
-                advanceCredit <= 0
+                effectiveMaxCredit <= 0 ||
+                parseFloat(amount) > effectiveMaxCredit ||
+                !activeCustomer
               }
               className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-red-600 text-xs font-bold text-white shadow-sm hover:bg-red-700 disabled:opacity-50 transition cursor-pointer"
             >

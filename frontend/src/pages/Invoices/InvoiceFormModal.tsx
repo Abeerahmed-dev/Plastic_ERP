@@ -12,11 +12,13 @@ import { toast, handleApiError } from '../../utils/toast';
 
 const itemSchema = z.object({
   product_id: z.string().min(1, 'Product is required'),
-  selected_family_name: z.string().optional(),
-  selected_variant_id: z.string().optional(),
+  selected_family_name: z.string().min(1, 'Product is required'),
+  selected_variant_id: z.string().min(1, 'Size / Variant is compulsory'),
   bags_input: z.union([z.string(), z.number()]).optional(),
   quantity: z.coerce.number().min(0.01, 'Quantity (KG) must be greater than 0'),
   unit_price: z.coerce.number().min(0, 'Price / KG cannot be negative'),
+  total: z.union([z.string(), z.number()]).optional(),
+  total_price: z.union([z.string(), z.number()]).optional(),
 });
 
 const schema = z.object({
@@ -56,7 +58,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
       discount: 0,
       delivery_charge: 0,
       notes: '',
-      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 }],
+      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
     }
   });
 
@@ -73,9 +75,27 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
   const selectedCustomer = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
   const walletBalance = Number(selectedCustomer?.advance_credit || (selectedCustomer as any)?.advance_wallet || 0);
 
-  const subtotal = items.reduce((acc, item) => acc + (Number(item.quantity || 0) * Number(item.unit_price || 0)), 0);
-  const deliveryChargeNum = Number(delivery_charge || 0);
-  const total = Math.max(0, subtotal - (Number(discount) || 0)) + deliveryChargeNum;
+  // Check if any row has missing product or empty size/variant
+  const hasAnyEmptySize = !items || items.length === 0 || items.some((item) => {
+    const prodId = item.product_id || item.selected_variant_id;
+    if (!prodId) return true;
+    const prod = products.find(p => p.id === prodId);
+    return !prod || !prod.size || prod.size.trim() === '';
+  });
+
+  // Phase 2: Explicitly rounded line-item totals summation
+  const subtotal = Math.round(
+    (items || []).reduce((acc, item) => {
+      const itemTotal = item.total !== undefined && item.total !== null && item.total !== ''
+        ? Number(item.total)
+        : Math.round((Number(item.quantity || 0) * Number(item.unit_price || 0)) * 100) / 100;
+      return acc + (Number(itemTotal) || 0);
+    }, 0) * 100
+  ) / 100;
+
+  const deliveryChargeNum = Math.round(Number(delivery_charge || 0) * 100) / 100;
+  const discountNum = Math.round(Number(discount || 0) * 100) / 100;
+  const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100) + deliveryChargeNum;
 
   // Step 1: Group products by product_name
   const groupedProducts = useMemo(() => {
@@ -105,9 +125,19 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
 
   const handleFamilyChange = (index: number, familyName: string) => {
     setValue(`items.${index}.selected_family_name`, familyName);
-    setValue(`items.${index}.selected_variant_id`, '');
-    setValue(`items.${index}.product_id`, '');
-    setValue(`items.${index}.unit_price`, 0);
+    const variants = groupedProducts[familyName] || [];
+    if (variants.length === 1) {
+      const singleVariant = variants[0];
+      setValue(`items.${index}.selected_variant_id`, singleVariant.id);
+      setValue(`items.${index}.product_id`, singleVariant.id);
+      handleProductChange(index, singleVariant.id);
+    } else {
+      setValue(`items.${index}.selected_variant_id`, '');
+      setValue(`items.${index}.product_id`, '');
+      setValue(`items.${index}.unit_price`, 0);
+      setValue(`items.${index}.total`, 0);
+      setValue(`items.${index}.total_price`, 0);
+    }
   };
 
   const handleVariantChange = (index: number, variantId: string) => {
@@ -120,8 +150,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     const product = products.find(p => p.id === productId);
     if (product) {
       const stdWeight = Number(product.bag_weight_kg || 25);
-      const available_stock = Number(product.total_stock_kg ?? product.current_stock ?? 0);
-      setValue(`items.${index}.unit_price`, Number(product.sale_price || 0));
+      const unitPrice = Number(product.sale_price || 0);
+      setValue(`items.${index}.unit_price`, unitPrice);
       
       const currentBags = items[index]?.bags_input;
       let requestedKg = stdWeight;
@@ -129,14 +159,11 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
         requestedKg = Number((Number(currentBags) * stdWeight).toFixed(2));
       }
 
-      if (requestedKg > available_stock) {
-        toast.warning(`Only ${available_stock} KG available.`);
-        setValue(`items.${index}.quantity`, available_stock);
-        setValue(`items.${index}.bags_input`, stdWeight > 0 ? Number((available_stock / stdWeight).toFixed(2)) : 0);
-      } else {
-        setValue(`items.${index}.bags_input`, currentBags !== undefined && currentBags !== '' ? currentBags : 1);
-        setValue(`items.${index}.quantity`, requestedKg);
-      }
+      setValue(`items.${index}.bags_input`, currentBags !== undefined && currentBags !== '' ? currentBags : 1);
+      setValue(`items.${index}.quantity`, requestedKg);
+      const lineTotal = Math.round(requestedKg * unitPrice * 100) / 100;
+      setValue(`items.${index}.total`, lineTotal);
+      setValue(`items.${index}.total_price`, lineTotal);
     }
   };
 
@@ -146,19 +173,57 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     const selectedProdId = items[index]?.product_id || items[index]?.selected_variant_id || '';
     const selectedProd = products.find(p => p.id === selectedProdId);
     const stdWeight = selectedProd && selectedProd.bag_weight_kg ? Number(selectedProd.bag_weight_kg) : 25;
-    const available_stock = Number(selectedProd?.total_stock_kg ?? selectedProd?.current_stock ?? 0);
+    const unitPrice = Number(items[index]?.unit_price || 0);
     
     if (numBags > 0) {
       const requestedKg = Number((numBags * stdWeight).toFixed(2));
-      if (requestedKg > available_stock) {
-        toast.warning(`Only ${available_stock} KG available.`);
-        setValue(`items.${index}.quantity`, available_stock);
-        if (stdWeight > 0) {
-          setValue(`items.${index}.bags_input`, Number((available_stock / stdWeight).toFixed(2)));
-        }
-        return;
-      }
       setValue(`items.${index}.quantity`, requestedKg);
+      const lineTotal = Math.round(requestedKg * unitPrice * 100) / 100;
+      setValue(`items.${index}.total`, lineTotal);
+      setValue(`items.${index}.total_price`, lineTotal);
+    }
+  };
+
+  // Phase 1: Bidirectional handlers
+  const handleQuantityChange = (index: number, val: string) => {
+    setValue(`items.${index}.quantity`, val as any);
+    const enteredQty = parseFloat(val);
+    if (!isNaN(enteredQty)) {
+      const selectedProdId = items[index]?.product_id || items[index]?.selected_variant_id || '';
+      const selectedProd = products.find(p => p.id === selectedProdId);
+      const unitPrice = Number(items[index]?.unit_price || 0);
+      const stdWeight = Number(selectedProd?.bag_weight_kg || 25);
+
+      if (stdWeight > 0) {
+        setValue(`items.${index}.bags_input`, Number((enteredQty / stdWeight).toFixed(2)));
+      }
+
+      // Keep unit_price locked, recalculate total
+      const newTotal = Math.round(enteredQty * unitPrice * 100) / 100;
+      setValue(`items.${index}.total`, newTotal);
+      setValue(`items.${index}.total_price`, newTotal);
+    }
+  };
+
+  const handleUnitPriceChange = (index: number, val: string) => {
+    setValue(`items.${index}.unit_price`, val as any);
+    const newUnitPrice = parseFloat(val);
+    if (!isNaN(newUnitPrice)) {
+      const qty = Number(items[index]?.quantity || 0);
+      const newTotal = Math.round(qty * newUnitPrice * 100) / 100;
+      setValue(`items.${index}.total`, newTotal);
+      setValue(`items.${index}.total_price`, newTotal);
+    }
+  };
+
+  const handleTotalChange = (index: number, val: string) => {
+    setValue(`items.${index}.total`, val as any);
+    setValue(`items.${index}.total_price`, val as any);
+    const newTotal = parseFloat(val);
+    if (!isNaN(newTotal)) {
+      const qty = Number(items[index]?.quantity || 0);
+      const newUnitPrice = qty > 0 ? Math.round((newTotal / qty) * 100) / 100 : 0;
+      setValue(`items.${index}.unit_price`, newUnitPrice);
     }
   };
 
@@ -187,7 +252,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
       discount: 0,
       delivery_charge: 0,
       notes: '',
-      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 }],
+      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
     });
     setApplyAdvance(false);
     setAdvanceAppliedAmount('0');
@@ -197,15 +262,29 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     try {
       const cleanData = {
         ...data,
-        discount: Number(data.discount || 0),
-        delivery_charge: Number(data.delivery_charge || 0),
-        advance_applied_amount: applyAdvance ? Number(advanceAppliedAmount || 0) : 0,
-        items: data.items.map(({ bags_input, ...i }) => ({
-          product_id: i.product_id,
-          quantity: Number(i.quantity),
-          selected_unit: 'KG',
-          unit_price: Number(i.unit_price),
-        })),
+        discount: Math.round(Number(data.discount || 0) * 100) / 100,
+        delivery_charge: Math.round(Number(data.delivery_charge || 0) * 100) / 100,
+        advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
+        items: data.items.map(({ bags_input, selected_family_name, selected_variant_id, ...i }) => {
+          const qty = Number(i.quantity || 0);
+          const unitPrice = Math.round(Number(i.unit_price || 0) * 100) / 100;
+          const totalPrice = i.total !== undefined && i.total !== null && i.total !== ''
+            ? Math.round(Number(i.total) * 100) / 100
+            : Math.round(qty * unitPrice * 100) / 100;
+
+          const prod = products.find(p => p.id === i.product_id);
+          const resolvedSize = (prod?.size || 'Standard').trim();
+
+          return {
+            product_id: i.product_id,
+            size: resolvedSize,
+            quantity: qty,
+            selected_unit: 'KG',
+            unit_price: unitPrice,
+            total: totalPrice,
+            total_price: totalPrice,
+          };
+        }),
       };
       await mutation.mutateAsync(cleanData as any);
     } catch (err: any) {
@@ -216,10 +295,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
   if (!isOpen) return null;
 
   const inputCls = (hasError: boolean) =>
-    `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
+    `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
       hasError
         ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
+        : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
     }`;
 
   const formatCurrency = (val: number) => {
@@ -289,10 +368,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                   <tr>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-[26%]">Product</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-[24%]">Size / Variant</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-24">Bags (Opt.)</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-24 min-w-[75px] text-center">Bags (Opt.)</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-28">QTY (KG)</th>
                     <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-32">PRICE / KG</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-36">Total</th>
+                    <th className="px-4 py-3 text-xs font-semibold text-slate-600 uppercase tracking-wider w-36">TOTAL (PKR)</th>
                     <th className="px-4 py-3 w-10"></th>
                   </tr>
                 </thead>
@@ -316,7 +395,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
 
                     const qty = Number(items[index]?.quantity || 0);
                     const price = Number(items[index]?.unit_price || 0);
-                    const lineTotal = qty * price;
+                    const currentLineTotal = items[index]?.total !== undefined && items[index]?.total !== null && items[index]?.total !== ''
+                      ? items[index]?.total
+                      : (qty && price ? Math.round(qty * price * 100) / 100 : '');
+
+                    const available_stock = Number(selectedProd?.total_stock_kg ?? selectedProd?.current_stock ?? 0);
+                    const shortfall = selectedProdId ? Math.max(0, Math.round((qty - available_stock) * 100) / 100) : 0;
 
                     return (
                       <tr key={field.id} className="hover:bg-slate-50/60 transition-colors">
@@ -352,7 +436,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                           )}
                         </td>
 
-                        <td className="px-4 py-3 align-top">
+                        <td className="px-4 py-3 align-top w-24 min-w-[75px]">
                           <input
                             type="number"
                             step="0.1"
@@ -360,63 +444,61 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                             placeholder="0"
                             value={items[index]?.bags_input ?? ''}
                             onChange={(e) => handleBagsChange(index, e.target.value)}
-                            className={inputCls(false)}
+                            className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl text-slate-900 text-center font-medium bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
                           />
-                          <span className="text-[10px] text-slate-400 block mt-1">Bags helper</span>
+                          <span className="text-[10px] text-slate-400 block mt-1 text-center">Bags helper</span>
                         </td>
 
-                        <td className="px-4 py-3 align-top">
+                        <td className="px-4 py-3 align-top min-w-[120px]">
+                          <div className="flex flex-col">
+                            <input
+                              type="number"
+                              step="0.01"
+                              disabled={!selectedProdId}
+                              placeholder="0.00"
+                              value={items[index]?.quantity ?? ''}
+                              onChange={(e) => handleQuantityChange(index, e.target.value)}
+                              className={`block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
+                                itemError?.quantity
+                                  ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
+                                  : shortfall > 0
+                                  ? 'border-orange-400 text-orange-600 focus:border-orange-500 focus:ring-orange-500/20'
+                                  : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
+                              }`}
+                            />
+                            {shortfall > 0 && (
+                              <span className="text-xs text-orange-500 mt-1 font-medium">
+                                {shortfall} KG will be backordered
+                              </span>
+                            )}
+                            {itemError?.quantity && <p className="text-xs text-red-600 mt-1">{itemError.quantity.message}</p>}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 align-top min-w-[120px]">
                           <input
                             type="number"
                             step="0.01"
                             disabled={!selectedProdId}
                             placeholder="0.00"
-                            {...register(`items.${index}.quantity`, {
-                              onChange: (e) => {
-                                const rawVal = e.target.value;
-                                if (rawVal === '') return;
-                                const enteredQty = parseFloat(rawVal);
-                                if (isNaN(enteredQty)) return;
-
-                                const selectedProdId = items[index]?.product_id || items[index]?.selected_variant_id || '';
-                                const selectedProd = products.find(p => p.id === selectedProdId);
-                                const available_stock = Number(selectedProd?.total_stock_kg ?? selectedProd?.current_stock ?? 0);
-
-                                if (enteredQty > available_stock) {
-                                  toast.warning(`Only ${available_stock} KG available.`);
-                                  setValue(`items.${index}.quantity`, available_stock);
-                                  const stdWeight = Number(selectedProd?.bag_weight_kg || 25);
-                                  if (stdWeight > 0) {
-                                    setValue(`items.${index}.bags_input`, Number((available_stock / stdWeight).toFixed(2)));
-                                  }
-                                  return;
-                                }
-
-                                const stdWeight = Number(selectedProd?.bag_weight_kg || 25);
-                                if (stdWeight > 0) {
-                                  setValue(`items.${index}.bags_input`, Number((enteredQty / stdWeight).toFixed(2)));
-                                }
-                              },
-                            })}
-                            className={inputCls(!!itemError?.quantity)}
-                          />
-                          {itemError?.quantity && <p className="text-xs text-red-600 mt-1">{itemError.quantity.message}</p>}
-                        </td>
-
-                        <td className="px-4 py-3 align-top">
-                          <input
-                            type="number"
-                            step="0.01"
-                            disabled={!selectedProdId}
-                            placeholder="0.00"
-                            {...register(`items.${index}.unit_price`)}
+                            value={items[index]?.unit_price ?? ''}
+                            onChange={(e) => handleUnitPriceChange(index, e.target.value)}
                             className={inputCls(!!itemError?.unit_price)}
                           />
                           {itemError?.unit_price && <p className="text-xs text-red-600 mt-1">{itemError.unit_price.message}</p>}
                         </td>
 
-                        <td className="px-4 py-3 text-sm font-bold text-slate-900 align-top pt-3 font-mono">
-                          {formatCurrency(lineTotal)}
+                        <td className="px-4 py-3 align-top min-w-[130px]">
+                          <input
+                            type="number"
+                            step="0.01"
+                            disabled={!selectedProdId}
+                            placeholder="0.00"
+                            value={currentLineTotal}
+                            onChange={(e) => handleTotalChange(index, e.target.value)}
+                            className={`${inputCls(false)} font-mono font-bold text-slate-900 bg-blue-50/20 focus:bg-white`}
+                          />
+                          <span className="text-[10px] text-slate-400 block mt-1">Lump sum total</span>
                         </td>
 
                         <td className="px-4 py-3 text-right">
@@ -434,14 +516,25 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                 </tbody>
               </table>
 
-              <div className="bg-slate-50 px-4 py-3 border-t border-slate-200">
+              <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 flex items-center justify-between">
                 <button
                   type="button"
+                  disabled={hasAnyEmptySize}
                   onClick={() => append({ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 })}
-                  className="inline-flex items-center text-sm font-bold text-blue-600 hover:text-blue-700"
+                  className={`inline-flex items-center text-sm font-bold transition-colors ${
+                    hasAnyEmptySize
+                      ? 'text-slate-400 cursor-not-allowed opacity-60'
+                      : 'text-blue-600 hover:text-blue-700 cursor-pointer'
+                  }`}
+                  title={hasAnyEmptySize ? "Please select a size/variant for all items before adding another row" : "Add line item"}
                 >
                   <Plus className="mr-1 h-4 w-4" /> Add Line Item
                 </button>
+                {hasAnyEmptySize && (
+                  <span className="text-xs text-amber-600 font-medium">
+                    * Select product & size/variant for all rows to add more or save
+                  </span>
+                )}
               </div>
             </div>
             {errors.items?.root && <p className="text-sm text-red-600">{errors.items.root.message}</p>}
@@ -557,8 +650,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
           <button
             type="submit"
             form="invoice-form"
-            disabled={mutation.isPending}
-            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition shadow-md"
+            disabled={mutation.isPending || hasAnyEmptySize}
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-md"
+            title={hasAnyEmptySize ? "All line items must have a size/variant selected" : undefined}
           >
             {mutation.isPending ? (
               <>

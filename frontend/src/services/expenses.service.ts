@@ -7,6 +7,9 @@ export interface Expense {
   description?: string;
   expense_date: string;
   payment_method: string;
+  bank_account_id?: string | null;
+  bank_name?: string;
+  account_title?: string;
   created_by?: string;
   created_by_name?: string;
   created_at: string;
@@ -18,7 +21,7 @@ export interface CreateExpenseData {
   description?: string;
   expense_date?: string;
   payment_method?: string;
-  bank_account_id?: string | null;
+  bank_account_id: string;
 }
 
 export interface ExpenseFilters {
@@ -26,6 +29,7 @@ export interface ExpenseFilters {
   endDate?: string;
   category?: string;
   payment_method?: string;
+  bank_account_id?: string;
 }
 
 export const expensesService = {

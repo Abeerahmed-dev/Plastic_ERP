@@ -82,15 +82,42 @@ export async function deleteCustomerController(
   }
 }
 
+export async function getCustomerStatementController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const statement = await customersService.fetchCustomerStatement(req.params.id);
+    res.status(200).json(ok(statement));
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getCustomerLedgerController(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const ledger = await customersService.fetchCustomerLedger(req.params.id);
+    const ledger = await customersService.fetchCustomerStatement(req.params.id);
     res.status(200).json(ok(ledger));
   } catch (err) {
     next(err);
   }
 }
+
+export async function getCustomerRefundableCreditsController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const credits = await customersService.getCustomerRefundableCredits(req.params.id);
+    res.status(200).json(ok(credits));
+  } catch (err) {
+    next(err);
+  }
+}
+

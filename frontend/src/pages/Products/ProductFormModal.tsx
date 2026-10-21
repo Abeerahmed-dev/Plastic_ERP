@@ -10,7 +10,10 @@ import { categoriesService, Category } from '../../services/categories.service';
 const productSchema = z.object({
   code: z.string().optional(),
   name: z.string().min(2, 'Name is required').max(150),
-  size: z.string().optional(),
+  size: z.string({ required_error: 'Size/Variant is compulsory' })
+    .trim()
+    .min(1, 'Size/Variant is compulsory'),
+  low_stock_threshold: z.coerce.number().min(0, 'Must be at least 0').default(0),
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
   cost_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
@@ -60,6 +63,7 @@ export const ProductFormModal = ({
       code: '',
       name: '',
       size: '',
+      low_stock_threshold: 0,
       description: '',
       category_id: '',
       cost_price: 0,
@@ -83,6 +87,7 @@ export const ProductFormModal = ({
           code: initialData.code,
           name: initialData.name,
           size: initialData.size || '',
+          low_stock_threshold: Number((initialData as any).low_stock_threshold || 0),
           description: initialData.description || '',
           category_id: initialData.category_id,
           cost_price: Number(initialData.cost_price),
@@ -97,6 +102,7 @@ export const ProductFormModal = ({
           code: '',
           name: '',
           size: '',
+          low_stock_threshold: 0,
           description: '',
           category_id: categories.length > 0 ? categories[0].id : '',
           cost_price: 0,
@@ -109,6 +115,7 @@ export const ProductFormModal = ({
       }
     }
   }, [isOpen, initialData, reset, categories]);
+
 
   if (!isOpen) return null;
 
@@ -171,11 +178,37 @@ export const ProductFormModal = ({
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Size <span className="text-slate-400 font-normal text-xs">(Format: Width x Height, e.g., 10x15)</span>
+                  Size / Variant <span className="text-red-500">*</span>
+                  <span className="text-slate-400 font-normal text-xs ml-1">(e.g., 10x15, Standard)</span>
                 </label>
-                <input {...register('size')} placeholder="e.g. 10x15" className={inputCls(!!errors.size)} />
-                {errors.size && <p className="mt-1 text-xs text-red-600">{errors.size.message}</p>}
+                <input
+                  {...register('size', { required: 'Size/Variant is compulsory' })}
+                  required
+                  placeholder="e.g. 10x15 or Standard"
+                  className={inputCls(!!errors.size)}
+                />
+                {errors.size && <p className="mt-1 text-xs text-red-600 font-medium">{errors.size.message}</p>}
               </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Low Stock Alert Threshold (KG)
+                  <span className="text-slate-400 font-normal text-xs ml-1">(Warning limit)</span>
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  {...register('low_stock_threshold')}
+                  placeholder="e.g. 50"
+                  className={inputCls(!!errors.low_stock_threshold)}
+                />
+                {errors.low_stock_threshold && (
+                  <p className="mt-1 text-xs text-red-600 font-medium">{errors.low_stock_threshold.message}</p>
+                )}
+                <p className="mt-1 text-[11px] text-slate-400">Triggers dashboard warning when current stock &le; threshold.</p>
+              </div>
+
 
               <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">

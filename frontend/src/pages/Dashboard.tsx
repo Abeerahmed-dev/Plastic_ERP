@@ -3,6 +3,7 @@ import CashierDashboard from './CashierDashboard';
 import { LiquidityLedger } from '../components/Reports/LiquidityLedger';
 import { BusinessPerformanceCharts } from '../components/Reports/BusinessPerformanceCharts';
 import { InventoryLedgerSection } from '../components/Reports/InventoryLedgerSection';
+import { LowStockWidget } from '../components/Dashboard/LowStockWidget';
 
 export const Dashboard = () => {
   const { user } = useAuthStore();
@@ -14,10 +15,13 @@ export const Dashboard = () => {
 
   return (
     <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div className="px-4 py-6 sm:px-0">
+      <div className="px-4 py-6 sm:px-0 space-y-8">
+
+        {/* Low Stock Early Warnings Alert Engine */}
+        <LowStockWidget />
 
         {/* Liquidity & Working Capital Ledger */}
-        <div className="mb-8">
+        <div>
           <LiquidityLedger />
         </div>
 

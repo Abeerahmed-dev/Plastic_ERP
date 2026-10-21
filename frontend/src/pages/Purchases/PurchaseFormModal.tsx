@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -11,11 +11,13 @@ import { SearchableCombobox, ComboboxOption } from '../../components/SearchableC
 
 const itemSchema = z.object({
   product_id: z.string().min(1, 'Product is required'),
-  selected_family_name: z.string().optional(),
-  selected_variant_id: z.string().optional(),
+  selected_family_name: z.string().min(1, 'Product is required'),
+  selected_variant_id: z.string().min(1, 'Size / Variant is compulsory'),
   bags_input: z.union([z.string(), z.number()]).optional(),
   quantity: z.coerce.number().min(0.0001, 'Min quantity 0.0001'),
   unit_price: z.coerce.number().min(0, 'Min price 0'),
+  total: z.union([z.string(), z.number()]).optional(),
+  total_price: z.union([z.string(), z.number()]).optional(),
   actual_weight_per_unit: z.coerce.number().min(0).optional().nullable(),
   actual_kanta_wt: z.coerce.number().min(0).optional().nullable(),
   actual_weight_kg: z.coerce.number().min(0).optional().nullable(),
@@ -35,9 +37,10 @@ type FormData = z.infer<typeof schema>;
 interface Props {
   onClose: () => void;
   onSuccess: () => void;
+  initialProductId?: string;
 }
 
-export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
+export default function PurchaseFormModal({ onClose, onSuccess, initialProductId }: Props) {
   const qc = useQueryClient();
   const [applyAdvance, setApplyAdvance] = useState(false);
   const [advanceAppliedAmount, setAdvanceAppliedAmount] = useState('0');
@@ -63,7 +66,7 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
       due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       discount: 0,
       notes: '',
-      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 }],
+      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
     },
   });
 
@@ -79,9 +82,47 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
   const selectedSupplier = suppliers.find((s: any) => s.id === selectedSupplierId);
   const walletBalance = Number((selectedSupplier as any)?.advance_payable || (selectedSupplier as any)?.advance_wallet || 0);
 
-  // Calculations
-  const subtotal = watchItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unit_price) || 0), 0);
-  const total = Math.max(0, subtotal - (Number(watchDiscount) || 0));
+  // Check if any row has missing product or empty size/variant
+  const hasAnyEmptySize = !watchItems || watchItems.length === 0 || watchItems.some((item) => {
+    const prodId = item.product_id || item.selected_variant_id;
+    if (!prodId) return true;
+    const prod = products.find(p => p.id === prodId);
+    return !prod || !prod.size || prod.size.trim() === '';
+  });
+
+  // Prefill when initialProductId is passed (e.g. from Low Stock alert "Order Stock" action)
+  useEffect(() => {
+    if (initialProductId && products.length > 0) {
+      const p = products.find(prod => prod.id === initialProductId);
+      if (p) {
+        const stdWeight = Number(p.bag_weight_kg || 25);
+        const costPrice = Number(p.cost_price || 0);
+        setValue('items', [{
+          product_id: p.id,
+          selected_family_name: p.name,
+          selected_variant_id: p.id,
+          bags_input: 1,
+          quantity: stdWeight,
+          unit_price: costPrice,
+          total: Math.round(stdWeight * costPrice * 100) / 100,
+          total_price: Math.round(stdWeight * costPrice * 100) / 100,
+        }]);
+      }
+    }
+  }, [initialProductId, products, setValue]);
+
+  // Phase 2: Explicitly rounded line-item totals summation
+  const subtotal = Math.round(
+    (watchItems || []).reduce((sum, item) => {
+      const itemTotal = item.total !== undefined && item.total !== null && item.total !== ''
+        ? Number(item.total)
+        : Math.round((Number(item.quantity || 0) * Number(item.unit_price || 0)) * 100) / 100;
+      return sum + (Number(itemTotal) || 0);
+    }, 0) * 100
+  ) / 100;
+
+  const discountNum = Math.round((Number(watchDiscount) || 0) * 100) / 100;
+  const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100);
 
   // Step 1: Group products by product_name
   const groupedProducts = useMemo(() => {
@@ -111,9 +152,19 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
 
   const handleFamilyChange = (index: number, familyName: string) => {
     setValue(`items.${index}.selected_family_name`, familyName);
-    setValue(`items.${index}.selected_variant_id`, '');
-    setValue(`items.${index}.product_id`, '');
-    setValue(`items.${index}.unit_price`, 0);
+    const variants = groupedProducts[familyName] || [];
+    if (variants.length === 1) {
+      const singleVariant = variants[0];
+      setValue(`items.${index}.selected_variant_id`, singleVariant.id);
+      setValue(`items.${index}.product_id`, singleVariant.id);
+      handleProductChange(index, singleVariant.id);
+    } else {
+      setValue(`items.${index}.selected_variant_id`, '');
+      setValue(`items.${index}.product_id`, '');
+      setValue(`items.${index}.unit_price`, 0);
+      setValue(`items.${index}.total`, 0);
+      setValue(`items.${index}.total_price`, 0);
+    }
   };
 
   const handleVariantChange = (index: number, variantId: string) => {
@@ -126,15 +177,20 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
     const product = products.find(p => p.id === productId);
     if (product) {
       const stdWeight = Number(product.bag_weight_kg || 25);
-      setValue(`items.${index}.unit_price`, Number(product.cost_price || 0));
+      const unitPrice = Number(product.cost_price || 0);
+      setValue(`items.${index}.unit_price`, unitPrice);
       
       const currentBags = watchItems[index]?.bags_input;
+      let qty = stdWeight;
       if (currentBags !== undefined && currentBags !== '' && Number(currentBags) > 0) {
-        setValue(`items.${index}.quantity`, Number((Number(currentBags) * stdWeight).toFixed(2)));
+        qty = Number((Number(currentBags) * stdWeight).toFixed(2));
       } else {
         setValue(`items.${index}.bags_input`, 1);
-        setValue(`items.${index}.quantity`, stdWeight);
       }
+      setValue(`items.${index}.quantity`, qty);
+      const lineTotal = Math.round(qty * unitPrice * 100) / 100;
+      setValue(`items.${index}.total`, lineTotal);
+      setValue(`items.${index}.total_price`, lineTotal);
     }
   };
 
@@ -146,7 +202,54 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
     const stdWeight = selectedProd && selectedProd.bag_weight_kg ? Number(selectedProd.bag_weight_kg) : 25;
     
     if (numBags > 0) {
-      setValue(`items.${index}.quantity`, Number((numBags * stdWeight).toFixed(2)));
+      const newQty = Number((numBags * stdWeight).toFixed(2));
+      setValue(`items.${index}.quantity`, newQty);
+      const unitPrice = Number(watchItems[index]?.unit_price || 0);
+      const newTotal = Math.round(newQty * unitPrice * 100) / 100;
+      setValue(`items.${index}.total`, newTotal);
+      setValue(`items.${index}.total_price`, newTotal);
+    }
+  };
+
+  // Phase 1: Bidirectional handlers
+  const handleQuantityChange = (index: number, val: string) => {
+    setValue(`items.${index}.quantity`, val as any);
+    const newQty = parseFloat(val);
+    if (!isNaN(newQty)) {
+      const unitPrice = Number(watchItems[index]?.unit_price || 0);
+      const newTotal = Math.round(newQty * unitPrice * 100) / 100;
+      setValue(`items.${index}.total`, newTotal);
+      setValue(`items.${index}.total_price`, newTotal);
+
+      // Helper sync for bags count if valid standard bag weight exists
+      const selectedProdId = watchItems[index]?.product_id || watchItems[index]?.selected_variant_id || '';
+      const selectedProd = products.find(p => p.id === selectedProdId);
+      const stdWeight = selectedProd && selectedProd.bag_weight_kg ? Number(selectedProd.bag_weight_kg) : 25;
+      if (stdWeight > 0) {
+        setValue(`items.${index}.bags_input`, Number((newQty / stdWeight).toFixed(2)));
+      }
+    }
+  };
+
+  const handleUnitPriceChange = (index: number, val: string) => {
+    setValue(`items.${index}.unit_price`, val as any);
+    const newUnitPrice = parseFloat(val);
+    if (!isNaN(newUnitPrice)) {
+      const qty = Number(watchItems[index]?.quantity || 0);
+      const newTotal = Math.round(qty * newUnitPrice * 100) / 100;
+      setValue(`items.${index}.total`, newTotal);
+      setValue(`items.${index}.total_price`, newTotal);
+    }
+  };
+
+  const handleTotalChange = (index: number, val: string) => {
+    setValue(`items.${index}.total`, val as any);
+    setValue(`items.${index}.total_price`, val as any);
+    const newTotal = parseFloat(val);
+    if (!isNaN(newTotal)) {
+      const qty = Number(watchItems[index]?.quantity || 0);
+      const newUnitPrice = qty > 0 ? Math.round((newTotal / qty) * 100) / 100 : 0;
+      setValue(`items.${index}.unit_price`, newUnitPrice);
     }
   };
 
@@ -166,15 +269,40 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
   });
 
   const onSubmit = (data: FormData) => {
-    const cleanItems = data.items.map(({ bags_input, selected_family_name, selected_variant_id, ...rest }) => rest);
+    const cleanItems = data.items.map(({ bags_input, selected_family_name, selected_variant_id, ...rest }) => {
+      const qty = Number(rest.quantity || 0);
+      const unitPrice = Math.round(Number(rest.unit_price || 0) * 100) / 100;
+      const itemTotal = rest.total !== undefined && rest.total !== null && rest.total !== ''
+        ? Math.round(Number(rest.total) * 100) / 100
+        : Math.round(qty * unitPrice * 100) / 100;
+
+      const prod = products.find(p => p.id === rest.product_id);
+      const resolvedSize = (prod?.size || 'Standard').trim();
+
+      return {
+        ...rest,
+        size: resolvedSize,
+        quantity: qty,
+        unit_price: unitPrice,
+        total: itemTotal,
+        total_price: itemTotal,
+      };
+    });
+
     mutation.mutate({
       ...data,
-      advance_applied_amount: applyAdvance ? Number(advanceAppliedAmount || 0) : 0,
+      discount: Math.round(Number(data.discount || 0) * 100) / 100,
+      advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
       items: cleanItems,
     } as any);
   };
 
-  const inputCls = (err?: boolean) => `w-full rounded-lg border ${err ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-slate-200 focus:border-emerald-500 focus:ring-emerald-500'} py-2 px-3 text-sm outline-none transition`;
+  const inputCls = (err?: boolean) =>
+    `w-full rounded-lg border ${
+      err
+        ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
+        : 'border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+    } py-2 px-3 text-sm outline-none transition bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed`;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
@@ -228,11 +356,24 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
 
             <div className="border border-slate-200 rounded-xl overflow-visible shadow-sm">
               <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center rounded-t-xl">
-                <h3 className="font-semibold text-slate-800 text-sm">Line Items (Strict KG Wholesale Model)</h3>
+                <div className="flex items-center gap-3">
+                  <h3 className="font-semibold text-slate-800 text-sm">Line Items (Strict KG Wholesale Model)</h3>
+                  {hasAnyEmptySize && (
+                    <span className="text-xs text-amber-600 font-medium">
+                      * Select product & size/variant for all rows to add more or save
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
+                  disabled={hasAnyEmptySize}
                   onClick={() => append({ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 })}
-                  className="text-xs font-medium text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+                  className={`text-xs font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-colors ${
+                    hasAnyEmptySize
+                      ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                      : 'text-emerald-600 hover:text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+                  }`}
+                  title={hasAnyEmptySize ? "Please select a size/variant for all items before adding another row" : "Add Row"}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add Row
@@ -247,10 +388,10 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                     <tr>
                       <th className="px-4 py-3 w-[26%]">Product</th>
                       <th className="px-4 py-3 w-[24%]">Size / Variant</th>
-                      <th className="px-4 py-3 w-24">Bags (Opt.)</th>
+                      <th className="px-4 py-3 w-24 min-w-[75px] text-center">Bags (Opt.)</th>
                       <th className="px-4 py-3 w-28">QTY (KG)</th>
                       <th className="px-4 py-3 w-32">PRICE / KG</th>
-                      <th className="px-4 py-3 w-36">TOTAL</th>
+                      <th className="px-4 py-3 w-36">TOTAL (PKR)</th>
                       <th className="px-4 py-3 w-12"></th>
                     </tr>
                   </thead>
@@ -274,7 +415,9 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
 
                       const qty = Number(watchItems[index]?.quantity) || 0;
                       const price = Number(watchItems[index]?.unit_price) || 0;
-                      const lineTotal = qty * price;
+                      const currentLineTotal = watchItems[index]?.total !== undefined && watchItems[index]?.total !== null && watchItems[index]?.total !== ''
+                        ? watchItems[index]?.total
+                        : (qty && price ? Math.round(qty * price * 100) / 100 : '');
                       
                       return (
                         <tr key={field.id} className="hover:bg-slate-50/60 transition-colors">
@@ -310,7 +453,7 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                             )}
                           </td>
 
-                          <td className="px-4 py-3 align-top">
+                          <td className="px-4 py-3 align-top w-24 min-w-[75px]">
                             <input
                               type="number"
                               step="0.1"
@@ -318,37 +461,48 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
                               placeholder="0"
                               value={watchItems[index]?.bags_input ?? ''}
                               onChange={(e) => handleBagsChange(index, e.target.value)}
-                              className={inputCls(false)}
+                              className="w-full py-2 px-3 text-sm border border-slate-300 rounded-lg text-slate-900 text-center font-medium bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed transition"
                             />
-                            <span className="text-[10px] text-slate-400 block mt-1">Bags helper</span>
+                            <span className="text-[10px] text-slate-400 block mt-1 text-center">Bags helper</span>
                           </td>
 
-                          <td className="px-4 py-3 align-top">
+                          <td className="px-4 py-3 align-top min-w-[120px]">
                             <input
                               type="number"
                               step="0.01"
                               disabled={!selectedProdId}
                               placeholder="0.00"
-                              {...register(`items.${index}.quantity`)}
+                              value={watchItems[index]?.quantity ?? ''}
+                              onChange={(e) => handleQuantityChange(index, e.target.value)}
                               className={inputCls(!!itemError?.quantity)}
                             />
                             {itemError?.quantity && <p className="text-xs text-red-600 mt-1">{itemError.quantity.message}</p>}
                           </td>
 
-                          <td className="px-4 py-3 align-top">
+                          <td className="px-4 py-3 align-top min-w-[120px]">
                             <input
                               type="number"
                               step="0.01"
                               disabled={!selectedProdId}
                               placeholder="0.00"
-                              {...register(`items.${index}.unit_price`)}
+                              value={watchItems[index]?.unit_price ?? ''}
+                              onChange={(e) => handleUnitPriceChange(index, e.target.value)}
                               className={inputCls(!!itemError?.unit_price)}
                             />
                             {itemError?.unit_price && <p className="text-xs text-red-600 mt-1">{itemError.unit_price.message}</p>}
                           </td>
 
-                          <td className="px-4 py-3 text-sm font-bold text-slate-900 align-top pt-3 font-mono">
-                            Rs. {lineTotal.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <td className="px-4 py-3 align-top min-w-[130px]">
+                            <input
+                              type="number"
+                              step="0.01"
+                              disabled={!selectedProdId}
+                              placeholder="0.00"
+                              value={currentLineTotal}
+                              onChange={(e) => handleTotalChange(index, e.target.value)}
+                              className={`${inputCls(false)} font-mono font-bold text-slate-900 bg-emerald-50/20 focus:bg-white`}
+                            />
+                            <span className="text-[10px] text-slate-400 block mt-1">Lump sum total</span>
                           </td>
                           <td className="px-4 py-3 text-right">
                             {fields.length > 1 && (
@@ -473,8 +627,9 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
           <button
             type="submit"
             form="purchase-form"
-            disabled={mutation.isPending}
-            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-70 flex items-center"
+            disabled={mutation.isPending || hasAnyEmptySize}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            title={hasAnyEmptySize ? "All line items must have a size/variant selected" : undefined}
           >
             {mutation.isPending ? 'Saving...' : 'Save Purchase'}
           </button>

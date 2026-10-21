@@ -26,3 +26,7 @@ export async function processSalesReturn(id: string, input: CreateSalesReturnInp
   return await invoicesRepo.processSalesReturn(id, input, userId);
 }
 
+export async function getPendingDeliveries(query?: { status?: string; product_id?: string }) {
+  return await invoicesRepo.getPendingDeliveries(query);
+}
+

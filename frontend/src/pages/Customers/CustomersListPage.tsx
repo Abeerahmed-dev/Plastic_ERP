@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft } from 'lucide-react';
+import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
 import { getCustomers, deactivateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 import { useAuthStore } from '../../store/auth.store';
 import CustomerFormModal from './CustomerFormModal';
-import { CustomerRefundModal } from './CustomerRefundModal';
+import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
+import { ProcessCashRefundModal } from '../../components/Modals/ProcessCashRefundModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
@@ -27,6 +28,9 @@ export default function CustomersListPage() {
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | undefined>();
+  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
+  const [advanceTargetCustomer, setAdvanceTargetCustomer] = useState<Customer | null>(null);
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
   const [refundTargetCustomer, setRefundTargetCustomer] = useState<Customer | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -98,13 +102,37 @@ export default function CustomersListPage() {
               <RefreshCw className="h-4 w-4" />
             </button>
             {canWrite && (
-              <button
-                onClick={openCreate}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
-              >
-                <Plus className="h-4 w-4" />
-                Add Customer
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    setAdvanceTargetCustomer(null);
+                    setAdvanceModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition shadow-sm"
+                  title="Log Advance Deposit"
+                >
+                  <ArrowUpRight className="h-4 w-4" />
+                  Log Advance
+                </button>
+                <button
+                  onClick={() => {
+                    setRefundTargetCustomer(null);
+                    setRefundModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-700 transition shadow-sm"
+                  title="Process Cash Refund"
+                >
+                  <ArrowDownLeft className="h-4 w-4" />
+                  Process Refund
+                </button>
+                <button
+                  onClick={openCreate}
+                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Customer
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -211,11 +239,25 @@ export default function CustomersListPage() {
                     }`}
                   >
                     <td className="px-4 py-3">
-                      <span className="inline-block rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-semibold text-blue-700">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(c)}
+                        className="inline-block rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-semibold text-blue-700 hover:bg-blue-100 hover:text-blue-900 transition cursor-pointer"
+                        title="View Customer Profile & Statement of Account"
+                      >
                         {c.code}
-                      </span>
+                      </button>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(c)}
+                        className="font-semibold text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left transition"
+                        title="View Customer Profile & Statement of Account"
+                      >
+                        {c.name}
+                      </button>
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -251,7 +293,10 @@ export default function CustomersListPage() {
                             </span>
                             {displayAdvance > 0 && canWrite && (
                               <button
-                                onClick={() => setRefundTargetCustomer(c)}
+                                onClick={() => {
+                                  setRefundTargetCustomer(c);
+                                  setRefundModalOpen(true);
+                                }}
                                 className="inline-flex items-center gap-1 rounded-md bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 text-xs font-bold transition shadow-2xs cursor-pointer"
                                 title="Issue Cash Refund from Advance Wallet"
                               >
@@ -281,13 +326,25 @@ export default function CustomersListPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
                         {canWrite && (
-                          <button
-                            onClick={() => openEdit(c)}
-                            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition"
-                            title="Edit"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => {
+                                setAdvanceTargetCustomer(c);
+                                setAdvanceModalOpen(true);
+                              }}
+                              className="rounded-lg border border-gray-200 p-1.5 text-emerald-600 hover:border-emerald-400 hover:bg-emerald-50 transition"
+                              title="Log Advance Deposit"
+                            >
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => openEdit(c)}
+                              className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition"
+                              title="Edit"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
                         )}
                         {canDelete && c.is_active && (
                           <button
@@ -344,10 +401,25 @@ export default function CustomersListPage() {
         <CustomerFormModal customer={editTarget} onClose={closeModal} />
       )}
 
-      <CustomerRefundModal
-        isOpen={!!refundTargetCustomer}
+      <LogAdvanceDepositModal
+        isOpen={advanceModalOpen}
+        entityType="customer"
+        customer={advanceTargetCustomer}
+        onClose={() => {
+          setAdvanceModalOpen(false);
+          setAdvanceTargetCustomer(null);
+        }}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['customers'] })}
+      />
+
+      <ProcessCashRefundModal
+        isOpen={refundModalOpen}
+        entityType="customer"
         customer={refundTargetCustomer}
-        onClose={() => setRefundTargetCustomer(null)}
+        onClose={() => {
+          setRefundModalOpen(false);
+          setRefundTargetCustomer(null);
+        }}
         onSuccess={() => qc.invalidateQueries({ queryKey: ['customers'] })}
       />
     </div>
