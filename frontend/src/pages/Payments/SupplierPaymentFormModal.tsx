@@ -9,8 +9,8 @@ import { purchasesService } from '../../services/purchases.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 
 const schema = z.object({
-  supplier_id: z.string().min(1, 'Supplier is required'),
-  purchase_invoice_id: z.string().uuid('Please select a purchase bill to settle'),
+  supplier_id: z.string().min(1, 'Supplier / Party is required'),
+  purchase_invoice_id: z.string().optional().nullable(),
   payment_date: z.string().min(1, 'Date is required'),
   amount: z.coerce.number().min(0.01, 'Amount must be greater than 0'),
   payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'PDC']),
@@ -143,7 +143,7 @@ export const SupplierPaymentFormModal = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200 overflow-y-auto">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl flex flex-col my-auto max-h-[90vh] animate-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h2 className="text-lg font-semibold text-slate-800">Settle Purchase Bill</h2>
+          <h2 className="text-lg font-semibold text-slate-800">Record Supplier Payment</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded-full hover:bg-slate-100">
             <X className="h-5 w-5" />
           </button>
@@ -162,9 +162,9 @@ export const SupplierPaymentFormModal = ({
             className="space-y-5"
           >
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Supplier</label>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Party</label>
               <select {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
-                <option value="">Select a supplier...</option>
+                <option value="">Select a party...</option>
                 {suppliersResponse?.data.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}

@@ -19,9 +19,12 @@ import { PaymentFormModal } from './PaymentFormModal';
 import { CustomerRefundModal } from '../Customers/CustomerRefundModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
+import { Pagination } from '../../components/Common/Pagination';
 
 export default function PaymentsListPage() {
   const { user, hasPermission } = useAuthStore();
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
@@ -143,6 +146,12 @@ export default function PaymentsListPage() {
     });
   }, [baseLedgerRows, selectedCity, selectedName, selectedInvoice, statusFilter]);
 
+  const totalPages = Math.ceil(filteredTableRows.length / PAGE_SIZE) || 1;
+  const paginatedPayments = filteredTableRows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
+
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
       style: 'currency',
@@ -243,7 +252,7 @@ export default function PaymentsListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredTableRows.flatMap((row) => {
+                {paginatedPayments.flatMap((row) => {
                   if (!row) return [];
                   const rowId = row.sales_id || row.id || Math.random().toString();
                   const isExpanded = !!expandedRows[rowId];
@@ -627,6 +636,15 @@ export default function PaymentsListPage() {
             </table>
           )}
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredTableRows.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       <PaymentFormModal

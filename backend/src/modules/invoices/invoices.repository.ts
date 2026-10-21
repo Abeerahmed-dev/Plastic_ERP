@@ -74,6 +74,7 @@ export async function createInvoiceWithItems(
         .select(
           'p.id',
           'p.name',
+          'p.name_urdu',
           'p.size',
           'p.total_stock_kg',
           'p.rolling_avg_cost_per_kg',
@@ -129,6 +130,7 @@ export async function createInvoiceWithItems(
           estimated_cogs: Math.round(abs_kg * avgCost * 100) / 100,
           actual_cogs: Math.round(abs_kg * avgCost * 100) / 100,
           missing_qty: 0,
+          name_urdu: product.name_urdu || null,
         });
 
 
@@ -279,6 +281,7 @@ export async function createInvoiceWithItems(
           estimated_cogs,
           actual_cogs,
           missing_qty,
+          name_urdu: product.name_urdu || null,
         });
       }
     }
@@ -1051,12 +1054,15 @@ export async function findInvoiceById(id: string) {
     creditNotesRows.map(async (cn) => {
       const cnItems = await db('sales_invoice_items as sii')
         .join('products as p', 'sii.product_id', 'p.id')
+        .leftJoin('categories as c', 'p.category_id', 'c.id')
         .where('sii.invoice_id', cn.id)
         .select(
           'sii.*',
           'p.name as product_name',
+          'p.name_urdu as product_name_urdu',
           'p.code as product_code',
-          'p.size as product_size'
+          'p.size as product_size',
+          'c.name as category'
         );
       return { ...cn, items: cnItems };
     })
@@ -1143,12 +1149,15 @@ export async function findInvoiceById(id: string) {
 
   const items = await db('sales_invoice_items as sii')
     .join('products as p', 'sii.product_id', 'p.id')
+    .leftJoin('categories as c', 'p.category_id', 'c.id')
     .where('sii.invoice_id', id)
     .select(
       'sii.*',
       'p.name as product_name',
+      'p.name_urdu as product_name_urdu',
       'p.code as product_code',
-      'p.size as product_size'
+      'p.size as product_size',
+      'c.name as category'
     );
 
   const pending_deliveries = await db('pending_deliveries as pd')

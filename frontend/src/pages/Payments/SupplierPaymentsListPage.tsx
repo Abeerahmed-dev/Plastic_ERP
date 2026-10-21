@@ -17,9 +17,12 @@ import { SupplierPaymentFormModal } from './SupplierPaymentFormModal';
 import { ProcessPurchaseReturnModal } from './ProcessPurchaseReturnModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
+import { Pagination } from '../../components/Common/Pagination';
 
 export default function SupplierPaymentsListPage() {
   const { user, hasPermission } = useAuthStore();
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [returnInvoiceId, setReturnInvoiceId] = useState<string | null>(null);
@@ -126,6 +129,12 @@ export default function SupplierPaymentsListPage() {
     });
   }, [normalizedPayments, selectedCity, selectedName, selectedInvoice, statusFilter]);
 
+  const totalPages = Math.ceil(filteredTableRows.length / PAGE_SIZE) || 1;
+  const paginatedPayments = filteredTableRows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
+
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
       style: 'currency',
@@ -138,7 +147,7 @@ export default function SupplierPaymentsListPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Supplier Payments Ledger</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Party Payments Ledger</h1>
           <p className="mt-1 text-sm text-slate-500">
             Invoice-aggregated payment summaries with partial settlement transaction timelines and debit notes.
           </p>
@@ -187,7 +196,7 @@ export default function SupplierPaymentsListPage() {
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="flex h-32 items-center justify-center text-slate-500 text-sm font-medium">
-              Loading aggregated supplier payments...
+              Loading aggregated party payments...
             </div>
           ) : filteredTableRows.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center px-4">
@@ -198,7 +207,7 @@ export default function SupplierPaymentsListPage() {
               <p className="mt-1 text-sm text-slate-500">
                 {selectedCity || selectedName || selectedInvoice
                   ? 'No records match the active cascading filters. Try resetting filters.'
-                  : 'Get started by recording a new supplier payment.'}
+                  : 'Get started by recording a new party payment.'}
               </p>
             </div>
           ) : (
@@ -207,14 +216,14 @@ export default function SupplierPaymentsListPage() {
                 <tr>
                   <th className="w-10 px-4 py-3.5"></th>
                   <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900">Invoice #</th>
-                  <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900">Supplier</th>
+                  <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900">Party</th>
                   <th className="px-6 py-3.5 text-right text-sm font-semibold text-slate-900">Invoice Total</th>
                   <th className="px-6 py-3.5 text-right text-sm font-semibold text-slate-900">Total Paid</th>
                   <th className="px-6 py-3.5 text-center text-sm font-semibold text-slate-900">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredTableRows.flatMap((row) => {
+                {paginatedPayments.flatMap((row) => {
                   const isExpanded = !!expandedRows[row.purchase_id];
                   const isAccountDeposit =
                     row.invoice_type === 'ACCOUNT_PAYMENT' ||
@@ -554,6 +563,15 @@ export default function SupplierPaymentsListPage() {
             </table>
           )}
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredTableRows.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {isModalOpen && (

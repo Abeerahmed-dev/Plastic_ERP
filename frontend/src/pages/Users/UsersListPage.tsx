@@ -92,7 +92,7 @@ function getPayrollStatus(user: User) {
   };
 }
 
-export default function UsersListPage() {
+export default function UsersListPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { hasPermission } = useAuthStore();
 
@@ -174,7 +174,7 @@ export default function UsersListPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
+    <div className={embedded ? "space-y-6" : "mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-6"}>
       {/* Header section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -191,7 +191,7 @@ export default function UsersListPage() {
             className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all"
           >
             <Plus className="-ml-1 mr-2 h-5 w-5" />
-            Add Employee
+            Add Access
           </button>
         )}
       </div>

@@ -5,11 +5,12 @@ import { Dashboard } from './pages/Dashboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import CustomersListPage from './pages/Customers/CustomersListPage';
 import SuppliersListPage from './pages/Suppliers/SuppliersListPage';
-import UsersListPage from './pages/Users/UsersListPage';
 import ProductsListPage from './pages/Products/ProductsListPage';
 import CategoriesPage from './pages/Categories/CategoriesPage';
 import InvoicesListPage from './pages/Invoices/InvoicesListPage';
 import PurchasesListPage from './pages/Purchases/PurchasesListPage';
+import PaymentsListPage from './pages/Payments/PaymentsListPage';
+import SupplierPaymentsListPage from './pages/Payments/SupplierPaymentsListPage';
 import POSPage from './pages/POS/POSPage';
 import { MainLayout } from './components/Layout/MainLayout';
 import { useAuthStore } from './store/auth.store';
@@ -19,6 +20,8 @@ import CashierStockPage from './pages/Cashier/CashierStockPage';
 import IncomeStatementPage from './pages/Reports/IncomeStatementPage';
 import MarginAnalyticsPage from './pages/Reports/MarginAnalyticsPage';
 import InventoryValuationPage from './pages/Reports/InventoryValuationPage';
+import SettingsPage from './pages/Settings/SettingsPage';
+import EmployeesListPage from './pages/Employees/EmployeesListPage';
 
 function App() {
   const { user } = useAuthStore();
@@ -39,7 +42,9 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={isCashier ? <Navigate to="/pos" replace /> : <Dashboard />} />
-          <Route path="/users" element={isCashier ? <Navigate to="/pos" replace /> : <UsersListPage />} />
+          <Route path="/users" element={isCashier ? <Navigate to="/pos" replace /> : <Navigate to="/settings?tab=employees" replace />} />
+          <Route path="/employees" element={isCashier ? <Navigate to="/pos" replace /> : <EmployeesListPage />} />
+          <Route path="/settings" element={isCashier ? <Navigate to="/pos" replace /> : <SettingsPage />} />
           <Route path="/products" element={<ProductsListPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/uom" element={<Navigate to="/categories" replace />} />
@@ -48,10 +53,10 @@ function App() {
           <Route path="/invoices" element={<InvoicesListPage />} />
           <Route path="/sales" element={<InvoicesListPage />} />
           <Route path="/purchases" element={<PurchasesListPage />} />
-          <Route path="/payments" element={<Navigate to="/customers" replace />} />
-          <Route path="/customer-payments" element={<Navigate to="/customers" replace />} />
-          <Route path="/supplier-payments" element={<Navigate to="/suppliers" replace />} />
-          <Route path="/expenses" element={<ExpensesListPage />} />
+          <Route path="/payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
+          <Route path="/customer-payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
+          <Route path="/supplier-payments" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierPaymentsListPage />} />
+          <Route path="/expenses" element={isCashier ? <Navigate to="/pos" replace /> : <ExpensesListPage />} />
           <Route path="/pos" element={<POSPage />} />
           <Route path="/stock" element={<CashierStockPage />} />
           <Route path="/reports" element={isCashier ? <Navigate to="/pos" replace /> : <FinancialReports />} />

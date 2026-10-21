@@ -3,9 +3,8 @@ import { z } from 'zod';
 export const createProductSchema = z.object({
   code: z.string().optional().nullable(),
   name: z.string().min(1, 'Name is required').max(150),
-  size: z.string({ required_error: 'Size/Variant is compulsory' })
-    .trim()
-    .min(1, 'Size/Variant is compulsory'),
+  name_urdu: z.string().optional().nullable(),
+  size: z.string().trim().min(1, 'Size/Variant is compulsory').optional().nullable(),
   low_stock_threshold: z.preprocess(
     (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? 0 : Number(val)),
     z.number().min(0, 'Low stock threshold cannot be negative').default(0)

@@ -24,7 +24,7 @@ const itemSchema = z.object({
 });
 
 const schema = z.object({
-  supplier_id: z.string().min(1, 'Supplier is required'),
+  supplier_id: z.string().min(1, 'Party is required'),
   date: z.string(),
   due_date: z.string().optional(),
   discount: z.coerce.number().min(0).default(0),
@@ -331,11 +331,13 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Supplier</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Party</label>
                 <select {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
-                  <option value="">Select supplier...</option>
+                  <option value="">Select party...</option>
                   {suppliers.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.city ? ` (${s.city})` : ''}
+                    </option>
                   ))}
                 </select>
                 {errors.supplier_id && <p className="mt-1 text-xs text-red-600">{errors.supplier_id.message}</p>}

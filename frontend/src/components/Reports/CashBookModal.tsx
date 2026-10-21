@@ -276,7 +276,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
             <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono text-xs flex items-center gap-1">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
               Inflow: Rs. {stats.filteredInflow.toLocaleString()}
@@ -284,6 +284,10 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
             <span className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-900 border border-rose-300 font-mono text-xs flex items-center gap-1">
               <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
               Outflow: Rs. {stats.filteredOutflow.toLocaleString()}
+            </span>
+            <span className="px-3 py-1 rounded-lg bg-slate-900 text-white font-mono text-xs flex items-center gap-1.5 shadow-xs">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+              Net Drawer: Rs. {stats.netFilteredTotal.toLocaleString()}
             </span>
           </div>
         </div>
@@ -467,6 +471,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                   {filteredEntries.flatMap((item) => {
                     const isExpanded = !!expandedRows[item.id];
                     const hasLineItems = Array.isArray(item.order_details) && item.order_details.length > 0;
+                    const isRefund = item.entry_type === 'CUSTOMER REFUND' || Number(item.amount) < 0;
 
                     const dateStr = item.date
                       ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })

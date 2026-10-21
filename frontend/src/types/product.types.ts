@@ -11,7 +11,8 @@ export interface Product {
   id: string;
   code: string;
   name: string;
-  size: string;
+  name_urdu?: string | null;
+  size?: string | null;
   low_stock_threshold?: number;
   description: string | null;
   category_id: string;
@@ -33,7 +34,8 @@ export interface Product {
 export interface CreateProductData {
   code?: string;
   name: string;
-  size: string;
+  name_urdu?: string;
+  size?: string;
   low_stock_threshold?: number;
   description?: string;
   category_id: string;

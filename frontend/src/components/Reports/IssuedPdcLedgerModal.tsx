@@ -65,7 +65,7 @@ export const IssuedPdcLedgerModal: React.FC<IssuedPdcLedgerModalProps> = ({ isOp
             </div>
             <div>
               <h2 className="text-xl font-bold leading-tight">Issued Post-Dated Cheques (Outgoing Liability)</h2>
-              <p className="text-xs text-rose-100 font-medium">Audit of pending cheques issued to suppliers awaiting bank clearance</p>
+              <p className="text-xs text-rose-100 font-medium">Audit of pending cheques issued to parties awaiting bank clearance</p>
             </div>
           </div>
           <button
@@ -107,7 +107,7 @@ export const IssuedPdcLedgerModal: React.FC<IssuedPdcLedgerModalProps> = ({ isOp
                 <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
                   <tr>
                     <th className="p-3">Due Date</th>
-                    <th className="p-3">Supplier</th>
+                    <th className="p-3">Party</th>
                     <th className="p-3">Bank & Cheque #</th>
                     <th className="p-3">Ref / Invoice</th>
                     <th className="p-3 text-right">Amount (PKR)</th>

@@ -157,7 +157,7 @@ export async function getCashierTallyController(
 export async function getPnLController(
   req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ): Promise<void> {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
@@ -165,8 +165,7 @@ export async function getPnLController(
     const data = await reportsService.getPnLReport(startDate, endDate);
     res.status(200).json(ok(data));
   } catch (err: any) {
-    console.error("P&L API CRASH:", err?.message || err, err?.stack);
-    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+    next(err);
   }
 }
 
@@ -214,7 +213,7 @@ export async function getIssuedPdcController(
 export async function getIncomeStatementController(
   req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ): Promise<void> {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
@@ -222,15 +221,14 @@ export async function getIncomeStatementController(
     const data = await reportsService.getIncomeStatementReport(startDate, endDate);
     res.status(200).json(ok(data));
   } catch (err: any) {
-    console.error('Income Statement Controller Crash:', err?.message || err, err?.stack);
-    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+    next(err);
   }
 }
 
 export async function getIncomeStatementReturnsDetailController(
   req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ): Promise<void> {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
@@ -238,15 +236,14 @@ export async function getIncomeStatementReturnsDetailController(
     const data = await reportsService.getIncomeStatementReturnsDetail(startDate, endDate);
     res.status(200).json(ok(data));
   } catch (err: any) {
-    console.error('Income Statement Returns Detail Controller Crash:', err?.message || err, err?.stack);
-    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+    next(err);
   }
 }
 
 export async function getMarginAnalyticsController(
   req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ): Promise<void> {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
@@ -254,22 +251,20 @@ export async function getMarginAnalyticsController(
     const data = await reportsService.getMarginAnalyticsReport(startDate, endDate);
     res.status(200).json(ok(data));
   } catch (err: any) {
-    console.error('Margin Analytics Controller Crash:', err?.message || err, err?.stack);
-    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+    next(err);
   }
 }
 
 export async function getInventoryValuationController(
   _req: Request,
   res: Response,
-  _next: NextFunction,
+  next: NextFunction,
 ): Promise<void> {
   try {
     const data = await reportsService.getInventoryValuationReport();
     res.status(200).json(ok(data));
   } catch (err: any) {
-    console.error('Inventory Valuation Controller Crash:', err?.message || err, err?.stack);
-    res.status(500).json({ success: false, error: err?.message || 'Internal Server Error' });
+    next(err);
   }
 }
 

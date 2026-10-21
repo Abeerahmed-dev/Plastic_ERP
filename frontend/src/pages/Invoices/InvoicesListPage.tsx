@@ -10,6 +10,7 @@ import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 import { getCustomers } from '../../services/customers.service';
+import { Pagination } from '../../components/Common/Pagination';
 
 export default function InvoicesListPage() {
   const { user, hasPermission } = useAuthStore();
@@ -17,6 +18,8 @@ export default function InvoicesListPage() {
   const isCashier = userRole === 'CASHIER';
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
@@ -86,6 +89,12 @@ export default function InvoicesListPage() {
       return matchesCity && matchesName && matchesInvoice;
     });
   }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice]);
+
+  const totalPages = Math.ceil(filteredTableRows.length / PAGE_SIZE) || 1;
+  const paginatedInvoices = filteredTableRows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
 
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
@@ -186,13 +195,13 @@ export default function InvoicesListPage() {
           selectedCity={selectedCity}
           selectedName={selectedName}
           selectedInvoice={selectedInvoice}
-          onCityChange={setSelectedCity}
-          onNameChange={setSelectedName}
-          onInvoiceChange={setSelectedInvoice}
+          onCityChange={(c) => { setSelectedCity(c); setCurrentPage(1); }}
+          onNameChange={(n) => { setSelectedName(n); setCurrentPage(1); }}
+          onInvoiceChange={(inv) => { setSelectedInvoice(inv); setCurrentPage(1); }}
           availableCities={availableCities}
           availableNames={availableNames}
           availableInvoices={availableInvoices}
-          onReset={resetFilters}
+          onReset={() => { resetFilters(); setCurrentPage(1); }}
           showInvoice={true}
           nameLabel="Customer"
           namePlaceholder="Filter by customer…"
@@ -252,7 +261,7 @@ export default function InvoicesListPage() {
                   </td>
                 </tr>
               ) : (
-                filteredTableRows.map((invoice) => {
+                paginatedInvoices.map((invoice) => {
                   const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
                   const balanceDue = Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0));
 
@@ -340,6 +349,15 @@ export default function InvoicesListPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredTableRows.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       <InvoiceFormModal

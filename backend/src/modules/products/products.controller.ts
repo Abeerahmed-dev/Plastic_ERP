@@ -12,6 +12,7 @@ function sanitizeForCashier(item: any) {
   return {
     id: item.id,
     name: item.name,
+    name_urdu: item.name_urdu || null,
     product_name: item.name,
     code: item.code,
     product_code: item.code,

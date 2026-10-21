@@ -1,38 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Package,
-  Filter,
-  ChevronDown,
-  ChevronRight,
-  Layers,
   RefreshCw,
+  Boxes,
+  TrendingUp,
+  ArrowUpRight,
+  ShieldCheck,
 } from 'lucide-react';
 import { useReportStore } from '../../store/useReportStore';
 
 const formatPKR = (val: number | undefined | null) => {
-  if (val === undefined || val === null || isNaN(val)) return 'Rs. 0.00';
-  return new Intl.NumberFormat('en-PK', {
-    style: 'currency',
-    currency: 'PKR',
-    minimumFractionDigits: 2,
-  }).format(val);
+  if (val === undefined || val === null || isNaN(val)) return 'Rs. 0';
+  const num = Math.round(Number(val));
+  return `Rs. ${num.toLocaleString('en-PK')}`;
 };
 
 const formatNumber = (val: number | undefined | null) => {
   if (val === undefined || val === null || isNaN(val)) return '0';
-  return new Intl.NumberFormat('en-PK', { maximumFractionDigits: 2 }).format(val);
+  return new Intl.NumberFormat('en-PK', { maximumFractionDigits: 1 }).format(val);
 };
 
 export const InventoryLedgerSection: React.FC = () => {
   const {
     inventoryLedger = [],
-    selectedProductId,
     isLoadingInventory,
-    setSelectedProductId,
     fetchInventoryLedger,
   } = useReportStore();
-
-  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!inventoryLedger || inventoryLedger.length === 0) {
@@ -40,285 +34,170 @@ export const InventoryLedgerSection: React.FC = () => {
     }
   }, []);
 
-  const toggleProductAccordion = (productId: string) => {
-    setExpandedProducts((prev) => ({
-      ...prev,
-      [productId]: !prev[productId],
-    }));
-  };
-
   const safeInventory = Array.isArray(inventoryLedger) ? inventoryLedger : [];
-  const filteredInventory = selectedProductId
-    ? safeInventory.filter((i) => i.product_id === selectedProductId)
-    : safeInventory;
+
+  // Calculate Overall Aggregate Lifetime Inventory Turnover & Metrics
+  const overallMetrics = useMemo(() => {
+    let totalKgSold = 0;
+    let totalKgPurchased = 0;
+    let totalStockKg = 0;
+    let totalGrossMargin = 0;
+    let totalAssetValue = 0;
+
+    safeInventory.forEach((item) => {
+      const sold = Number(item.all_time_kg_sold || 0);
+      const purchased = Number(item.all_time_kg_purchased || 0);
+      const stock = Number(item.total_kg || 0);
+      totalKgSold += sold;
+      totalKgPurchased += purchased;
+      totalStockKg += stock;
+      totalGrossMargin += Number(item.all_time_profit || 0);
+      totalAssetValue += Number(item.total_asset_value || 0);
+    });
+
+    const totalAcquired = Math.max(totalKgPurchased, totalKgSold + totalStockKg);
+    const turnoverPct = totalAcquired > 0 ? Math.min(100, Math.max(0, (totalKgSold / totalAcquired) * 100)) : 0;
+
+    return {
+      totalKgSold,
+      totalKgAcquired: totalAcquired,
+      turnoverPct,
+      totalGrossMargin,
+      totalAssetValue,
+      totalStockKg,
+    };
+  }, [safeInventory]);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+    <div className="rounded-2xl border border-slate-300/80 bg-white p-4 sm:p-5 shadow-[0_20px_50px_rgba(15,23,42,0.30),0_8px_20px_rgba(15,23,42,0.18)] transition-all space-y-3.5 w-full min-w-0 overflow-hidden flex flex-col justify-between">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-600">
-            <Package className="h-6 w-6" />
+      <div className="flex flex-wrap items-center justify-between gap-2.5 min-w-0 pb-2 border-b border-slate-100">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
+            <Package className="h-4.5 w-4.5" />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">1. Inventory Ledger & WAC Asset Valuation</h2>
-            <p className="text-xs text-slate-500">Flattened stock levels and rolling average cost valuation per product</p>
+          <div className="min-w-0">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight">
+              1. Inventory Ledger &amp; WAC Valuation
+            </h2>
+            <p className="text-[11px] text-slate-400 font-medium truncate">
+              Overall stock levels and average cost valuation
+            </p>
           </div>
         </div>
 
-        {/* Global Product Filter */}
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-slate-500 shrink-0" />
-          <label className="text-xs font-semibold text-slate-600 shrink-0">Filter by Product:</label>
-          <select
-            value={selectedProductId || ''}
-            onChange={(e) => setSelectedProductId(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All Products ({safeInventory.length})</option>
-            {safeInventory.map((item) => (
-              <option key={item.product_id} value={item.product_id}>
-                {item.product_name} ({item.product_code})
-              </option>
-            ))}
-          </select>
+        {/* Refresh Button */}
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           <button
             onClick={() => fetchInventoryLedger()}
             disabled={isLoadingInventory}
-            title="Refresh Inventory Ledger"
-            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg border border-slate-200 transition active:scale-95 disabled:opacity-50"
+            title="Refresh Inventory Data"
+            className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg border border-slate-200 transition"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInventory ? 'animate-spin text-blue-600' : ''}`} />
+            <RefreshCw className={`w-3 h-3 ${isLoadingInventory ? 'animate-spin text-indigo-600' : ''}`} />
           </button>
-          {isLoadingInventory && <span className="text-xs text-blue-600 animate-pulse font-medium ml-1">Loading...</span>}
         </div>
       </div>
 
-      {/* Inventory Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-xs tracking-wider border-b border-slate-200">
-            <tr>
-              <th className="py-3 px-4">Product Name</th>
-              <th className="py-3 px-4">Category</th>
-              <th className="py-3 px-4 text-right">Total Stock (KG)</th>
-              <th className="py-3 px-4 text-right">Rolling Avg Cost/KG</th>
-              <th className="py-3 px-4 text-right">Total Asset Value</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredInventory.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="py-8 text-center text-slate-500 text-sm">
-                  {isLoadingInventory ? 'Loading inventory data...' : 'No active inventory products found matching the filter.'}
-                </td>
-              </tr>
-            ) : (
-              filteredInventory.flatMap((item) => {
-                const isAccordionOpen = !!expandedProducts[item.product_id];
-                const kgSold = item.all_time_kg_sold || 0;
-                const kgPurchased = item.all_time_kg_purchased || 0;
-                const totalAcquired = Math.max(kgPurchased, kgSold + (item.total_kg || 0));
-                const turnoverPct = totalAcquired > 0 ? Math.min(100, Math.max(0, (kgSold / totalAcquired) * 100)) : 0;
-                const profit = item.all_time_profit || 0;
-                const isProfit = profit >= 0;
-                const batches = item.batches || [];
+      {/* ── Single Aggregate Overall Lifetime Inventory Turnover Banner ── */}
+      <div className="bg-slate-50/80 p-3 sm:p-3.5 rounded-xl border border-slate-200 space-y-2.5 shadow-2xs">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-slate-800 flex items-center gap-1.5">
+            <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+            Overall Inventory Lifetime Turnover
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-500 font-medium">Turnover Rate:</span>
+            <span className="font-mono font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded border border-blue-200 text-xs">
+              {overallMetrics.turnoverPct.toFixed(1)}%
+            </span>
+          </div>
+        </div>
 
-                return [
-                  /* ─── Top Level Row (Product Summary) ─── */
-                  <tr
-                    key={item.product_id}
-                    onClick={() => toggleProductAccordion(item.product_id)}
-                    className="hover:bg-slate-50/70 transition-colors border-t border-slate-200/60 cursor-pointer"
-                  >
-                    <td className="py-3.5 px-4 font-semibold text-slate-900">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleProductAccordion(item.product_id);
-                          }}
-                          className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                        >
-                          {isAccordionOpen ? (
-                            <ChevronDown className="w-4 h-4 text-indigo-600" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </button>
-                        <span>{item.product_name}</span>
-                        <span className="text-xs font-mono font-normal text-slate-400">({item.product_code})</span>
-                        {batches.length > 0 && (
-                          <span className="ml-1 text-[11px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
-                            {batches.length} Buckets
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-600">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 text-xs font-medium">
-                        {item.category}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-bold text-slate-900 font-mono">
-                      {formatNumber(item.total_kg)} KG
-                      {item.secondary_units_summary && (
-                        <span className="block text-[11px] font-normal text-slate-400">
-                          {item.secondary_units_summary}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-mono font-semibold text-slate-700">
-                      {formatPKR(item.avg_cost)} / KG
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-bold text-emerald-600 font-mono">
-                      {formatPKR(item.total_asset_value)}
-                    </td>
-                  </tr>,
+        {/* Progress Bar */}
+        <div className="w-full bg-slate-200/80 rounded-full h-2.5 overflow-hidden">
+          <div
+            className="bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500 h-2.5 rounded-full transition-all duration-500"
+            style={{ width: `${overallMetrics.turnoverPct}%` }}
+          />
+        </div>
 
-                  /* ─── Middle Accordion Row (Consolidated Price Buckets) ─── */
-                  isAccordionOpen && (
-                    <tr key={`buckets-${item.product_id}`} className="bg-indigo-50/30 border-b border-indigo-100">
-                      <td colSpan={5} className="py-3 px-6">
-                        <div className="rounded-xl border border-indigo-100 bg-white p-4 shadow-2xs space-y-3">
-                          <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                            <span className="flex items-center gap-2">
-                              <Layers className="w-4 h-4 text-indigo-600" />
-                              Active & Historical Price Buckets for {item.product_name} ({batches.length} Buckets)
-                            </span>
-                            <span className="text-slate-500 font-normal text-[11px]">
-                              Auto-FIFO Stock Deduction Order (Oldest First)
-                            </span>
-                          </div>
-
-                          {batches.length === 0 ? (
-                            <div className="py-4 text-center text-xs text-slate-400 italic">
-                              No granular price buckets found for this product.
-                            </div>
-                          ) : (
-                            <div className="overflow-x-auto rounded-lg border border-slate-200">
-                              <table className="w-full text-xs text-left">
-                                <thead className="bg-slate-50 text-slate-600 uppercase text-[11px] font-semibold border-b border-slate-200">
-                                  <tr>
-                                    <th className="py-2.5 px-3">Bucket #</th>
-                                    <th className="py-2.5 px-3">Created Date</th>
-                                    <th className="py-2.5 px-3 text-right">Buy Price / KG</th>
-                                    <th className="py-2.5 px-3 text-right">Stock (Remaining / Original)</th>
-                                    <th className="py-2.5 px-3 min-w-[180px]">Depletion Progress</th>
-                                    <th className="py-2.5 px-3 text-center">Status</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                  {batches.map((b: any) => {
-                                    const orig = Number(b.original_qty || 0);
-                                    const rem = Number(b.remaining_qty || 0);
-                                    const sold = Number(b.total_kg_sold || Math.max(0, orig - rem));
-                                    const depletionPct = orig > 0 ? Math.min(100, Math.max(0, (sold / orig) * 100)) : 0;
-                                    const isDepleted = b.status === 'DEPLETED' || rem <= 0;
-
-                                    return (
-                                      <tr key={b.batch_id} className="hover:bg-slate-50/60">
-                                        <td className="py-2 px-3 font-mono font-bold text-indigo-600">
-                                          {b.batch_number}
-                                        </td>
-                                        <td className="py-2 px-3 font-mono text-slate-600">
-                                          {b.date}
-                                        </td>
-                                        <td className="py-2 px-3 text-right font-mono font-semibold text-slate-800">
-                                          {formatPKR(b.buy_price_per_kg)}
-                                        </td>
-                                        <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
-                                          {formatNumber(rem)} / {formatNumber(orig)} KG
-                                        </td>
-                                        <td className="py-2 px-3">
-                                          <div className="space-y-1">
-                                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200/60">
-                                              <div
-                                                className={`h-2 rounded-full transition-all duration-300 ${
-                                                  isDepleted ? 'bg-slate-400' : 'bg-emerald-500'
-                                                }`}
-                                                style={{ width: `${depletionPct}%` }}
-                                              />
-                                            </div>
-                                            <div className="text-[10px] text-slate-500 font-mono flex justify-between">
-                                              <span>{formatNumber(sold)} KG Depleted</span>
-                                              <span>{depletionPct.toFixed(1)}%</span>
-                                            </div>
-                                          </div>
-                                        </td>
-                                        <td className="py-2 px-3 text-center">
-                                          {isDepleted ? (
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                                              DEPLETED
-                                            </span>
-                                          ) : (
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                              ACTIVE
-                                            </span>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ),
-
-                  /* ─── Bottom Master Bar (All-Time Turnover & Margin) ─── */
-                  <tr key={`turnover-${item.product_id}`} className="bg-slate-50/50 border-b border-slate-200">
-                    <td colSpan={5} className="pb-3 pt-1 px-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
-                        {/* Progress Bar & Lifetime Turnover */}
-                        <div className="flex-1 space-y-1.5 min-w-[220px]">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                              <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
-                              Lifetime Inventory Turnover
-                            </span>
-                            <span className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                              {turnoverPct.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden p-0.5 border border-slate-200/60">
-                            <div
-                              className="bg-gradient-to-r from-blue-500 to-indigo-600 h-1.5 rounded-full transition-all duration-500"
-                              style={{ width: `${turnoverPct}%` }}
-                            />
-                          </div>
-                          <div className="text-[11px] font-medium text-slate-500 flex justify-between">
-                            <span>
-                              Lifetime Turnover: <strong className="text-slate-800 font-mono">{formatNumber(kgSold)} KG</strong> Sold
-                            </span>
-                            <span>
-                              <strong className="text-slate-800 font-mono">{formatNumber(kgPurchased > 0 ? kgPurchased : totalAcquired)} KG</strong> Total Acquired
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Vertical divider on sm screens */}
-                        <div className="hidden sm:block w-px h-10 bg-slate-200" />
-
-                        {/* Yield Metric: All-Time Gross Margin */}
-                        <div className="flex items-center sm:flex-col sm:items-end justify-between sm:justify-center shrink-0">
-                          <span className="text-xs font-semibold text-slate-500">All-Time Gross Margin</span>
-                          <span className={`text-base font-black font-mono ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {formatPKR(profit)}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>,
-                ];
-              })
-            )}
-          </tbody>
-        </table>
+        {/* Bottom Details Row */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] pt-0.5">
+          <div className="text-slate-600">
+            Total Sold: <strong className="text-slate-900 font-mono">{formatNumber(overallMetrics.totalKgSold)} KG</strong>
+            <span className="mx-1.5 text-slate-300">|</span>
+            Acquired: <strong className="text-slate-900 font-mono">{formatNumber(overallMetrics.totalKgAcquired)} KG</strong>
+          </div>
+          <div className="text-slate-600">
+            All-Time Margin: <strong className={`font-mono ${overallMetrics.totalGrossMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatPKR(overallMetrics.totalGrossMargin)}</strong>
+          </div>
+        </div>
       </div>
+
+      {/* Aggregate KPI Metric Tiles */}
+      <div className="grid grid-cols-2 gap-2.5 w-full">
+        {/* Total Stock on Hand */}
+        <div className="bg-blue-50/50 rounded-xl border border-blue-100/80 p-2.5 sm:p-3 flex items-center gap-2.5 shadow-2xs hover:shadow-xs transition-all">
+          <div className="p-2 rounded-lg bg-blue-100 text-blue-600 shrink-0">
+            <Boxes className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[11px] font-medium text-slate-500">Current Stock</span>
+            <span className="block text-sm sm:text-base font-bold text-slate-900 font-mono tabular-nums truncate">
+              {formatNumber(overallMetrics.totalStockKg)} <span className="text-xs font-normal text-slate-500">KG</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Total Asset Valuation */}
+        <div className="bg-emerald-50/50 rounded-xl border border-emerald-100/80 p-2.5 sm:p-3 flex items-center gap-2.5 shadow-2xs hover:shadow-xs transition-all">
+          <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600 shrink-0">
+            <TrendingUp className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[11px] font-medium text-slate-500">Total Asset Value</span>
+            <span className="block text-sm sm:text-base font-bold text-emerald-700 font-mono tabular-nums truncate">
+              {formatPKR(overallMetrics.totalAssetValue)}
+            </span>
+          </div>
+        </div>
+
+        {/* Products Tracked */}
+        <div className="bg-indigo-50/50 rounded-xl border border-indigo-100/80 p-2.5 sm:p-3 flex items-center gap-2.5 shadow-2xs hover:shadow-xs transition-all">
+          <div className="p-2 rounded-lg bg-indigo-100 text-indigo-600 shrink-0">
+            <Package className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[11px] font-medium text-slate-500">Active Products</span>
+            <span className="block text-sm sm:text-base font-bold text-slate-900 font-mono tabular-nums">
+              {safeInventory.length} <span className="text-xs font-normal text-slate-500">Items</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Inventory Security & Valuation Mode */}
+        <div className="bg-amber-50/50 rounded-xl border border-amber-100/80 p-2.5 sm:p-3 flex items-center gap-2.5 shadow-2xs hover:shadow-xs transition-all">
+          <div className="p-2 rounded-lg bg-amber-100 text-amber-600 shrink-0">
+            <ShieldCheck className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <span className="block text-[11px] font-medium text-slate-500">Costing Method</span>
+            <span className="block text-xs font-bold text-amber-900 truncate">
+              Weighted Avg (WAC)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Link to Full Item-wise Valuation Page */}
+      <Link
+        to="/reports/inventory-valuation"
+        className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200/80 transition-all text-xs font-semibold text-slate-700 hover:text-indigo-600 group"
+      >
+        <span>View Item-wise Valuation &amp; FIFO Buckets</span>
+        <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+      </Link>
     </div>
   );
 };

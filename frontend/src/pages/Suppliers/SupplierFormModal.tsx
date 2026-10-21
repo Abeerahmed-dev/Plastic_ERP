@@ -29,11 +29,11 @@ const normalizeRegion = (r?: string | null) => {
 
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
-  phone: z.string().max(30).optional(),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
-  address: z.string().optional(),
   city: z.string().optional(),
   region: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+  address: z.string().optional(),
   payment_terms: z.coerce.number().int().min(0).default(30),
   opening_payable: z.coerce.number().min(0).default(0),
   opening_advance: z.coerce.number().min(0).default(0),
