@@ -72,7 +72,7 @@ export default function CashierDashboard() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {/* Total Cash Tally Card */}
-            <div className="bg-gradient-to-br from-emerald-500 to-teal-700 p-6 rounded-2xl text-white shadow-lg relative overflow-hidden">
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-700 p-6 rounded-2xl text-white shadow-[0_8px_24px_rgba(16,185,129,0.25)] hover:shadow-[0_12px_32px_rgba(16,185,129,0.35)] hover:-translate-y-0.5 transition-all relative overflow-hidden">
               <div className="relative z-10">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-100 block mb-1">
                   Total Cash Collected
@@ -88,7 +88,7 @@ export default function CashierDashboard() {
             </div>
 
             {/* POS Sales Cash */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-1">
+            <div className="bg-white p-6 rounded-2xl shadow-[0_8px_24px_rgba(15,23,42,0.22),0_2px_8px_rgba(15,23,42,0.12)] hover:shadow-[0_12px_32px_rgba(15,23,42,0.35)] hover:-translate-y-0.5 transition-all border border-slate-300 space-y-1">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
                 POS Sales Cash
               </span>
@@ -99,7 +99,7 @@ export default function CashierDashboard() {
             </div>
 
             {/* Customer Debt Payments Cash */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-1">
+            <div className="bg-white p-6 rounded-2xl shadow-[0_8px_24px_rgba(15,23,42,0.22),0_2px_8px_rgba(15,23,42,0.12)] hover:shadow-[0_12px_32px_rgba(15,23,42,0.35)] hover:-translate-y-0.5 transition-all border border-slate-300 space-y-1">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
                 Customer Payments Cash
               </span>
@@ -110,7 +110,7 @@ export default function CashierDashboard() {
             </div>
 
             {/* Shift Status */}
-            <div className="bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-800 text-white space-y-1">
+            <div className="bg-slate-900 p-6 rounded-2xl shadow-[0_8px_24px_rgba(15,23,42,0.25)] hover:shadow-[0_12px_32px_rgba(15,23,42,0.35)] hover:-translate-y-0.5 transition-all border border-slate-800 text-white space-y-1">
               <span className="text-xs font-bold text-amber-400 uppercase tracking-wider block">
                 Safeguards Enforced
               </span>
@@ -128,7 +128,7 @@ export default function CashierDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         <Link
           to="/pos"
-          className="group p-6 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-blue-500 hover:shadow-md transition flex items-center justify-between"
+          className="group p-6 rounded-2xl bg-white border border-slate-200/80 shadow-md hover:border-blue-500 hover:shadow-lg transition-all flex items-center justify-between"
         >
           <div className="flex items-center gap-4">
             <div className="p-4 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition">
@@ -144,7 +144,7 @@ export default function CashierDashboard() {
 
         <Link
           to="/payments"
-          className="group p-6 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-emerald-500 hover:shadow-md transition flex items-center justify-between"
+          className="group p-6 rounded-2xl bg-white border border-slate-200/80 shadow-md hover:border-emerald-500 hover:shadow-lg transition-all flex items-center justify-between"
         >
           <div className="flex items-center gap-4">
             <div className="p-4 rounded-xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition">

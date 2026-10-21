@@ -344,7 +344,7 @@ export function SystemInitialization() {
             }`}
           >
             <Truck className="h-4 w-4" />
-            3. Supplier Debt (Payables)
+            3. Party Debt (Payables)
           </button>
         </div>
 
@@ -572,8 +572,8 @@ export function SystemInitialization() {
           <div className="p-6 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">Supplier Debt (Opening Payables)</h3>
-                <p className="text-xs text-slate-500">Record money your business owes to suppliers at system go-live.</p>
+                <h3 className="text-lg font-bold text-slate-900">Party Debt (Opening Payables)</h3>
+                <p className="text-xs text-slate-500">Record money your business owes to parties at system go-live.</p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs font-semibold text-slate-500">
@@ -594,7 +594,7 @@ export function SystemInitialization() {
                 <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-xs tracking-wider border-b border-slate-200">
                   <tr>
                     <th className="py-3 px-4 w-12 text-center">#</th>
-                    <th className="py-3 px-4 min-w-[200px]">Supplier Name</th>
+                    <th className="py-3 px-4 min-w-[200px]">Party Name</th>
                     <th className="py-3 px-4 w-40">Phone</th>
                     <th className="py-3 px-4 w-36">City</th>
                     <th className="py-3 px-4 w-48 text-right">Opening Balance (Payable Owed)</th>
@@ -663,7 +663,7 @@ export function SystemInitialization() {
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 transition"
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Submit Supplier Opening Debt
+                Submit Party Opening Debt
               </button>
             </div>
           </div>

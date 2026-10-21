@@ -5,10 +5,13 @@ import { paymentsService } from '../../services/payments.service';
 import { CustomerPaymentSummary } from '../../types/payment.types';
 import { useAuthStore } from '../../store/auth.store';
 import { PaymentFormModal } from './PaymentFormModal';
+import { Pagination } from '../../components/Common/Pagination';
 
 export default function PaymentsListPage() {
   const { user, hasPermission } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
@@ -42,6 +45,12 @@ export default function PaymentsListPage() {
     );
     return matchesInvoice || matchesCustomer || matchesHistory;
   });
+
+  const totalPages = Math.ceil(filteredPayments.length / PAGE_SIZE) || 1;
+  const paginatedPayments = filteredPayments.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
 
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
@@ -85,7 +94,10 @@ export default function PaymentsListPage() {
               className="block w-full rounded-xl border-0 py-2.5 pl-10 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 transition-all"
               placeholder="Search by invoice #, customer, or payment #..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
             />
           </div>
         </div>
@@ -116,7 +128,7 @@ export default function PaymentsListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredPayments.flatMap((row) => {
+                {paginatedPayments.flatMap((row) => {
                   if (!row) return [];
                   const rowId = row.sales_id || row.id || Math.random().toString();
                   const isExpanded = !!expandedRows[rowId];
@@ -249,6 +261,15 @@ export default function PaymentsListPage() {
             </table>
           )}
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredPayments.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       <PaymentFormModal

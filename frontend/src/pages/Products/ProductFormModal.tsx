@@ -10,6 +10,7 @@ import { categoriesService, Category } from '../../services/categories.service';
 const productSchema = z.object({
   code: z.string().optional(),
   name: z.string().min(2, 'Name is required').max(150),
+  name_urdu: z.string().optional(),
   size: z.string().optional(),
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
@@ -58,6 +59,7 @@ export const ProductFormModal = ({
     defaultValues: {
       code: '',
       name: '',
+      name_urdu: '',
       size: '',
       description: '',
       category_id: '',
@@ -78,6 +80,7 @@ export const ProductFormModal = ({
         reset({
           code: initialData.code,
           name: initialData.name,
+          name_urdu: initialData.name_urdu || '',
           size: initialData.size || '',
           description: initialData.description || '',
           category_id: initialData.category_id,
@@ -91,6 +94,7 @@ export const ProductFormModal = ({
         reset({
           code: '',
           name: '',
+          name_urdu: '',
           size: '',
           description: '',
           category_id: categories.length > 0 ? categories[0].id : '',
@@ -145,10 +149,24 @@ export const ProductFormModal = ({
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Product Name <span className="text-red-500">*</span>
+                  Product Name (English) <span className="text-red-500">*</span>
                 </label>
-                <input {...register('name')} placeholder="e.g. Shopping Bag" className={inputCls(!!errors.name)} />
+                <input {...register('name')} placeholder="e.g. Shopping Bag / 30/s Poly" className={inputCls(!!errors.name)} />
                 {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
+              </div>
+
+              <div>
+                <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-slate-700">
+                  <span>Urdu Name / پروڈکٹ کا نام اردو میں</span>
+                  <span className="text-slate-400 font-normal text-xs">(اختیاری)</span>
+                </label>
+                <input
+                  {...register('name_urdu')}
+                  placeholder="مثال: شاپنگ بیگ یا رول"
+                  dir="rtl"
+                  className={`${inputCls(!!errors.name_urdu)} font-serif`}
+                />
+                {errors.name_urdu && <p className="mt-1 text-xs text-red-600">{errors.name_urdu.message}</p>}
               </div>
 
               <div>

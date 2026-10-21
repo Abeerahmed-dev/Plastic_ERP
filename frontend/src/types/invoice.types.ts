@@ -6,6 +6,7 @@ export interface InvoiceItem {
   unit_price: string | number;
   total_price: string | number;
   product_name?: string;
+  name_urdu?: string | null;
   product_code?: string;
 }
 
@@ -24,6 +25,8 @@ export interface Invoice {
   discount: string | number;
   total_amount: string | number;
   paid_amount: string | number;
+  cash_tendered?: number | null;
+  change_returned?: number | null;
   status: 'DRAFT' | 'UNPAID' | 'PARTIAL' | 'PAID' | 'CANCELLED';
   notes: string | null;
   created_at: string;

@@ -5,6 +5,7 @@ export interface ProductRow {
   id: string;
   code: string;
   name: string;
+  name_urdu?: string | null;
   size: string | null;
   description: string | null;
   category_id: string;
@@ -137,7 +138,6 @@ export async function findPOSAvailableProducts(search?: string): Promise<Product
   const baseQuery = db('products')
     .join('categories as c', 'products.category_id', 'c.id')
     .where('products.is_active', true)
-    .where('products.total_stock_kg', '>', 0)
     .modify((qb) => {
       if (search) {
         qb.where((inner) => {
@@ -187,6 +187,7 @@ export async function createProduct(
   const insertPayload: Record<string, any> = {
     code,
     name: data.name,
+    name_urdu: data.name_urdu ?? null,
     size: data.size ?? null,
     description: data.description ?? null,
     category_id: data.category_id,

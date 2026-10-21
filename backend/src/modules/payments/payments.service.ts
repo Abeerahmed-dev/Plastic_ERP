@@ -14,3 +14,7 @@ export async function getPayments(query?: { search?: string; customer_id?: strin
 export async function clearCheque(paymentId: string) {
   return await paymentsRepo.clearCheque(paymentId);
 }
+
+export async function createRefund(data: { customer_id: string; amount: number; source: string; notes?: string; linked_invoice_id?: string | null }, userId?: string) {
+  return await paymentsRepo.createRefund(data, userId);
+}

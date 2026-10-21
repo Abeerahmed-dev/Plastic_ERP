@@ -4,10 +4,13 @@ import { Plus, Search, HandCoins, ChevronDown, ChevronRight, CheckCircle2, Clock
 import { supplierPaymentsService, SupplierPaymentSummary } from '../../services/supplier-payments.service';
 import { useAuthStore } from '../../store/auth.store';
 import { SupplierPaymentFormModal } from './SupplierPaymentFormModal';
+import { Pagination } from '../../components/Common/Pagination';
 
 export default function SupplierPaymentsListPage() {
   const { user, hasPermission } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
@@ -40,6 +43,12 @@ export default function SupplierPaymentsListPage() {
     return matchesInvoice || matchesSupplier || matchesHistory;
   });
 
+  const totalPages = Math.ceil(filteredPayments.length / PAGE_SIZE) || 1;
+  const paginatedPayments = filteredPayments.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
+
   const formatCurrency = (val: string | number) => {
     return new Intl.NumberFormat('en-PK', {
       style: 'currency',
@@ -52,7 +61,7 @@ export default function SupplierPaymentsListPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Supplier Payments Ledger</h1>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Party Payments Ledger</h1>
           <p className="mt-1 text-sm text-slate-500">
             Invoice-aggregated payment summaries with partial settlement transaction timelines.
           </p>
@@ -78,9 +87,12 @@ export default function SupplierPaymentsListPage() {
             <input
               type="text"
               className="block w-full rounded-xl border-0 py-2.5 pl-10 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6 transition-all"
-              placeholder="Search by invoice #, supplier, or payment #..."
+              placeholder="Search by invoice #, party, or payment #..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
             />
           </div>
         </div>
@@ -88,7 +100,7 @@ export default function SupplierPaymentsListPage() {
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="flex h-32 items-center justify-center text-slate-500 text-sm font-medium">
-              Loading aggregated supplier payments...
+              Loading aggregated party payments...
             </div>
           ) : filteredPayments.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center px-4">
@@ -96,7 +108,7 @@ export default function SupplierPaymentsListPage() {
                 <HandCoins className="h-6 w-6 text-slate-400" />
               </div>
               <h3 className="text-sm font-medium text-slate-900">No payment records found</h3>
-              <p className="mt-1 text-sm text-slate-500">Get started by recording a new supplier payment.</p>
+              <p className="mt-1 text-sm text-slate-500">Get started by recording a new party payment.</p>
             </div>
           ) : (
             <table className="min-w-full divide-y divide-slate-200">
@@ -104,14 +116,14 @@ export default function SupplierPaymentsListPage() {
                 <tr>
                   <th className="w-10 px-4 py-3.5"></th>
                   <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900">Invoice #</th>
-                  <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900">Supplier</th>
+                  <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900">Party</th>
                   <th className="px-6 py-3.5 text-right text-sm font-semibold text-slate-900">Invoice Total</th>
                   <th className="px-6 py-3.5 text-right text-sm font-semibold text-slate-900">Total Paid</th>
                   <th className="px-6 py-3.5 text-center text-sm font-semibold text-slate-900">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
-                {filteredPayments.flatMap((row) => {
+                {paginatedPayments.flatMap((row) => {
                   const isExpanded = !!expandedRows[row.purchase_id];
                   const totalPaid = Number(row.total_paid_against_invoice || 0);
                   const totalInvoice = Number(row.invoice_total_amount || 0);
@@ -241,6 +253,15 @@ export default function SupplierPaymentsListPage() {
             </table>
           )}
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredPayments.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {isModalOpen && (

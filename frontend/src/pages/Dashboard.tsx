@@ -13,24 +13,23 @@ export const Dashboard = () => {
   }
 
   return (
-    <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div className="px-4 py-6 sm:px-0">
+    <main className="w-full max-w-full py-4 sm:py-5 px-3 sm:px-5 space-y-4 min-w-0 overflow-x-hidden">
+      {/* 1. Liquidity & Working Capital Top Card */}
+      <div className="w-full min-w-0">
+        <LiquidityLedger />
+      </div>
 
-        {/* Liquidity & Working Capital Ledger */}
-        <div className="mb-8">
-          <LiquidityLedger />
-        </div>
-
-        {/* Time-Bound Business Performance (P&L Overview) - 2 Graphs */}
-        <div className="mb-8">
+      {/* 2. Side-by-Side: Time-Bound Business Performance (P&L Graphs) + 1. Inventory Ledger & WAC Asset Valuation */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch w-full min-w-0">
+        {/* Left Column: Graphs */}
+        <div className="w-full min-w-0">
           <BusinessPerformanceCharts />
         </div>
 
-        {/* 1. Inventory Ledger & WAC Asset Valuation */}
-        <div className="mb-8">
+        {/* Right Column: 1. Inventory Ledger & WAC Asset Valuation */}
+        <div className="w-full min-w-0">
           <InventoryLedgerSection />
         </div>
-
       </div>
     </main>
   );

@@ -213,3 +213,26 @@ export async function findAllPayments(query?: { search?: string; customer_id?: s
     };
   });
 }
+
+export async function createRefund(data: { customer_id: string; amount: number; source: string; notes?: string; linked_invoice_id?: string | null }, userId?: string) {
+  return await db.transaction(async (trx) => {
+    const paymentNumber = await generateNextPaymentNumber();
+    const isCashDrawer = data.source === 'CASH_DRAWER';
+    const isBank = !isCashDrawer && data.source;
+
+    const [payment] = await trx('customer_payments').insert({
+      customer_id: data.customer_id,
+      invoice_id: data.linked_invoice_id || null,
+      payment_number: paymentNumber,
+      payment_date: new Date().toISOString().split('T')[0],
+      amount: data.amount,
+      payment_method: isCashDrawer ? 'CASH_REFUND' : 'BANK_TRANSFER',
+      bank_account_id: isBank ? data.source : null,
+      notes: data.notes || 'Customer Cash Refund from Advance Wallet',
+      cheque_status: 'CLEARED',
+      created_by: userId || null,
+    }).returning('*');
+
+    return payment;
+  });
+}

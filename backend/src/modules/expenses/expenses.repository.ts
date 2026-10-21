@@ -1,4 +1,5 @@
 import db from '../../db/knex';
+import { parseDateFilter } from '../../shared/dateFilter';
 import { CreateExpenseInput, ExpenseQuery } from './expenses.schemas';
 
 export async function createExpenseRecord(input: CreateExpenseInput, userId?: string) {
@@ -17,6 +18,8 @@ export async function createExpenseRecord(input: CreateExpenseInput, userId?: st
 }
 
 export async function findExpenses(query: ExpenseQuery = {}) {
+  const { startDate: sDateObj, endDate: eDateObj } = parseDateFilter(query.startDate, query.endDate);
+
   let builder = db('expenses as e')
     .leftJoin('users as u', 'e.created_by', 'u.id')
     .select(
@@ -26,17 +29,11 @@ export async function findExpenses(query: ExpenseQuery = {}) {
     .orderBy('e.expense_date', 'desc')
     .orderBy('e.created_at', 'desc');
 
-  if (query.startDate) {
-    const startDateOnly = query.startDate.includes('T') ? query.startDate.split('T')[0] : query.startDate;
-    builder = builder.where(function () {
-      this.where('e.created_at', '>=', query.startDate!).orWhere('e.expense_date', '>=', startDateOnly);
-    });
+  if (sDateObj) {
+    builder = builder.whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj]);
   }
-  if (query.endDate) {
-    const endDateOnly = query.endDate.includes('T') ? query.endDate.split('T')[0] : query.endDate;
-    builder = builder.where(function () {
-      this.where('e.created_at', '<=', query.endDate!).orWhere('e.expense_date', '<=', endDateOnly);
-    });
+  if (eDateObj) {
+    builder = builder.whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
   }
   if (query.category) {
     builder = builder.where('e.category', query.category);

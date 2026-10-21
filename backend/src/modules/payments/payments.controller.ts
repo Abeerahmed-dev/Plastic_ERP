@@ -46,3 +46,22 @@ export async function clearCheque(req: Request, res: Response, next: NextFunctio
     next(error);
   }
 }
+
+export async function createRefund(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { customer_id, amount, source, notes, linked_invoice_id } = req.body;
+    if (!customer_id || !amount) {
+      throw new ValidationError('Customer and amount are required');
+    }
+    const payment = await paymentsService.createRefund({
+      customer_id,
+      amount: Number(amount),
+      source: source || 'CASH_DRAWER',
+      notes: notes || 'Customer Cash Refund from Advance Wallet',
+      linked_invoice_id: linked_invoice_id || null,
+    }, req.user?.id);
+    res.status(201).json(ok(payment));
+  } catch (error) {
+    next(error);
+  }
+}

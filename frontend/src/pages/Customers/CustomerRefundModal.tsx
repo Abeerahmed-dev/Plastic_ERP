@@ -7,7 +7,6 @@ import { getCustomers } from '../../services/customers.service';
 import { invoicesService } from '../../services/invoices.service';
 import { Customer } from '../../types/customer.types';
 import { useReportStore } from '../../store/useReportStore';
-import { toast } from '../../utils/toast';
 
 interface CustomerRefundModalProps {
   isOpen: boolean;
@@ -106,7 +105,7 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
       queryClient.invalidateQueries({ queryKey: ['dashboardMetrics'] });
       useReportStore.getState().fetchLiquidityLedger();
       useReportStore.getState().fetchAllReports();
-      toast.success('Cash refund successfully processed and deducted from Cash Drawer.');
+      alert('Cash refund successfully processed and deducted from Cash Drawer.');
       if (activeCustomer?.id) {
         queryClient.invalidateQueries({ queryKey: ['customers', activeCustomer.id, 'ledger'] });
       }

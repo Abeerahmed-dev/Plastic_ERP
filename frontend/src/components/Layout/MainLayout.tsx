@@ -25,7 +25,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     heading: 'Overview',
     items: [
       { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: null },
-      { to: '/pos', label: 'Walk-in POS', icon: ShoppingCart, permission: 'sales:write' },
     ],
   },
   {
@@ -39,9 +38,9 @@ const navSections: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'Purchases',
     items: [
-      { to: '/purchases', label: 'Purchase Invoices', icon: Truck, permission: 'purchases:read' },
-      { to: '/supplier-payments', label: 'Supp. Payments', icon: HandCoins, permission: 'payments:read' },
-      { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },
+      { to: '/purchases', label: 'Purchasing', icon: Truck, permission: 'purchases:read' },
+      { to: '/supplier-payments', label: 'Party Payments', icon: HandCoins, permission: 'payments:read' },
+      { to: '/suppliers', label: 'Parties', icon: Truck, permission: 'suppliers:read' },
     ],
   },
   {
@@ -165,7 +164,7 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
           className="h-10 w-auto object-contain shrink-0 drop-shadow"
         />
         <div>
-          <p className="font-bold text-white text-sm leading-tight tracking-tight">Sabir Plastic</p>
+          <p className="font-bold text-white text-sm leading-tight tracking-tight">Sabir Plastic Store</p>
           <p className="text-[11px] text-amber-400 font-medium leading-tight">ERP System</p>
         </div>
       </div>
@@ -249,13 +248,13 @@ const getPageTitle = (pathname: string): { title: string; subtitle?: string } =>
     return { title: 'Customers', subtitle: 'Customer Directory & Accounts' };
   }
   if (pathname.startsWith('/purchases')) {
-    return { title: 'Purchase Invoices', subtitle: 'Supplier Purchases & Bills' };
+    return { title: 'Purchasing', subtitle: 'Party Purchases & Bills' };
   }
   if (pathname.startsWith('/supplier-payments')) {
-    return { title: 'Supplier Payments', subtitle: 'Accounts Payable & Disbursals' };
+    return { title: 'Party Payments', subtitle: 'Accounts Payable & Disbursals' };
   }
   if (pathname.startsWith('/suppliers')) {
-    return { title: 'Suppliers', subtitle: 'Vendor Management' };
+    return { title: 'Parties', subtitle: 'Party Management' };
   }
   if (pathname.startsWith('/products')) {
     return { title: 'Products', subtitle: 'Inventory Catalog & Pricing' };
@@ -328,7 +327,7 @@ export const MainLayout = () => {
                 />
                 <div className="hidden sm:flex flex-col">
                   <span className="font-bold text-sm text-white tracking-tight leading-none">
-                    Sabir Plastic
+                    Sabir Plastic Store
                   </span>
                   <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
                     Cashier Terminal
@@ -341,7 +340,7 @@ export const MainLayout = () => {
                 {[
                   { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
                   { to: '/invoices', label: 'Sales Invoices', icon: FileText },
-                  { to: '/purchases', label: 'Purchases', icon: Truck },
+                  { to: '/purchases', label: 'Purchasing', icon: Truck },
                   { to: '/products', label: 'Products', icon: Box },
                   { to: '/categories', label: 'Categories', icon: Tag },
                 ].map(({ to, label, icon: Icon }) => {
@@ -393,20 +392,24 @@ export const MainLayout = () => {
     );
   }
 
+  const isPOSPage = location.pathname.startsWith('/pos');
+
   /* ─── Owner / Admin: fixed sidebar layout ─── */
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      {/* Desktop fixed sidebar */}
-      <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md print:hidden">
-        <SidebarContent
-          user={user}
-          hasPermission={hasPermission}
-          handleLogout={handleLogout}
-        />
-      </aside>
+    <div className="min-h-screen bg-slate-100 flex">
+      {/* Desktop fixed sidebar - hidden on POS page */}
+      {!isPOSPage && (
+        <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md print:hidden">
+          <SidebarContent
+            user={user}
+            hasPermission={hasPermission}
+            handleLogout={handleLogout}
+          />
+        </aside>
+      )}
 
-      {/* Mobile sidebar overlay */}
-      {mobileSidebarOpen && (
+      {/* Mobile sidebar overlay - hidden on POS page */}
+      {!isPOSPage && mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
           <div
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
@@ -429,43 +432,80 @@ export const MainLayout = () => {
         </div>
       )}
 
-      {/* Right: slim topbar + page content */}
-      <div className="flex flex-col flex-1 lg:ml-60 min-h-screen">
+      {/* Right: slim topbar + page content (full width when on POS) */}
+      <div className={`flex flex-col flex-1 ${!isPOSPage ? 'lg:ml-60' : ''} min-h-screen min-w-0 overflow-x-hidden`}>
         {/* Top bar */}
-        <header className="sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 gap-3 shrink-0 shadow-sm print:hidden">
-          {/* Mobile hamburger */}
-          <button
-            onClick={() => setMobileSidebarOpen(true)}
-            className="lg:hidden p-2 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
+        <header className="relative sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 justify-between shrink-0 shadow-sm print:hidden">
+          {/* Left: Hamburger & Brand logo */}
+          <div className="flex items-center gap-2.5 z-10">
+            {!isPOSPage && (
+              <button
+                onClick={() => setMobileSidebarOpen(true)}
+                className="lg:hidden p-2 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+            )}
 
-          {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2 mr-1">
-            <img
-              src={sabirLogo}
-              alt="Sabir Plastic"
-              className="h-7 w-auto object-contain shrink-0"
-            />
-          </div>
+            <div className={`${isPOSPage ? 'flex' : 'lg:hidden flex'} items-center gap-2.5 mr-1`}>
+              <img
+                src={sabirLogo}
+                alt="Sabir Plastic"
+                className="h-9 w-auto object-contain shrink-0 drop-shadow"
+              />
+              <div className="hidden sm:flex flex-col">
+                <span className="font-bold text-sm text-white tracking-tight leading-none">Sabir Plastic Store</span>
+                {!isPOSPage && (
+                  <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
+                    ERP System
+                  </span>
+                )}
+              </div>
+            </div>
 
-          {/* Dynamic Page Heading */}
-          <div className="flex flex-col justify-center">
-            <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-none">
-              {currentPage.title}
-            </h1>
-            {currentPage.subtitle && (
-              <p className="hidden md:block text-[11px] text-slate-400 font-medium mt-1 leading-none">
-                {currentPage.subtitle}
-              </p>
+            {/* Dynamic Page Heading when NOT on POS */}
+            {!isPOSPage && (
+              <div className="flex flex-col justify-center ml-2">
+                <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-none">
+                  {currentPage.title}
+                </h1>
+                {currentPage.subtitle && (
+                  <p className="hidden md:block text-[11px] text-slate-400 font-medium mt-1 leading-none">
+                    {currentPage.subtitle}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
-          <div className="flex-1" />
+          {/* Centered Dynamic Page Heading when ON POS */}
+          {isPOSPage && (
+            <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center text-center z-0 pointer-events-none">
+              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight leading-none">
+                {currentPage.title}
+              </h1>
+              {currentPage.subtitle && (
+                <p className="hidden md:block text-[11px] text-amber-400/90 font-medium mt-1 leading-none">
+                  {currentPage.subtitle}
+                </p>
+              )}
+            </div>
+          )}
 
-          {/* User info chip */}
-          <div className="flex items-center gap-2.5">
+          {/* Right: Go to SBS ERP + User info chip */}
+          <div className="flex items-center gap-2.5 z-10">
+            {/* Go to SBS ERP button: Only for Admin / Owner on POS screen */}
+            {isPOSPage && !isCashier && (
+              <Link
+                to="/dashboard"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md transition-all active:scale-95 mr-1"
+                title="Return to SBS ERP Dashboard"
+              >
+                <LayoutDashboard className="w-4 h-4 text-slate-950" />
+                <span>Go to SBS ERP</span>
+              </Link>
+            )}
+
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-sm font-semibold text-slate-200">{user?.name}</span>
               <span className="text-xs text-amber-400 font-semibold uppercase tracking-wider">
@@ -481,7 +521,7 @@ export const MainLayout = () => {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 min-w-0 overflow-x-hidden">
           <Outlet />
         </main>
       </div>

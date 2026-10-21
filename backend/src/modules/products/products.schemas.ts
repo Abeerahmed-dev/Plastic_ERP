@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const createProductSchema = z.object({
   code: z.string().optional().nullable(),
   name: z.string().min(1, 'Name is required').max(150),
+  name_urdu: z.string().optional().nullable(),
   size: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   category_id: z.string().uuid('Invalid Category ID'),

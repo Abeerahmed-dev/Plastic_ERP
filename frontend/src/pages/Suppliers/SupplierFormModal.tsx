@@ -7,15 +7,9 @@ import { X, Loader2 } from 'lucide-react';
 import { createSupplier, updateSupplier } from '../../services/suppliers.service';
 import { Supplier } from '../../types/supplier.types';
 
-const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
-
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
-  phone: z.string().max(30).optional(),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
-  address: z.string().optional(),
   city: z.string().optional(),
-  region: z.enum(REGIONS).optional(),
   payment_terms: z.coerce.number().int().min(0).default(30),
   opening_payable: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
@@ -38,11 +32,7 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
     defaultValues: supplier
       ? {
           name: supplier.name,
-          phone: supplier.phone ?? '',
-          email: supplier.email ?? '',
-          address: supplier.address ?? '',
           city: supplier.city ?? '',
-          region: (supplier.region as (typeof REGIONS)[number]) ?? undefined,
           payment_terms: supplier.payment_terms,
           notes: supplier.notes ?? '',
         }
@@ -68,7 +58,7 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
       <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            {isEdit ? 'Edit Supplier' : 'Add New Supplier'}
+            {isEdit ? 'Edit Party' : 'Add New Party'}
           </h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition">
             <X className="h-5 w-5" />
@@ -86,35 +76,9 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
             {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">Phone</label>
-              <input {...register('phone')} placeholder="021-1234567" className={inputCls(false)} />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
-              <input {...register('email')} placeholder="supplier@example.com" className={inputCls(!!errors.email)} />
-              {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
-            </div>
-          </div>
-
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-gray-700">Address</label>
-            <input {...register('address')} placeholder="SITE Industrial Area, Block B" className={inputCls(false)} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
-              <input {...register('city')} placeholder="Karachi" className={inputCls(false)} />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">Region</label>
-              <select {...register('region')} className={inputCls(false)}>
-                <option value="">— Select —</option>
-                {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
+            <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
+            <input {...register('city')} placeholder="Karachi" className={inputCls(false)} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -146,7 +110,7 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
             </button>
             <button type="submit" disabled={mutation.isPending} className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition">
               {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isEdit ? 'Save Changes' : 'Add Supplier'}
+              {isEdit ? 'Save Changes' : 'Add Party'}
             </button>
           </div>
         </form>

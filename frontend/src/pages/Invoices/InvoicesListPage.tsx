@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
 import { ProcessReturnModal } from './ProcessReturnModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
+import { Pagination } from '../../components/Common/Pagination';
 
 export default function InvoicesListPage() {
   const { user, hasPermission } = useAuthStore();
@@ -14,6 +15,8 @@ export default function InvoicesListPage() {
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -47,6 +50,12 @@ export default function InvoicesListPage() {
     (i) =>
       i.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       i.customer_name?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const totalPages = Math.ceil(filteredInvoices.length / PAGE_SIZE) || 1;
+  const paginatedInvoices = filteredInvoices.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
   );
 
   const formatCurrency = (val: string | number) => {
@@ -138,7 +147,10 @@ export default function InvoicesListPage() {
             className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
             placeholder="Search by invoice number, credit note, or customer..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
           />
         </div>
       </div>
@@ -191,7 +203,7 @@ export default function InvoicesListPage() {
                   </td>
                 </tr>
               ) : (
-                filteredInvoices.map((invoice) => {
+                paginatedInvoices.map((invoice) => {
                   const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
                   const balanceDue = Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0));
 
@@ -267,6 +279,15 @@ export default function InvoicesListPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={filteredInvoices.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       <InvoiceFormModal

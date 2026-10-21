@@ -5,6 +5,7 @@ import { purchasesService } from '../../services/purchases.service';
 import { useAuthStore } from '../../store/auth.store';
 import PurchaseFormModal from './PurchaseFormModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
+import { Pagination } from '../../components/Common/Pagination';
 
 const LIMIT = 20;
 
@@ -86,7 +87,7 @@ export default function PurchasesListPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <Truck className="h-6 w-6 text-purple-600" />
-            Purchase Invoices
+            Purchasing
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             Track inventory stock arrivals and supplier purchase bills. Click purple document icon to view details.
@@ -98,7 +99,7 @@ export default function PurchasesListPage() {
             className="inline-flex items-center justify-center rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 transition-all gap-2"
           >
             <Plus className="h-5 w-5" />
-            New Purchase Invoice
+            New Purchasing
           </button>
         )}
       </div>
@@ -128,11 +129,11 @@ export default function PurchasesListPage() {
       {isLoading ? (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl bg-white border border-slate-200">
           <div className="h-8 w-8 animate-spin rounded-full border-3 border-purple-600 border-t-transparent" />
-          <p className="mt-3 text-sm text-slate-500 font-medium">Loading purchase invoices...</p>
+          <p className="mt-3 text-sm text-slate-500 font-medium">Loading purchasing records...</p>
         </div>
       ) : isError ? (
         <div className="p-6 rounded-2xl bg-red-50 border border-red-200 text-center">
-          <p className="text-sm font-medium text-red-800">Failed to load purchase invoices.</p>
+          <p className="text-sm font-medium text-red-800">Failed to load purchasing records.</p>
           <button onClick={() => refetch()} className="mt-2 text-xs font-semibold text-red-600 hover:underline">
             Try again
           </button>
@@ -140,13 +141,13 @@ export default function PurchasesListPage() {
       ) : invoices.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 rounded-2xl bg-white border border-slate-200 text-center">
           <FileText className="h-12 w-12 text-slate-300 mb-3" />
-          <span className="text-slate-500 font-medium">No purchase invoices found</span>
+          <span className="text-slate-500 font-medium">No purchasing records found</span>
           {canWrite && (
             <button
               onClick={() => setModalOpen(true)}
               className="mt-3 text-sm text-purple-600 hover:text-purple-700 font-semibold"
             >
-              Create your first purchase invoice
+              Create your first purchasing record
             </button>
           )}
         </div>
@@ -158,7 +159,7 @@ export default function PurchasesListPage() {
                 <tr>
                   <th className="px-6 py-4 font-semibold">Invoice #</th>
                   <th className="px-6 py-4 font-semibold">Date</th>
-                  <th className="px-6 py-4 font-semibold">Supplier</th>
+                  <th className="px-6 py-4 font-semibold">Party</th>
                   {!isCashier && <th className="px-6 py-4 font-semibold text-right">Total Amount</th>}
                   <th className="px-6 py-4 font-semibold text-center">Status</th>
                 </tr>
@@ -208,31 +209,14 @@ export default function PurchasesListPage() {
           </div>
 
           {/* Pagination */}
-          {meta && meta.totalPages > 1 && (
-            <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4 bg-slate-50">
-              <p className="text-sm text-slate-500">
-                Showing <span className="font-medium">{(meta.page - 1) * meta.limit + 1}</span> to <span className="font-medium">{Math.min(meta.page * meta.limit, meta.total)}</span> of <span className="font-medium">{meta.total}</span> results
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="p-1 rounded hover:bg-slate-200 disabled:opacity-50 transition"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <span className="text-sm font-medium text-slate-700">
-                  Page {page} of {meta.totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(p => Math.min(meta.totalPages, p + 1))}
-                  disabled={page === meta.totalPages}
-                  className="p-1 rounded hover:bg-slate-200 disabled:opacity-50 transition"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
+          {meta && (
+            <Pagination
+              currentPage={page}
+              totalPages={meta.totalPages}
+              totalItems={meta.total}
+              pageSize={LIMIT}
+              onPageChange={setPage}
+            />
           )}
         </div>
       )}

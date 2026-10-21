@@ -68,9 +68,9 @@ export default function SuppliersListPage() {
       <div className="border-b border-gray-200 bg-white px-6 py-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Suppliers</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Parties</h1>
             <p className="mt-0.5 text-sm text-gray-500">
-              {meta ? `${meta.total.toLocaleString()} suppliers` : 'Loading…'}
+              {meta ? `${meta.total.toLocaleString()} parties` : 'Loading…'}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -80,7 +80,7 @@ export default function SuppliersListPage() {
             {canWrite && (
               <button onClick={openCreate} className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm">
                 <Plus className="h-4 w-4" />
-                Add Supplier
+                Add Party
               </button>
             )}
           </div>
@@ -129,14 +129,14 @@ export default function SuppliersListPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">Loading suppliers…</td></tr>
+                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
               )}
               {isError && (
                 <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
               )}
               {!isLoading && !isError && suppliers.length === 0 && (
                 <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">
-                  {debouncedSearch ? `No suppliers matching "${debouncedSearch}"` : 'No suppliers yet.'}
+                  {debouncedSearch ? `No parties matching "${debouncedSearch}"` : 'No parties yet.'}
                 </td></tr>
               )}
               {suppliers.map((s, idx) => {

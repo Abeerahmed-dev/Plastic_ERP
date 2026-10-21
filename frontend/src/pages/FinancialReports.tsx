@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useReportStore } from '../store/useReportStore';
 import api from '../services/api';
 import {
@@ -20,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   Layers,
+  ShoppingCart,
 } from 'lucide-react';
 
 import { BusinessPerformanceRow } from '../components/Reports/BusinessPerformanceRow';
@@ -427,7 +429,7 @@ export default function FinancialReports() {
 
       {/* ─── TIER 2: INTERACTIVE LIQUIDITY & WORKING CAPITAL LEDGER ─── */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-600">
               <Wallet className="h-6 w-6" />
@@ -437,7 +439,17 @@ export default function FinancialReports() {
               <p className="text-xs text-slate-500">Click summary cards to open granular drill-down entity lists</p>
             </div>
           </div>
-          {isLoadingLiquidity && <span className="text-xs text-blue-600 animate-pulse font-medium">Loading liquidity...</span>}
+          <div className="flex items-center gap-3">
+            {isLoadingLiquidity && <span className="text-xs text-blue-600 animate-pulse font-medium">Loading liquidity...</span>}
+            <Link
+              to="/pos"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-sm hover:shadow transition-all active:scale-95 border border-amber-500/30"
+              title="Open Walk-in POS"
+            >
+              <ShoppingCart className="w-4 h-4 text-slate-950" />
+              <span>Walk-in POS</span>
+            </Link>
+          </div>
         </div>
 
         {/* 6 Grid Cards */}

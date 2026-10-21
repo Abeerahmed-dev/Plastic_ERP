@@ -1,4 +1,5 @@
 import db from '../../db/knex';
+import { parseDateFilter, toDateOnlyString } from '../../shared/dateFilter';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
 
 export async function getDashboardMetrics() {
@@ -159,17 +160,43 @@ export async function getInventoryLedgerReport() {
  * GET /api/reports/liquidity
  */
 export async function getLiquidityLedgerReport() {
+  // 1. Cash in from customers
   const cashPayments = await db('customer_payments')
-    .whereIn('payment_method', ['Cash', 'CASH'])
+    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
+    .andWhere('amount', '>', 0)
     .sum('amount as total')
     .first();
 
+  // 2. Cash refunds out to customers
+  const customerRefunds = await db('customer_payments')
+    .where(function() {
+      this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
+        .orWhere(function() {
+          this.whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
+            .andWhere('amount', '<', 0);
+        });
+    })
+    .sum('amount as total')
+    .first();
+
+  // 3. Cash paid to suppliers directly from counter drawer
   const supplierCash = await db('supplier_payments')
-    .whereIn('payment_method', ['Cash', 'CASH'])
+    .whereIn('payment_method', ['CASH_DRAWER', 'Cash in Drawer'])
     .sum('amount as total')
     .first();
 
-  const cash_drawer = Math.max(0, Number(cashPayments?.total || 0) - Number(supplierCash?.total || 0));
+  // 4. Petty cash expenses paid from drawer
+  const expensesCash = await db('expenses')
+    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
+    .sum('amount as total')
+    .first();
+
+  const totalIn = Number(cashPayments?.total || 0);
+  const totalRefunds = Math.abs(Number(customerRefunds?.total || 0));
+  const totalSupplier = Number(supplierCash?.total || 0);
+  const totalExpenses = Number(expensesCash?.total || 0);
+
+  const cash_drawer = Math.max(0, Math.round((totalIn - totalRefunds - totalSupplier - totalExpenses) * 100) / 100);
 
   const bankInDirect = await db('customer_payments')
     .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
@@ -542,6 +569,8 @@ export async function getCashierTallyReport(userId: string) {
 
 export async function getPnLReport(startDate?: string, endDate?: string) {
   try {
+    const { startDate: sDateObj, endDate: eDateObj } = parseDateFilter(startDate, endDate);
+
     let salesQuery = db('sales_invoices as si')
       .whereNot('si.status', 'CANCELLED')
       .select(db.raw('SUM(CAST(si.total_amount AS NUMERIC)) as total'));
@@ -555,30 +584,16 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
     let expensesQuery = db('expenses as e')
       .select(db.raw('SUM(CAST(e.amount AS NUMERIC)) as total'));
 
-    if (startDate) {
-      const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
-      salesQuery = salesQuery.where(function () {
-        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [startDateOnly]);
-      });
-      cogsQuery = cogsQuery.where(function () {
-        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [startDateOnly]);
-      });
-      expensesQuery = expensesQuery.where(function () {
-        this.where('e.created_at', '>=', startDate).orWhereRaw('e.expense_date::text >= ?', [startDateOnly]);
-      });
+    if (sDateObj) {
+      salesQuery = salesQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
+      cogsQuery = cogsQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
+      expensesQuery = expensesQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj]);
     }
 
-    if (endDate) {
-      const endDateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
-      salesQuery = salesQuery.where(function () {
-        this.where('si.created_at', '<=', endDate).orWhereRaw('si.date <= ?', [endDateOnly]);
-      });
-      cogsQuery = cogsQuery.where(function () {
-        this.where('si.created_at', '<=', endDate).orWhereRaw('si.date <= ?', [endDateOnly]);
-      });
-      expensesQuery = expensesQuery.where(function () {
-        this.where('e.created_at', '<=', endDate).orWhereRaw('e.expense_date::text <= ?', [endDateOnly]);
-      });
+    if (eDateObj) {
+      salesQuery = salesQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+      cogsQuery = cogsQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+      expensesQuery = expensesQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
     }
 
     console.log('[DEBUG Knex] Sales Query SQL:', salesQuery.toSQL().toNative());
@@ -598,7 +613,8 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
     const total_expenses = Math.round(Number((expRes as any)?.total || 0) * 100) / 100;
     const gross_profit = Math.round((total_sales - total_cogs) * 100) / 100;
     const net_profit = Math.round((gross_profit - total_expenses) * 100) / 100;
-    const net_profit_margin_percent = total_sales > 0 ? Math.round((net_profit / total_sales) * 10000) / 10000 : 0;
+    const rawMargin = total_sales > 0 ? (net_profit / total_sales) : 0;
+    const net_profit_margin_percent = isFinite(rawMargin) ? Math.round(rawMargin * 10000) / 10000 : 0;
 
     return {
       total_sales,
@@ -615,20 +631,29 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
 }
 
 export async function getCashLedgerReport(startDate?: string, endDate?: string) {
+  const { startDate: sDateObj, endDate: eDateObj } = parseDateFilter(startDate, endDate);
+
   let query = db('customer_payments as cp')
     .join('customers as c', 'cp.customer_id', 'c.id')
     .leftJoin('sales_invoices as si', 'cp.invoice_id', 'si.id')
     .leftJoin('sales_invoice_items as sii', 'si.id', 'sii.invoice_id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
-    .whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER'])
+    .where(function() {
+      this.whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer', 'CASH_REFUND', 'cash_refund'])
+        .orWhere('cp.amount', '<', 0);
+    })
     .select(
       'cp.id',
       'cp.payment_date as date',
       'cp.created_at',
-      db.raw("'CASH SALE' as entry_type"),
-      db.raw("CONCAT('Cash Payment from ', c.name, COALESCE(CONCAT(' (Inv #', si.invoice_number, ')'), '')) as description"),
+      'cp.payment_method',
+      'cp.notes',
+      'c.name as customer_name',
+      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN 'CUSTOMER REFUND' ELSE 'CASH SALE' END as entry_type"),
+      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN CONCAT('Cash Refund to ', c.name, COALESCE(CONCAT(' (', cp.notes, ')'), '')) ELSE CONCAT('Cash Payment from ', c.name, COALESCE(CONCAT(' (Inv #', si.invoice_number, ')'), '')) END as description"),
       'cp.amount as amount',
-      'cp.amount as cash_in',
+      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN 0 ELSE ABS(cp.amount) END as cash_in"),
+      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN ABS(cp.amount) ELSE 0 END as cash_out"),
       db.raw(`
         COALESCE(
           json_agg(
@@ -648,24 +673,20 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
       'cp.id',
       'cp.payment_date',
       'cp.created_at',
+      'cp.payment_method',
+      'cp.notes',
       'c.name',
       'si.invoice_number',
       'cp.amount'
     )
     .orderBy('cp.created_at', 'desc');
 
-  if (startDate) {
-    const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
-    query = query.where(function () {
-      this.where('cp.created_at', '>=', startDate).orWhereRaw('cp.payment_date::text >= ?', [startDateOnly]);
-    });
+  if (sDateObj) {
+    query = query.whereRaw('COALESCE(cp.payment_date, cp.created_at::date) >= ?', [sDateObj]);
   }
 
-  if (endDate) {
-    const endDateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
-    query = query.where(function () {
-      this.where('cp.created_at', '<=', endDate).orWhereRaw('cp.payment_date::text <= ?', [endDateOnly]);
-    });
+  if (eDateObj) {
+    query = query.whereRaw('COALESCE(cp.payment_date, cp.created_at::date) <= ?', [eDateObj]);
   }
 
   const rows = await query;
@@ -767,11 +788,14 @@ export async function getIssuedPdcReport() {
 export async function getIncomeStatementReport(startDate?: string, endDate?: string) {
   try {
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const today = now.toISOString().split('T')[0];
+    const defaultStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0));
+    const defaultEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));
 
-    const sDate = startDate || firstDay;
-    const eDate = endDate || today;
+    const filter = parseDateFilter(startDate, endDate);
+    const sDateObj = filter.startDate || defaultStart;
+    const eDateObj = filter.endDate || defaultEnd;
+    const sDateOnly = toDateOnlyString(sDateObj);
+    const eDateOnly = toDateOnlyString(eDateObj);
 
     // 1. Gross Sales & Delivery Revenue Query
     let salesQuery = db('sales_invoices as si')
@@ -782,7 +806,9 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .select(
         db.raw('SUM(CAST(COALESCE(si.total_amount, 0) AS NUMERIC) - CAST(COALESCE(si.delivery_charge, 0) AS NUMERIC)) as gross_sales'),
         db.raw('SUM(CAST(COALESCE(si.delivery_charge, 0) AS NUMERIC)) as delivery_revenue')
-      );
+      )
+      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
+      .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
     // 2. Sales Returns Query
     let returnsQuery = db('sales_invoices as si')
@@ -792,7 +818,9 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
           .orWhere('si.invoice_type', 'RETURN')
           .orWhere('si.total_amount', '<', 0);
       })
-      .select(db.raw('SUM(ABS(CAST(COALESCE(si.total_amount, 0) AS NUMERIC))) as total_returns'));
+      .select(db.raw('SUM(ABS(CAST(COALESCE(si.total_amount, 0) AS NUMERIC))) as total_returns'))
+      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
+      .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
     // 3. COGS Query
     let cogsQuery = db('sales_invoice_items as sii')
@@ -806,49 +834,23 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
         db.raw(
           'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
         )
-      );
+      )
+      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
+      .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
     // 4. Operating Expenses Query
-    let expensesQuery = db('expenses as e').select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total_expenses'));
+    let expensesQuery = db('expenses as e')
+      .select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total_expenses'))
+      .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
+      .whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
 
     // 5. Expenses Breakdown Query
     let expensesBreakdownQuery = db('expenses as e')
       .select('category', db.raw('SUM(CAST(COALESCE(amount, 0) AS NUMERIC)) as total'))
+      .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
+      .whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj])
       .groupBy('category')
       .orderBy('total', 'desc');
-
-    const sDateOnly = sDate.includes('T') ? sDate.split('T')[0] : sDate;
-    const eDateOnly = eDate.includes('T') ? eDate.split('T')[0] : eDate;
-
-    salesQuery = salesQuery.where(function () {
-      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
-    }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
-    });
-
-    returnsQuery = returnsQuery.where(function () {
-      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
-    }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
-    });
-
-    cogsQuery = cogsQuery.where(function () {
-      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
-    }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
-    });
-
-    expensesQuery = expensesQuery.where(function () {
-      this.where('e.created_at', '>=', sDate).orWhereRaw('e.expense_date::text >= ?', [sDateOnly]);
-    }).where(function () {
-      this.where('e.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
-    });
-
-    expensesBreakdownQuery = expensesBreakdownQuery.where(function () {
-      this.where('e.created_at', '>=', sDate).orWhereRaw('e.expense_date::text >= ?', [sDateOnly]);
-    }).where(function () {
-      this.where('e.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('e.expense_date::text <= ?', [eDateOnly]);
-    });
 
     const [salesRes, returnsRes, cogsRes, expRes, breakdownRes] = await Promise.all([
       salesQuery.first(),
@@ -900,14 +902,12 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
 export async function getIncomeStatementReturnsDetail(startDate?: string, endDate?: string) {
   try {
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const today = now.toISOString().split('T')[0];
+    const defaultStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0));
+    const defaultEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));
 
-    const sDate = startDate || firstDay;
-    const eDate = endDate || today;
-
-    const sDateOnly = sDate.includes('T') ? sDate.split('T')[0] : sDate;
-    const eDateOnly = eDate.includes('T') ? eDate.split('T')[0] : eDate;
+    const filter = parseDateFilter(startDate, endDate);
+    const sDateObj = filter.startDate || defaultStart;
+    const eDateObj = filter.endDate || defaultEnd;
 
     let query = db('sales_invoices as si')
       .innerJoin('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
@@ -932,13 +932,9 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
         db.raw('ABS(CAST(COALESCE(sii.net_kg_processed, sii.quantity, 0) AS NUMERIC)) as returned_kg'),
         db.raw('ABS(CAST(COALESCE(sii.total_price, si.total_amount, 0) AS NUMERIC)) as refund_amount')
       )
+      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
+      .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj])
       .orderBy('si.created_at', 'desc');
-
-    query = query.where(function () {
-      this.where('si.created_at', '>=', sDate).orWhereRaw('si.date >= ?', [sDateOnly]);
-    }).where(function () {
-      this.where('si.created_at', '<=', eDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [eDateOnly]);
-    });
 
     const rows = await query;
 
@@ -968,8 +964,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
 
 export async function getMarginAnalyticsReport(startDate?: string, endDate?: string) {
   try {
-    const sDateOnly = startDate ? (startDate.includes('T') ? startDate.split('T')[0] : startDate) : undefined;
-    const eDateOnly = endDate ? (endDate.includes('T') ? endDate.split('T')[0] : endDate) : undefined;
+    const { startDate: sDateObj, endDate: eDateObj, startDateStr, endDateStr } = parseDateFilter(startDate, endDate);
 
     // 1. Margin by Product
     let pQuery = db('sales_invoice_items as sii')
@@ -1020,40 +1015,26 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .where(function () {
         this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
       })
-      .groupByRaw('DATE(si.created_at)')
+      .groupByRaw('COALESCE(si.date, si.created_at::date)')
       .select(
-        db.raw('DATE(si.created_at) as date'),
+        db.raw('COALESCE(si.date, si.created_at::date) as date'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as daily_revenue'),
         db.raw(
           'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as daily_cogs'
         )
       )
-      .orderByRaw('DATE(si.created_at) ASC');
+      .orderByRaw('COALESCE(si.date, si.created_at::date) ASC');
 
-    if (startDate && sDateOnly) {
-      const sd: string = sDateOnly;
-      pQuery = pQuery.where(function () {
-        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [sd]);
-      });
-      cQuery = cQuery.where(function () {
-        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [sd]);
-      });
-      tQuery = tQuery.where(function () {
-        this.where('si.created_at', '>=', startDate).orWhereRaw('si.date >= ?', [sd]);
-      });
+    if (sDateObj) {
+      pQuery = pQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
+      cQuery = cQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
+      tQuery = tQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
     }
 
-    if (endDate && eDateOnly) {
-      const ed: string = eDateOnly;
-      pQuery = pQuery.where(function () {
-        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
-      });
-      cQuery = cQuery.where(function () {
-        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
-      });
-      tQuery = tQuery.where(function () {
-        this.where('si.created_at', '<=', endDate + 'T23:59:59.999Z').orWhereRaw('si.date <= ?', [ed]);
-      });
+    if (eDateObj) {
+      pQuery = pQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+      cQuery = cQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+      tQuery = tQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
     }
 
     const [productRows, customerRows, trendRows] = await Promise.all([pQuery, cQuery, tQuery]);
@@ -1066,7 +1047,8 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
 
       const avg_sell_price = kg > 0 ? Math.round((rev / kg) * 100) / 100 : 0;
       const avg_wac_cogs = kg > 0 ? Math.round((cogs / kg) * 100) / 100 : 0;
-      const gross_margin_pct = avg_sell_price > 0 ? Math.round((((avg_sell_price - avg_wac_cogs) / avg_sell_price) * 100) * 10) / 10 : 0;
+      const rawMargin = avg_sell_price > 0 ? (((avg_sell_price - avg_wac_cogs) / avg_sell_price) * 100) : 0;
+      const gross_margin_pct = isFinite(rawMargin) ? Math.round(rawMargin * 10) / 10 : 0;
 
       return {
         product_id: r.product_id,
@@ -1080,14 +1062,15 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         avg_wac_cogs,
         gross_margin_pct,
       };
-    }).sort((a: any, b: any) => b.gross_margin_pct - a.gross_margin_pct);
+    }).sort((a: any, b: any) => (b.gross_margin_pct || 0) - (a.gross_margin_pct || 0));
 
     const customers = customerRows.map((r: any) => {
       const kg = Math.round(Number(r.total_volume_kg || 0) * 100) / 100;
       const rev = Math.round(Number(r.total_revenue || 0) * 100) / 100;
       const cogs = Math.round(Number(r.total_cogs || 0) * 100) / 100;
       const profit = Math.round((rev - cogs) * 100) / 100;
-      const gross_margin_pct = rev > 0 ? Math.round(((profit / rev) * 100) * 10) / 10 : 0;
+      const rawMargin = rev > 0 ? ((profit / rev) * 100) : 0;
+      const gross_margin_pct = isFinite(rawMargin) ? Math.round(rawMargin * 10) / 10 : 0;
 
       return {
         customer_id: r.customer_id,
@@ -1098,13 +1081,14 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         total_profit: profit,
         gross_margin_pct,
       };
-    }).sort((a: any, b: any) => b.total_revenue - a.total_revenue);
+    }).sort((a: any, b: any) => (b.total_revenue || 0) - (a.total_revenue || 0));
 
     const trend_data = trendRows.map((r: any) => {
       const rev = Math.round(Number(r.daily_revenue || 0) * 100) / 100;
       const cogs = Math.round(Number(r.daily_cogs || 0) * 100) / 100;
       const profit = Math.round((rev - cogs) * 100) / 100;
-      const margin_pct = rev > 0 ? Math.round((profit / rev) * 10000) / 100 : 0;
+      const rawMargin = rev > 0 ? ((profit / rev) * 10000) / 100 : 0;
+      const margin_pct = isFinite(rawMargin) ? rawMargin : 0;
       let dateStr = '';
       if (r.date) {
         try {
@@ -1123,8 +1107,8 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
     }).sort((a: any, b: any) => (a.date > b.date ? 1 : -1));
 
     return {
-      startDate: sDateOnly,
-      endDate: eDateOnly,
+      startDate: startDateStr,
+      endDate: endDateStr,
       products,
       customers,
       trend_data,

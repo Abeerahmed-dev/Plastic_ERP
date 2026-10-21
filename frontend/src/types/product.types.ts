@@ -11,6 +11,7 @@ export interface Product {
   id: string;
   code: string;
   name: string;
+  name_urdu?: string | null;
   size?: string | null;
   description: string | null;
   category_id: string;
@@ -32,6 +33,7 @@ export interface Product {
 export interface CreateProductData {
   code?: string;
   name: string;
+  name_urdu?: string;
   size?: string;
   description?: string;
   category_id: string;

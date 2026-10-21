@@ -11,6 +11,8 @@ export interface Customer {
   credit_limit: number;
   opening_balance: number;
   outstanding_balance: number;
+  advance_credit?: number;
+  advance?: number;
   net_lifetime_volume_kg?: number;
   is_active: boolean;
   notes: string | null;

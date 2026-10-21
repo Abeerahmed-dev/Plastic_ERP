@@ -3,11 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
 import { productsService } from '../services/products.service';
 import sabirLogo from '../assets/sabirlogo.png';
+import { getUrduProductName } from '../utils/bilingual';
 
 export interface InvoiceDetailItem {
   id?: string;
   product_id: string;
   product_name: string;
+  name_urdu?: string | null;
+  product_name_urdu?: string | null;
+  category?: string;
   product_code?: string;
   product_size?: string | null;
   size?: string | null;
@@ -43,6 +47,8 @@ export interface InvoiceDetailData {
   delivery_charge?: number;
   total_amount: number;
   paid_amount: number;
+  cash_tendered?: number | null;
+  change_returned?: number | null;
   notes?: string | null;
   items: InvoiceDetailItem[];
   credit_notes?: InvoiceDetailData[];
@@ -83,7 +89,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
     return new Intl.NumberFormat('en-PK', { maximumFractionDigits: 2 }).format(val);
   };
 
-  const entityName = type === 'purchase' ? (invoice.supplier_name || 'Supplier') : (invoice.customer_name || 'Customer');
+  const entityName = type === 'purchase' ? (invoice.supplier_name || 'Party') : (invoice.customer_name || 'Customer');
   const entityCode = type === 'purchase' ? invoice.supplier_code : invoice.customer_code;
   const entityPhone = type === 'purchase' ? invoice.supplier_phone : invoice.customer_phone;
   const entityCity = type === 'purchase' ? invoice.supplier_city : invoice.customer_city;
@@ -214,7 +220,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/80 print:bg-white print:border-slate-300">
             <div className="space-y-1">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                {type === 'purchase' ? 'Supplier Details' : 'Billed To'}
+                {type === 'purchase' ? 'Party Details' : 'Billed To'}
               </span>
               <div className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
                 <User className="w-4 h-4 text-purple-600 print:hidden" />
@@ -274,17 +280,31 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
                     const origQty = Number(item.quantity || 0);
                     const netQty = Math.max(0, origQty - returnedQty);
+
+                    const matchingProduct = allProducts.find((p) => p.id === item.product_id);
                     const productSize =
                       item.product_size ||
                       item.size ||
-                      allProducts.find((p) => p.id === item.product_id)?.size;
+                      matchingProduct?.size;
+                    const urduName = getUrduProductName(
+                      item.product_name,
+                      item.name_urdu || item.product_name_urdu || matchingProduct?.name_urdu,
+                      item.category || matchingProduct?.category
+                    );
 
                     return (
                       <tr key={item.id || idx} className={isCreditNote ? 'bg-red-50/50' : 'hover:bg-slate-50'}>
                         <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">
-                          {item.product_name}
-                          {item.product_code && <span className="ml-1 text-[10px] text-slate-400 font-mono">({item.product_code})</span>}
+                        <td className="py-2.5 px-3">
+                          <div className="font-bold text-slate-900 leading-snug">
+                            {item.product_name}
+                            {item.product_code && <span className="ml-1 text-[10px] text-slate-400 font-mono">({item.product_code})</span>}
+                          </div>
+                          {urduName && (
+                            <div className="text-[11px] font-medium text-slate-600 font-serif leading-tight mt-0.5" dir="rtl">
+                              {urduName}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 font-medium text-slate-700">
                           {productSize ? (
@@ -406,6 +426,20 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                 <span>Amount Paid:</span>
                 <span className="font-mono font-medium">{formatPKR(paidAmount)}</span>
               </div>
+
+              {((invoice.cash_tendered !== undefined && invoice.cash_tendered !== null && Number(invoice.cash_tendered) > paidAmount) ||
+                (invoice.change_returned !== undefined && invoice.change_returned !== null && Number(invoice.change_returned) > 0)) && (
+                <>
+                  <div className="flex justify-between text-slate-800">
+                    <span>Cash Tendered / نقد وصول:</span>
+                    <span className="font-mono font-bold">{formatPKR(Number(invoice.cash_tendered || paidAmount))}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                    <span>Change Returned / بقایا واپسی:</span>
+                    <span className="font-mono">{formatPKR(Number(invoice.change_returned || 0))}</span>
+                  </div>
+                </>
+              )}
 
               {!isCashier && (
                 balanceDue > 0 ? (

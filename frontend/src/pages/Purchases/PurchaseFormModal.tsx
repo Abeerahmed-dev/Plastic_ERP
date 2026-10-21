@@ -17,7 +17,7 @@ const itemSchema = z.object({
 });
 
 const schema = z.object({
-  supplier_id: z.string().min(1, 'Supplier is required'),
+  supplier_id: z.string().min(1, 'Party is required'),
   date: z.string(),
   due_date: z.string().optional(),
   discount: z.coerce.number().min(0).default(0),
@@ -105,7 +105,7 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">New Purchase Invoice</h2>
+            <h2 className="text-lg font-bold text-slate-900">New Purchasing</h2>
             <p className="text-sm text-slate-500 mt-0.5">Record incoming bags from supplier (Implicit Bag unit)</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition">
@@ -125,11 +125,13 @@ export default function PurchaseFormModal({ onClose, onSuccess }: Props) {
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Supplier</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Party</label>
                 <select {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
-                  <option value="">Select supplier...</option>
+                  <option value="">Select party...</option>
                   {suppliers.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.city ? ` (${s.city})` : ''}
+                    </option>
                   ))}
                 </select>
                 {errors.supplier_id && <p className="mt-1 text-xs text-red-600">{errors.supplier_id.message}</p>}

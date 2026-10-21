@@ -58,6 +58,7 @@ export async function createInvoiceWithItems(
         .select(
           'p.id',
           'p.name',
+          'p.name_urdu',
           'p.total_stock_kg',
           'p.rolling_avg_cost_per_kg',
           'p.min_markup_percent',
@@ -99,6 +100,7 @@ export async function createInvoiceWithItems(
           applied_cogs_per_kg: avgCost,
           unit_price: item.unit_price,
           total_price,
+          name_urdu: product.name_urdu || null,
         });
 
         // Record RETURN inventory transaction
@@ -199,6 +201,7 @@ export async function createInvoiceWithItems(
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: item.unit_price,
           total_price,
+          name_urdu: product.name_urdu || null,
         });
 
         // Record inventory transaction
@@ -572,12 +575,15 @@ export async function findInvoiceById(id: string) {
 
   const items = await db('sales_invoice_items as sii')
     .join('products as p', 'sii.product_id', 'p.id')
+    .leftJoin('categories as c', 'p.category_id', 'c.id')
     .where('sii.invoice_id', id)
     .select(
       'sii.*',
       'p.name as product_name',
+      'p.name_urdu as product_name_urdu',
       'p.code as product_code',
-      'p.size as product_size'
+      'p.size as product_size',
+      'c.name as category'
     );
 
   // Fetch child credit notes if any exist against this parent invoice
@@ -595,12 +601,15 @@ export async function findInvoiceById(id: string) {
     creditNotesRows.map(async (cn) => {
       const cnItems = await db('sales_invoice_items as sii')
         .join('products as p', 'sii.product_id', 'p.id')
+        .leftJoin('categories as c', 'p.category_id', 'c.id')
         .where('sii.invoice_id', cn.id)
         .select(
           'sii.*',
           'p.name as product_name',
+          'p.name_urdu as product_name_urdu',
           'p.code as product_code',
-          'p.size as product_size'
+          'p.size as product_size',
+          'c.name as category'
         );
       return { ...cn, items: cnItems };
     })
