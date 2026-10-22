@@ -7,12 +7,12 @@ import { ValidationError, ForbiddenError } from '../../shared/errors';
 export async function listInvoices(req: Request, res: Response, next: NextFunction) {
   try {
     const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
-    const userId = req.user?.id;
 
-    // RBAC: Cashiers can only view invoices they personally created
-    const queryFilter: { created_by?: string } = {};
-    if (userRole === 'CASHIER' && userId) {
-      queryFilter.created_by = userId;
+    // RBAC: Cashiers can only view POS retail sale invoices (all store counter sales)
+    // Wholesale commercial ERP invoices are hidden from Cashiers.
+    const queryFilter: { created_by?: string; is_pos_only?: boolean } = {};
+    if (userRole === 'CASHIER') {
+      queryFilter.is_pos_only = true;
     }
     // If role is 'Owner' / 'Admin', the filter remains empty, fetching all company invoices.
 
@@ -26,12 +26,11 @@ export async function listInvoices(req: Request, res: Response, next: NextFuncti
 export async function getUnpaidInvoices(req: Request, res: Response, next: NextFunction) {
   try {
     const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
-    const userId = req.user?.id;
     const customer_id = req.query.customer_id as string;
 
-    const queryFilter: { created_by?: string; customer_id?: string } = {};
-    if (userRole === 'CASHIER' && userId) {
-      queryFilter.created_by = userId;
+    const queryFilter: { created_by?: string; customer_id?: string; is_pos_only?: boolean } = {};
+    if (userRole === 'CASHIER') {
+      queryFilter.is_pos_only = true;
     }
 
     const invoices = await invoicesService.getInvoices(queryFilter);
@@ -50,11 +49,11 @@ export async function getInvoice(req: Request, res: Response, next: NextFunction
   try {
     const invoice = await invoicesService.getInvoice(req.params.id);
     const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
-    const userId = req.user?.id;
 
-    // RBAC: Cashiers can only fetch invoices they created
-    if (userRole === 'CASHIER' && userId && invoice.created_by && invoice.created_by !== userId) {
-      throw new ForbiddenError('You are only authorized to view invoices you personally created.');
+    // RBAC: Cashiers can view all POS counter invoices, but cannot view wholesale ERP invoices
+    const isPos = String(invoice.invoice_number || '').startsWith('POS-') || (invoice.notes && invoice.notes.includes('POS'));
+    if (userRole === 'CASHIER' && !isPos) {
+      throw new ForbiddenError('Cashiers are only authorized to view POS retail sale invoices.');
     }
 
     res.json(ok(invoice));
@@ -112,13 +111,6 @@ export async function getInvoiceReturnSummary(req: Request, res: Response, next:
   }
 }
 
-import { PrismaClient } from '@prisma/client';
-
-export const prisma = new PrismaClient();
-
-import { restoreInventoryBucketsLifo } from './invoices.repository';
-
-export { restoreInventoryBucketsLifo };
 
 export async function createSalesReturn(req: Request, res: Response, next: NextFunction) {
   try {

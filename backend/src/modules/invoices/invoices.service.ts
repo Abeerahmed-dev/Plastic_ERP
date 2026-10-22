@@ -8,7 +8,7 @@ export async function createInvoice(input: CreateInvoiceInput, userId?: string) 
   return await getInvoice(invoiceId);
 }
 
-export async function getInvoices(filter?: { created_by?: string }) {
+export async function getInvoices(filter?: { created_by?: string; is_pos_only?: boolean }) {
   return await invoicesRepo.findAllInvoices(filter);
 }
 

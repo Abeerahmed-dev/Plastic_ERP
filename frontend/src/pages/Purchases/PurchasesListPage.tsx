@@ -163,7 +163,7 @@ export default function PurchasesListPage() {
               className="inline-flex items-center justify-center rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-purple-700 transition-all gap-2"
             >
               <Plus className="h-5 w-5" />
-              New Purchase Invoice
+              New Purchasing
             </button>
           )}
         </div>

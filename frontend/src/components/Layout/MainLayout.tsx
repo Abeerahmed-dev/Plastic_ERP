@@ -37,9 +37,9 @@ const navSections: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'Purchases',
     items: [
-      { to: '/purchases', label: 'Purchase Invoices', icon: Truck, permission: 'purchases:read' },
+      { to: '/purchases', label: 'Purchasing', icon: Truck, permission: 'purchases:read' },
       { to: '/supplier-payments', label: 'Party Payments', icon: HandCoins, permission: 'payments:read' },
-      { to: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers:read' },
+      { to: '/suppliers', label: 'Party', icon: Truck, permission: 'suppliers:read' },
     ],
   },
   {
@@ -80,8 +80,19 @@ function SidebarLink({ item, onClick }: { item: NavItem; onClick?: () => void })
   const location = useLocation();
   if (!item.to) return null;
 
+  const searchParams = new URLSearchParams(location.search);
+  const isPosTab = searchParams.get('type') === 'pos';
+  const isPosRoute =
+    location.pathname.startsWith('/pos-invoices') ||
+    location.pathname.startsWith('/pos/invoices') ||
+    ((location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && isPosTab);
+
   const isActive =
-    item.to === '/dashboard'
+    item.to === '/pos-invoices' || item.to === '/invoices?type=pos'
+      ? isPosRoute
+      : item.to === '/invoices'
+      ? (location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && !isPosRoute
+      : item.to === '/dashboard'
       ? location.pathname === '/dashboard' || location.pathname === '/'
       : location.pathname.startsWith(item.to);
 
@@ -230,7 +241,14 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
 }
 
 /* ─── Route Title Mapping Helper ─── */
-const getPageTitle = (pathname: string): { title: string; subtitle?: string } => {
+const getPageTitle = (pathname: string, search?: string): { title: string; subtitle?: string } => {
+  const isPosInvoices =
+    pathname.startsWith('/pos-invoices') ||
+    pathname.startsWith('/pos/invoices') ||
+    ((pathname.startsWith('/invoices') || pathname.startsWith('/sales')) && new URLSearchParams(search || '').get('type') === 'pos');
+  if (isPosInvoices) {
+    return { title: 'POS Sale Invoices', subtitle: 'Retail Walk-in Counter Sale History' };
+  }
   if (pathname === '/dashboard' || pathname === '/') {
     return { title: 'Dashboard', subtitle: 'Overview & Business Analytics' };
   }
@@ -297,7 +315,7 @@ export const MainLayout = () => {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
-  const currentPage = getPageTitle(location.pathname);
+  const currentPage = getPageTitle(location.pathname, location.search);
 
   const handleLogout = async () => {
     try {
@@ -338,7 +356,7 @@ export const MainLayout = () => {
               <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                 {[
                   { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
-                  { to: '/invoices', label: 'Sales Invoices', icon: FileText },
+                  { to: '/pos-invoices', label: 'POS Sale Invoices', icon: FileText },
                   { to: '/purchases', label: 'Purchasing', icon: Truck },
                   { to: '/products', label: 'Products', icon: Box },
                   { to: '/categories', label: 'Categories', icon: Tag },
@@ -491,17 +509,29 @@ export const MainLayout = () => {
             </div>
           )}
 
-          {/* Right: Go to SBS ERP + User info chip */}
+          {/* Right: POS Sale Invoices + Go to SBS ERP + User info chip */}
           <div className="flex items-center gap-2.5 z-10">
-            {/* Go to SBS ERP button: Only for Admin / Owner on POS screen */}
+            {/* POS Sale Invoices button: directly beside Go to SBS ERP */}
+            {isPOSPage && (
+              <Link
+                to="/pos-invoices"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-100 border border-amber-500/40 font-bold text-xs sm:text-sm shadow-md transition-all active:scale-95"
+                title="View POS Sale Invoices History"
+              >
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span>POS Sale Invoices</span>
+              </Link>
+            )}
+
+            {/* Go to SPS ERP button: Only for Admin / Owner on POS screen */}
             {isPOSPage && !isCashier && (
               <Link
                 to="/dashboard"
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md transition-all active:scale-95 mr-1"
-                title="Return to SBS ERP Dashboard"
+                title="Return to SPS ERP Dashboard"
               >
                 <LayoutDashboard className="w-4 h-4 text-slate-950" />
-                <span>Go to SBS ERP</span>
+                <span>Go to SPS ERP</span>
               </Link>
             )}
 

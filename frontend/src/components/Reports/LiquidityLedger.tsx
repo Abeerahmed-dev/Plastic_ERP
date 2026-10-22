@@ -46,10 +46,10 @@ export function LiquidityLedger() {
   useEffect(() => {
     fetchAllReports();
     const interval = setInterval(() => {
-      useReportStore.getState().fetchLiquidityLedger();
-    }, 4000);
+      useReportStore.getState().fetchLiquidityLedger(true);
+    }, 15000);
     return () => clearInterval(interval);
-  }, [fetchAllReports]);
+  }, []);
 
   const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc' | 'customer-advances' | 'supplier-advances') => {
     if (type === 'pdc') {

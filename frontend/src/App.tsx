@@ -50,8 +50,10 @@ function App() {
           <Route path="/uom" element={<Navigate to="/categories" replace />} />
           <Route path="/customers" element={<CustomersListPage />} />
           <Route path="/suppliers" element={isCashier ? <Navigate to="/pos" replace /> : <SuppliersListPage />} />
-          <Route path="/invoices" element={<InvoicesListPage />} />
-          <Route path="/sales" element={<InvoicesListPage />} />
+          <Route path="/invoices" element={isCashier ? <Navigate to="/pos-invoices" replace /> : <InvoicesListPage />} />
+          <Route path="/sales" element={isCashier ? <Navigate to="/pos-invoices" replace /> : <InvoicesListPage />} />
+          <Route path="/pos/invoices" element={<InvoicesListPage defaultType="pos" />} />
+          <Route path="/pos-invoices" element={<InvoicesListPage defaultType="pos" />} />
           <Route path="/purchases" element={<PurchasesListPage />} />
           <Route path="/payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
           <Route path="/customer-payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />

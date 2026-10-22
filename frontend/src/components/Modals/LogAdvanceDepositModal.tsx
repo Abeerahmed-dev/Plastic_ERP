@@ -174,10 +174,10 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
   const entityTitle = entityType === 'customer' ? 'Customer' : 'Supplier';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50/50">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 flex min-h-full items-center justify-center">
+      <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] sm:max-h-[90vh] my-auto overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Header (Pinned) */}
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-100 px-5 sm:px-6 py-3.5 sm:py-4 bg-slate-50/70">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
               <ArrowUpRight className="h-5 w-5" />
@@ -198,13 +198,14 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
         </div>
 
         {/* Content & Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && (
-            <div className="flex items-start gap-2.5 p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1 overflow-hidden">
+          <div className="overflow-y-auto flex-1 p-5 sm:p-6 space-y-4">
+            {error && (
+              <div className="flex items-start gap-2.5 p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
 
           {/* Entity Selection or Details Card */}
           {entityType === 'customer' ? (
@@ -359,13 +360,15 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
             />
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          </div>
+
+          {/* Actions (Pinned Footer) */}
+          <div className="shrink-0 bg-slate-50/80 px-5 sm:px-6 py-3.5 border-t border-slate-100 flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
               disabled={advanceMutation.isPending}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-white transition cursor-pointer"
             >
               Cancel
             </button>

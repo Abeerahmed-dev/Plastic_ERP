@@ -84,7 +84,7 @@ interface ReportState {
   isLoadingProfit: boolean;
   error: string | null;
   fetchInventoryLedger: () => Promise<void>;
-  fetchLiquidityLedger: () => Promise<void>;
+  fetchLiquidityLedger: (silent?: boolean) => Promise<void>;
   fetchProfitMatrix: (productId?: string, timeFilter?: string) => Promise<void>;
   fetchSalesMarginReport: (productId?: string, timeFilter?: string) => Promise<void>;
   fetchProductProfitMatrix: (productId?: string) => Promise<void>;
@@ -117,8 +117,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
     }
   },
 
-  fetchLiquidityLedger: async () => {
-    set({ isLoadingLiquidity: true, error: null });
+  fetchLiquidityLedger: async (silent = false) => {
+    if (!silent && !get().liquidityLedger) {
+      set({ isLoadingLiquidity: true, error: null });
+    }
     try {
       const response = await api.get('/reports/liquidity');
       set({ liquidityLedger: response.data.data, isLoadingLiquidity: false });

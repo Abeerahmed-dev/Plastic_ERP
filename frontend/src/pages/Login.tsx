@@ -50,90 +50,92 @@ export const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
-      {/* Decorative background elements */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10">
-        <div className="absolute -top-[30%] -right-[10%] w-[70%] h-[70%] rounded-full bg-blue-400/20 blur-[120px]" />
-        <div className="absolute -bottom-[30%] -left-[10%] w-[70%] h-[70%] rounded-full bg-indigo-400/20 blur-[120px]" />
+    <div className="relative min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8 overflow-hidden bg-slate-950">
+      {/* Decorative ambient glowing gradient orbs (Pure lightweight CSS) */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[20%] -left-[10%] w-[55vw] h-[55vw] rounded-full bg-gradient-to-br from-blue-600/25 to-indigo-600/10 blur-[130px]" />
+        <div className="absolute -bottom-[20%] -right-[10%] w-[60vw] h-[60vw] rounded-full bg-gradient-to-tl from-purple-600/20 via-indigo-500/15 to-transparent blur-[140px]" />
+        <div className="absolute top-[35%] left-[25%] w-[40vw] h-[40vw] rounded-full bg-blue-500/10 blur-[120px]" />
       </div>
 
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+      <div className="relative z-10 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
           <img
             src={sabirLogo}
             alt="Sabir Plastic"
-            className="h-20 w-auto object-contain drop-shadow-md"
+            className="h-20 w-auto object-contain drop-shadow-2xl filter brightness-110"
           />
         </div>
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900 tracking-tight">
+        <h2 className="mt-4 text-center text-3xl font-extrabold text-white tracking-tight drop-shadow-lg">
           Sabir Plastic Store
         </h2>
-        <p className="mt-2 text-center text-sm text-slate-500">
+        <p className="mt-2 text-center text-sm text-slate-300 drop-shadow">
           Sign in to access your dashboard
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white/80 backdrop-blur-xl py-8 px-4 shadow-2xl sm:rounded-3xl sm:px-10 border border-white/50">
+      <div className="relative z-10 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        {/* Glass Mirror Card */}
+        <div className="bg-white/[0.12] backdrop-blur-2xl py-8 px-4 shadow-[0_16px_40px_rgba(0,0,0,0.5)] sm:rounded-3xl sm:px-10 border border-white/30 ring-1 ring-white/20">
           <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
             {serverError && (
-              <div className="p-4 rounded-xl bg-red-50 border border-red-100 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">{serverError}</p>
+              <div className="p-4 rounded-xl bg-red-500/20 border border-red-400/40 backdrop-blur-md flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-300 shrink-0 mt-0.5" />
+                <p className="text-sm font-medium text-red-100">{serverError}</p>
               </div>
             )}
 
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-slate-700 mb-1"
+                className="block text-sm font-semibold text-white/90 drop-shadow mb-1.5"
               >
                 Email address
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-slate-400" aria-hidden="true" />
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Mail className="h-5 w-5 text-white/60" aria-hidden="true" />
                 </div>
                 <input
                   id="email"
                   type="email"
                   autoComplete="email"
-                  className={`block w-full pl-10 pr-3 py-2.5 border ${
-                    errors.email ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                  } rounded-xl bg-white/50 focus:bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 sm:text-sm transition-colors duration-200`}
+                  className={`block w-full pl-10 pr-3.5 py-2.5 border ${
+                    errors.email ? 'border-red-400 focus:ring-red-400' : 'border-white/30 focus:border-white/80'
+                  } rounded-xl bg-white/15 focus:bg-white/25 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-md sm:text-sm transition-all duration-200`}
                   placeholder="admin@sabirplastic.com"
                   {...register('email')}
                 />
               </div>
               {errors.email && (
-                <p className="mt-1 text-sm text-red-500">{errors.email.message}</p>
+                <p className="mt-1 text-xs font-medium text-red-300">{errors.email.message}</p>
               )}
             </div>
 
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-slate-700 mb-1"
+                className="block text-sm font-semibold text-white/90 drop-shadow mb-1.5"
               >
                 Password
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-slate-400" aria-hidden="true" />
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-white/60" aria-hidden="true" />
                 </div>
                 <input
                   id="password"
                   type="password"
                   autoComplete="current-password"
-                  className={`block w-full pl-10 pr-3 py-2.5 border ${
-                    errors.password ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                  } rounded-xl bg-white/50 focus:bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 sm:text-sm transition-colors duration-200`}
+                  className={`block w-full pl-10 pr-3.5 py-2.5 border ${
+                    errors.password ? 'border-red-400 focus:ring-red-400' : 'border-white/30 focus:border-white/80'
+                  } rounded-xl bg-white/15 focus:bg-white/25 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-md sm:text-sm transition-all duration-200`}
                   placeholder="••••••••"
                   {...register('password')}
                 />
               </div>
               {errors.password && (
-                <p className="mt-1 text-sm text-red-500">{errors.password.message}</p>
+                <p className="mt-1 text-xs font-medium text-red-300">{errors.password.message}</p>
               )}
             </div>
 
@@ -143,11 +145,11 @@ export const Login = () => {
                   id="remember-me"
                   name="remember-me"
                   type="checkbox"
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded cursor-pointer"
+                  className="h-4 w-4 text-blue-500 focus:ring-blue-400 border-white/40 bg-white/20 rounded cursor-pointer"
                 />
                 <label
                   htmlFor="remember-me"
-                  className="ml-2 block text-sm text-slate-700 cursor-pointer"
+                  className="ml-2 block text-sm font-medium text-white/90 cursor-pointer drop-shadow"
                 >
                   Remember me
                 </label>
@@ -156,7 +158,7 @@ export const Login = () => {
               <div className="text-sm">
                 <a
                   href="#"
-                  className="font-medium text-blue-600 hover:text-blue-500 transition-colors"
+                  className="font-medium text-blue-300 hover:text-white transition-colors drop-shadow"
                 >
                   Forgot your password?
                 </a>
@@ -167,7 +169,7 @@ export const Login = () => {
               <button
                 type="submit"
                 disabled={loginMutation.isPending}
-                className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0"
+                className="w-full flex justify-center items-center py-2.5 px-4 border border-white/30 rounded-xl shadow-lg text-sm font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-white/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
               >
                 {loginMutation.isPending ? (
                   <>

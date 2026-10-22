@@ -124,7 +124,7 @@ export default function SuppliersListPage() {
                   className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Party / Supplier
+                  Add Party
                 </button>
               </>
             )}
@@ -141,8 +141,8 @@ export default function SuppliersListPage() {
             availableNames={availableNames}
             onReset={resetFilters}
             showInvoice={false}
-            nameLabel="Supplier Name"
-            namePlaceholder="Filter by supplier name…"
+            nameLabel="Party Name"
+            namePlaceholder="Filter by party name…"
           />
         </div>
       </div>
@@ -154,7 +154,6 @@ export default function SuppliersListPage() {
               <tr className="border-b border-gray-100 bg-gray-50 text-left">
                 <th className="px-4 py-3 font-semibold text-gray-600">Code</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">City</th>
                 <th className="px-4 py-3 font-semibold text-gray-600 text-center">Terms</th>
                 {!isCashier && (
@@ -169,13 +168,13 @@ export default function SuppliersListPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
+                <tr><td colSpan={isCashier ? 6 : 8} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
               )}
               {isError && (
-                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
+                <tr><td colSpan={isCashier ? 6 : 8} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
               )}
               {!isLoading && !isError && filteredTableRows.length === 0 && (
-                <tr><td colSpan={isCashier ? 7 : 9} className="py-16 text-center text-gray-400">
+                <tr><td colSpan={isCashier ? 6 : 8} className="py-16 text-center text-gray-400">
                   {selectedCity || selectedName
                     ? 'No suppliers match the active cascading filters. Try resetting filters.'
                     : 'No parties yet.'}
@@ -207,7 +206,6 @@ export default function SuppliersListPage() {
                         {s.name}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{s.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{s.city ?? '—'}</td>
                     <td className="px-4 py-3 text-center text-gray-600">{s.payment_terms}d</td>
                     {!isCashier && (

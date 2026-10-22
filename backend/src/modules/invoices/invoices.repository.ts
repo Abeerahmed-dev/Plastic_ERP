@@ -829,7 +829,7 @@ export async function processSalesReturn(
   });
 }
 
-export async function findAllInvoices(filter?: { created_by?: string }) {
+export async function findAllInvoices(filter?: { created_by?: string; is_pos_only?: boolean }) {
   const query = db('sales_invoices as si')
     .join('customers as c', 'si.customer_id', 'c.id')
     .leftJoin('users as u', 'si.created_by', 'u.id')
@@ -840,7 +840,9 @@ export async function findAllInvoices(filter?: { created_by?: string }) {
     })
     .whereNull('si.parent_invoice_id');
 
-  if (filter?.created_by) {
+  if (filter?.is_pos_only) {
+    query.where('si.invoice_number', 'like', 'POS-%');
+  } else if (filter?.created_by) {
     query.where('si.created_by', filter.created_by);
   }
 

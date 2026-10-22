@@ -15,9 +15,6 @@ export const Dashboard = () => {
 
   return (
     <main className="w-full max-w-full py-4 sm:py-5 px-3 sm:px-5 space-y-4 min-w-0 overflow-x-hidden">
-      {/* Low Stock Early Warnings Alert Engine */}
-      <LowStockWidget />
-
       {/* 1. Liquidity & Working Capital Top Card */}
       <div className="w-full min-w-0">
         <LiquidityLedger />
@@ -34,6 +31,11 @@ export const Dashboard = () => {
         <div className="w-full min-w-0">
           <InventoryLedgerSection />
         </div>
+      </div>
+
+      {/* Low Stock Early Warnings Alert Engine */}
+      <div className="w-full min-w-0">
+        <LowStockWidget />
       </div>
     </main>
   );

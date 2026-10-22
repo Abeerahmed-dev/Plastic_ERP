@@ -311,7 +311,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">New Purchase Invoice</h2>
+            <h2 className="text-lg font-bold text-slate-900">New Purchasing</h2>
             <p className="text-sm text-slate-500 mt-0.5">Record incoming inventory (Strict KG Wholesale Model)</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition">
