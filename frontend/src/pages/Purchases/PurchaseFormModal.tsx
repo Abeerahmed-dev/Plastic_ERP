@@ -26,7 +26,7 @@ const itemSchema = z.object({
 const schema = z.object({
   supplier_id: z.string().min(1, 'Party is required'),
   date: z.string(),
-  due_date: z.string().optional(),
+  due_date: z.string().optional().or(z.literal('')),
   discount: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
   items: z.array(itemSchema).min(1, 'At least one item is required'),
@@ -63,7 +63,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
     defaultValues: {
       supplier_id: '',
       date: new Date().toISOString().split('T')[0],
-      due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      due_date: '',
       discount: 0,
       notes: '',
       items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
@@ -291,6 +291,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
 
     mutation.mutate({
       ...data,
+      due_date: data.due_date ? data.due_date : undefined,
       discount: Math.round(Number(data.discount || 0) * 100) / 100,
       advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
       items: cleanItems,

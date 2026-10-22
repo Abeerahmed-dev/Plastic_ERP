@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { getSuppliers, deactivateSupplier } from '../../services/suppliers.service';
@@ -23,6 +24,7 @@ export default function SuppliersListPage() {
   const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:write');
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:delete'));
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
@@ -96,37 +98,13 @@ export default function SuppliersListPage() {
               <RefreshCw className="h-4 w-4" />
             </button>
             {canWrite && (
-              <>
-                <button
-                  onClick={() => {
-                    setAdvanceTargetSupplier(null);
-                    setAdvanceModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition shadow-sm"
-                  title="Log Advance Deposit"
-                >
-                  <ArrowUpRight className="h-4 w-4" />
-                  Log Advance
-                </button>
-                <button
-                  onClick={() => {
-                    setRefundTargetSupplier(null);
-                    setRefundModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-700 transition shadow-sm"
-                  title="Process Cash Refund"
-                >
-                  <ArrowDownLeft className="h-4 w-4" />
-                  Process Refund
-                </button>
-                <button
-                  onClick={openCreate}
-                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Party
-                </button>
-              </>
+              <button
+                onClick={openCreate}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Add Party
+              </button>
             )}
           </div>
         </div>
@@ -155,7 +133,6 @@ export default function SuppliersListPage() {
                 <th className="px-4 py-3 font-semibold text-gray-600">Code</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">City</th>
-                <th className="px-4 py-3 font-semibold text-gray-600 text-center">Terms</th>
                 {!isCashier && (
                   <>
                     <th className="px-4 py-3 font-semibold text-gray-600 text-right">Outstanding</th>
@@ -168,13 +145,13 @@ export default function SuppliersListPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={isCashier ? 6 : 8} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
+                <tr><td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
               )}
               {isError && (
-                <tr><td colSpan={isCashier ? 6 : 8} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
+                <tr><td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
               )}
               {!isLoading && !isError && filteredTableRows.length === 0 && (
-                <tr><td colSpan={isCashier ? 6 : 8} className="py-16 text-center text-gray-400">
+                <tr><td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">
                   {selectedCity || selectedName
                     ? 'No suppliers match the active cascading filters. Try resetting filters.'
                     : 'No parties yet.'}
@@ -189,7 +166,7 @@ export default function SuppliersListPage() {
                     <td className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => openEdit(s)}
+                        onClick={() => navigate(`/suppliers/${s.id}`)}
                         className="inline-block rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-mono font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-900 transition cursor-pointer"
                         title="View Supplier Profile & Statement of Account"
                       >
@@ -199,7 +176,7 @@ export default function SuppliersListPage() {
                     <td className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => openEdit(s)}
+                        onClick={() => navigate(`/suppliers/${s.id}`)}
                         className="font-semibold text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left transition"
                         title="View Supplier Profile & Statement of Account"
                       >
@@ -207,7 +184,6 @@ export default function SuppliersListPage() {
                       </button>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{s.city ?? '—'}</td>
-                    <td className="px-4 py-3 text-center text-gray-600">{s.payment_terms}d</td>
                     {!isCashier && (
                       <>
                         <td className="px-4 py-3 text-right">
@@ -257,7 +233,7 @@ export default function SuppliersListPage() {
                             >
                               <ArrowUpRight className="h-3.5 w-3.5" />
                             </button>
-                            <button onClick={() => openEdit(s)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition" title="Edit">
+                            <button onClick={() => navigate(`/suppliers/${s.id}`)} className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition" title="View & Edit Party">
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                           </>

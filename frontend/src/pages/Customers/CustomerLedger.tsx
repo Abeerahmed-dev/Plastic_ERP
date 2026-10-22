@@ -1,9 +1,7 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
 import { ApiSuccess } from '../../types/api.types';
 import { StatementOfAccount, StatementEntry } from '../../components/StatementOfAccount';
-import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 
 interface CustomerLedgerProps {
   customerId: string;
@@ -12,8 +10,6 @@ interface CustomerLedgerProps {
 }
 
 export const CustomerLedger = ({ customerId, customerName, customerCode }: CustomerLedgerProps) => {
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-
   const { data: statement = [], isLoading, refetch } = useQuery({
     queryKey: ['customers', customerId, 'statement'],
     queryFn: async () => {
@@ -23,26 +19,15 @@ export const CustomerLedger = ({ customerId, customerName, customerCode }: Custo
   });
 
   return (
-    <>
-      <StatementOfAccount
-        data={statement}
-        isLoading={isLoading}
-        entityType="customer"
-        entityName={customerName}
-        entityCode={customerCode}
-        onRefresh={refetch}
-        onRecordPayment={() => setIsPaymentModalOpen(true)}
-      />
-      <RecordPaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        entityType="customer"
-        customerId={customerId}
-        onSuccess={refetch}
-      />
-    </>
+    <StatementOfAccount
+      data={statement}
+      isLoading={isLoading}
+      entityType="customer"
+      entityName={customerName}
+      entityCode={customerCode}
+      onRefresh={refetch}
+    />
   );
 };
 
 export default CustomerLedger;
-

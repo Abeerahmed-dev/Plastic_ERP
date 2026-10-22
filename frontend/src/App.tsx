@@ -4,7 +4,9 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import CustomersListPage from './pages/Customers/CustomersListPage';
+import CustomerDetailPage from './pages/Customers/CustomerDetailPage';
 import SuppliersListPage from './pages/Suppliers/SuppliersListPage';
+import SupplierDetailPage from './pages/Suppliers/SupplierDetailPage';
 import ProductsListPage from './pages/Products/ProductsListPage';
 import CategoriesPage from './pages/Categories/CategoriesPage';
 import InvoicesListPage from './pages/Invoices/InvoicesListPage';
@@ -49,7 +51,9 @@ function App() {
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/uom" element={<Navigate to="/categories" replace />} />
           <Route path="/customers" element={<CustomersListPage />} />
+          <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/suppliers" element={isCashier ? <Navigate to="/pos" replace /> : <SuppliersListPage />} />
+          <Route path="/suppliers/:id" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierDetailPage />} />
           <Route path="/invoices" element={isCashier ? <Navigate to="/pos-invoices" replace /> : <InvoicesListPage />} />
           <Route path="/sales" element={isCashier ? <Navigate to="/pos-invoices" replace /> : <InvoicesListPage />} />
           <Route path="/pos/invoices" element={<InvoicesListPage defaultType="pos" />} />

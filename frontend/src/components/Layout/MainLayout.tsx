@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LogOut, Users, Box, FileText, Truck, Tag, HandCoins,
+  LogOut, Users, Box, FileText, Truck, Tag,
   ShoppingCart, LayoutDashboard, PieChart, Receipt, Boxes,
   ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings,
 } from 'lucide-react';
@@ -38,7 +38,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     heading: 'Purchases',
     items: [
       { to: '/purchases', label: 'Purchasing', icon: Truck, permission: 'purchases:read' },
-      { to: '/supplier-payments', label: 'Party Payments', icon: HandCoins, permission: 'payments:read' },
       { to: '/suppliers', label: 'Party', icon: Truck, permission: 'suppliers:read' },
     ],
   },
@@ -328,79 +327,82 @@ export const MainLayout = () => {
     }
   };
 
+  const isPOSPage = location.pathname.startsWith('/pos');
+  const hideSidebar = isPOSPage;
+
   /* ─── Cashier: horizontal top-nav ─── */
   if (isCashier) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col print:bg-white print:m-0 print:p-0">
         <nav className="bg-slate-900 shadow-md border-b border-slate-800 shrink-0 print:hidden">
-          <div className="w-full px-4 sm:px-6">
-            <div className="flex items-center justify-between h-16 gap-4">
-              {/* Brand Logo & Title */}
-              <div className="flex items-center gap-3 shrink-0">
-                <img
-                  src={sabirLogo}
-                  alt="Sabir Plastic"
-                  className="h-9 w-auto object-contain shrink-0 drop-shadow"
-                />
-                <div className="hidden sm:flex flex-col">
-                  <span className="font-bold text-sm text-white tracking-tight leading-none">
-                    Sabir Plastic Store
-                  </span>
-                  <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
-                    Cashier Terminal
-                  </span>
+            <div className="w-full px-4 sm:px-6">
+              <div className="flex items-center justify-between h-16 gap-4">
+                {/* Brand Logo & Title */}
+                <div className="flex items-center gap-3 shrink-0">
+                  <img
+                    src={sabirLogo}
+                    alt="Sabir Plastic"
+                    className="h-9 w-auto object-contain shrink-0 drop-shadow"
+                  />
+                  <div className="hidden sm:flex flex-col">
+                    <span className="font-bold text-sm text-white tracking-tight leading-none">
+                      Sabir Plastic Store
+                    </span>
+                    <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
+                      Cashier Terminal
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Navigation Links */}
-              <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                {[
-                  { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
-                  { to: '/pos-invoices', label: 'POS Sale Invoices', icon: FileText },
-                  { to: '/purchases', label: 'Purchasing', icon: Truck },
-                  { to: '/products', label: 'Products', icon: Box },
-                  { to: '/categories', label: 'Categories', icon: Tag },
-                ].map(({ to, label, icon: Icon }) => {
-                  const isActive = to === '/pos' ? location.pathname === '/pos' : location.pathname.startsWith(to);
-                  return (
-                    <Link
-                      key={to}
-                      to={to}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
-                        isActive
-                          ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/20'
-                          : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      <span>{label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
+                {/* Navigation Links */}
+                <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  {[
+                    { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
+                    { to: '/pos-invoices', label: 'POS Sale Invoices', icon: FileText },
+                    { to: '/purchases', label: 'Purchasing', icon: Truck },
+                    { to: '/products', label: 'Products', icon: Box },
+                    { to: '/categories', label: 'Categories', icon: Tag },
+                  ].map(({ to, label, icon: Icon }) => {
+                    const isActive = to === '/pos' ? location.pathname === '/pos' : location.pathname.startsWith(to);
+                    return (
+                      <Link
+                        key={to}
+                        to={to}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                          isActive
+                            ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        <span>{label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
 
-              {/* User Profile & Logout */}
-              <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
-                <div className="hidden md:flex flex-col items-end">
-                  <span className="text-xs font-semibold text-slate-200 leading-none">{user?.name}</span>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-none mt-1">
-                    {user?.role}
-                  </span>
+                {/* User Profile & Logout */}
+                <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
+                  <div className="hidden md:flex flex-col items-end">
+                    <span className="text-xs font-semibold text-slate-200 leading-none">{user?.name}</span>
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-none mt-1">
+                      {user?.role}
+                    </span>
+                  </div>
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-sm shrink-0">
+                    {user?.name?.charAt(0).toUpperCase()}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
                 </div>
-                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-sm shrink-0">
-                  {user?.name?.charAt(0).toUpperCase()}
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
-                  title="Sign out"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
               </div>
             </div>
-          </div>
-        </nav>
+          </nav>
 
         <div className="flex-1 overflow-auto">
           <Outlet />
@@ -409,13 +411,11 @@ export const MainLayout = () => {
     );
   }
 
-  const isPOSPage = location.pathname.startsWith('/pos');
-
   /* ─── Owner / Admin: fixed sidebar layout ─── */
   return (
     <div className="min-h-screen bg-slate-50 flex print:bg-white print:m-0 print:p-0">
       {/* Desktop fixed sidebar - hidden on POS page */}
-      {!isPOSPage && (
+      {!hideSidebar && (
         <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md print:hidden">
           <SidebarContent
             user={user}
@@ -426,7 +426,7 @@ export const MainLayout = () => {
       )}
 
       {/* Mobile sidebar overlay - hidden on POS page */}
-      {!isPOSPage && mobileSidebarOpen && (
+      {!hideSidebar && mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex print:hidden">
           <div
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
@@ -450,7 +450,7 @@ export const MainLayout = () => {
       )}
 
       {/* Right: slim topbar + page content (full width when on POS) */}
-      <div className={`flex flex-col flex-1 ${!isPOSPage ? 'lg:ml-60' : ''} min-h-screen min-w-0 overflow-x-hidden print:ml-0 print:p-0`}>
+      <div className={`flex flex-col flex-1 ${!hideSidebar ? 'lg:ml-60' : ''} min-h-screen min-w-0 overflow-x-hidden print:ml-0 print:p-0`}>
         {/* Top bar */}
         <header className="relative sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 justify-between shrink-0 shadow-sm print:hidden">
           {/* Left: Hamburger & Brand logo */}

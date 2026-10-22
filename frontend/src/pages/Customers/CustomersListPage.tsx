@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
 import { getCustomers, deactivateCustomer } from '../../services/customers.service';
@@ -23,6 +24,7 @@ export default function CustomersListPage() {
   const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:write');
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:delete'));
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'CREDIT' | 'CASH'>('CREDIT');
   const [page, setPage] = useState(1);
@@ -102,37 +104,13 @@ export default function CustomersListPage() {
               <RefreshCw className="h-4 w-4" />
             </button>
             {canWrite && (
-              <>
-                <button
-                  onClick={() => {
-                    setAdvanceTargetCustomer(null);
-                    setAdvanceModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition shadow-sm"
-                  title="Log Advance Deposit"
-                >
-                  <ArrowUpRight className="h-4 w-4" />
-                  Log Advance
-                </button>
-                <button
-                  onClick={() => {
-                    setRefundTargetCustomer(null);
-                    setRefundModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 rounded-lg bg-red-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-red-700 transition shadow-sm"
-                  title="Process Cash Refund"
-                >
-                  <ArrowDownLeft className="h-4 w-4" />
-                  Process Refund
-                </button>
-                <button
-                  onClick={openCreate}
-                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Customer
-                </button>
-              </>
+              <button
+                onClick={openCreate}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Add Customer
+              </button>
             )}
           </div>
         </div>
@@ -186,8 +164,6 @@ export default function CustomersListPage() {
               <tr className="border-b border-gray-100 bg-gray-50 text-left">
                 <th className="px-4 py-3 font-semibold text-gray-600">Code</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">City</th>
                 {!isCashier && (
                   <>
@@ -195,7 +171,6 @@ export default function CustomersListPage() {
                     <th className="px-4 py-3 font-semibold text-gray-600 text-right">Advance (Credit)</th>
                   </>
                 )}
-                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Net Volume (KG)</th>
                 <th className="px-4 py-3 font-semibold text-gray-600 text-center">Status</th>
                 {(canWrite || canDelete) && (
                   <th className="px-4 py-3 font-semibold text-gray-600 text-right">Actions</th>
@@ -205,14 +180,14 @@ export default function CustomersListPage() {
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-gray-400">
+                  <td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">
                     Loading customers…
                   </td>
                 </tr>
               )}
               {isError && (
                 <tr>
-                  <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-red-500">
+                  <td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-red-500">
                     Failed to load customers.{' '}
                     <button onClick={() => refetch()} className="underline">Retry</button>
                   </td>
@@ -220,7 +195,7 @@ export default function CustomersListPage() {
               )}
               {!isLoading && !isError && filteredTableRows.length === 0 && (
                 <tr>
-                  <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-gray-400">
+                  <td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">
                     {selectedCity || selectedName
                       ? 'No customers match the active cascading filters. Try resetting filters.'
                       : 'No customers yet. Add your first one.'}
@@ -241,7 +216,7 @@ export default function CustomersListPage() {
                     <td className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => openEdit(c)}
+                        onClick={() => navigate(`/customers/${c.id}`)}
                         className="inline-block rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-semibold text-blue-700 hover:bg-blue-100 hover:text-blue-900 transition cursor-pointer"
                         title="View Customer Profile & Statement of Account"
                       >
@@ -251,25 +226,13 @@ export default function CustomersListPage() {
                     <td className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => openEdit(c)}
+                        onClick={() => navigate(`/customers/${c.id}`)}
                         className="font-semibold text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left transition"
                         title="View Customer Profile & Statement of Account"
                       >
                         {c.name}
                       </button>
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          c.customer_type === 'CASH'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-indigo-100 text-indigo-800'
-                        }`}
-                      >
-                        {c.customer_type === 'CASH' ? 'Cash Entity' : 'Credit Account'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{c.phone ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{c.city ?? '—'}</td>
                     {!isCashier && (
                       <>
@@ -308,10 +271,7 @@ export default function CustomersListPage() {
                         </td>
                       </>
                     )}
-                  <td className="px-4 py-3 text-right font-mono font-medium text-purple-700">
-                    {c.net_lifetime_volume_kg !== undefined ? `${c.net_lifetime_volume_kg.toLocaleString()} KG` : '0 KG'}
-                  </td>
-                  <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-3 text-center">
                     <span
                       className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         c.is_active
@@ -326,25 +286,13 @@ export default function CustomersListPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-2">
                         {canWrite && (
-                          <>
-                            <button
-                              onClick={() => {
-                                setAdvanceTargetCustomer(c);
-                                setAdvanceModalOpen(true);
-                              }}
-                              className="rounded-lg border border-gray-200 p-1.5 text-emerald-600 hover:border-emerald-400 hover:bg-emerald-50 transition"
-                              title="Log Advance Deposit"
-                            >
-                              <ArrowUpRight className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => openEdit(c)}
-                              className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition"
-                              title="Edit"
-                            >
-                              <Edit2 className="h-3.5 w-3.5" />
-                            </button>
-                          </>
+                          <button
+                            onClick={() => openEdit(c)}
+                            className="rounded-lg border border-gray-200 p-1.5 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition"
+                            title="Edit"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
                         )}
                         {canDelete && c.is_active && (
                           <button

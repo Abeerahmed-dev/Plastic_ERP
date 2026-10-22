@@ -24,7 +24,7 @@ const itemSchema = z.object({
 const schema = z.object({
   customer_id: z.string().min(1, 'Customer is required'),
   date: z.string(),
-  due_date: z.string(),
+  due_date: z.string().optional().or(z.literal('')),
   discount: z.coerce.number().min(0).default(0),
   delivery_charge: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
@@ -54,7 +54,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     defaultValues: {
       customer_id: '',
       date: new Date().toISOString().split('T')[0],
-      due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      due_date: '',
       discount: 0,
       delivery_charge: 0,
       notes: '',
@@ -248,7 +248,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     reset({
       customer_id: '',
       date: new Date().toISOString().split('T')[0],
-      due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      due_date: '',
       discount: 0,
       delivery_charge: 0,
       notes: '',
@@ -262,6 +262,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
     try {
       const cleanData = {
         ...data,
+        due_date: data.due_date ? data.due_date : undefined,
         discount: Math.round(Number(data.discount || 0) * 100) / 100,
         delivery_charge: Math.round(Number(data.delivery_charge || 0) * 100) / 100,
         advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,

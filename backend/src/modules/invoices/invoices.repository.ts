@@ -353,6 +353,7 @@ export async function createInvoiceWithItems(
       is_deferred: item.is_deferred,
       estimated_cogs: item.estimated_cogs,
       actual_cogs: item.actual_cogs,
+      name_urdu: item.name_urdu || null,
     }));
 
 
