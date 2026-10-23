@@ -93,6 +93,8 @@ function SidebarLink({ item, onClick }: { item: NavItem; onClick?: () => void })
       ? (location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && !isPosRoute
       : item.to === '/dashboard'
       ? location.pathname === '/dashboard' || location.pathname === '/'
+      : item.to === '/reports'
+      ? location.pathname === '/reports' || location.pathname === '/reports/'
       : location.pathname.startsWith(item.to);
 
   return (

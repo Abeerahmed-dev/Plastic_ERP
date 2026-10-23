@@ -49,9 +49,9 @@ export default function CashierDashboard() {
 
             <Link
               to="/pos"
-              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-lg shadow-blue-600/30 transition transform active:scale-95 text-sm"
+              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold shadow-lg shadow-amber-500/25 transition transform active:scale-95 text-sm cursor-pointer"
             >
-              <ShoppingCart className="w-5 h-5" />
+              <ShoppingCart className="w-5 h-5 text-slate-950" />
               Open Walk-in POS
             </Link>
           </div>

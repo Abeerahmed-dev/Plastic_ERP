@@ -169,11 +169,11 @@ export const Login = () => {
               <button
                 type="submit"
                 disabled={loginMutation.isPending}
-                className="w-full flex justify-center items-center py-2.5 px-4 border border-white/30 rounded-xl shadow-lg text-sm font-bold text-white bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:via-indigo-500 hover:to-purple-500 focus:outline-none focus:ring-2 focus:ring-white/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
+                className="w-full flex justify-center items-center py-2.5 px-4 border border-amber-300/40 rounded-xl shadow-lg text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 cursor-pointer shadow-amber-500/25"
               >
                 {loginMutation.isPending ? (
                   <>
-                    <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
+                    <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-slate-950" />
                     Signing in...
                   </>
                 ) : (

@@ -152,7 +152,7 @@ export default function POSPage() {
   const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
-  const effectiveAmountPaid = amountPaid === '' ? 0 : Number(amountPaid);
+  const effectiveAmountPaid = amountPaid === '' ? total : Number(amountPaid);
 
   const hasPriceFloorViolation = !isCashier && cart.some((item) => {
     const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
@@ -180,13 +180,13 @@ export default function POSPage() {
         })),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
-        payment_method: isCashier ? 'CASH' : paymentMethod,
-        bank_account_id: selectedBankAccountId || undefined,
+        payment_method: paymentMethod,
+        bank_account_id: paymentMethod === 'BANK' ? (selectedBankAccountId || undefined) : undefined,
       }),
     onSuccess: (invoice: any) => {
       const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
       const selectedBank = bankAccounts.find((b: any) => b.id === selectedBankAccountId);
-      const activeMethod = isCashier ? 'CASH' : paymentMethod;
+      const activeMethod = paymentMethod;
       const tendered = activeMethod === 'CASH' ? (invoice.cash_tendered ?? effectiveAmountPaid) : 0;
       const returned = activeMethod === 'CASH' ? (invoice.change_returned ?? Math.max(0, effectiveAmountPaid - total)) : 0;
       const balanceDue = Math.max(0, total - effectiveAmountPaid);
@@ -224,6 +224,10 @@ export default function POSPage() {
       queryClient.invalidateQueries({ queryKey: ['pnlReport'] });
       queryClient.invalidateQueries({ queryKey: ['cashLedger'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
+      queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       useReportStore.getState().fetchLiquidityLedger();
       useReportStore.getState().fetchAllReports();
     },
@@ -300,10 +304,10 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setIsAddCustomerOpen(true)}
-                className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-lg border border-blue-200 transition-all shrink-0 flex items-center gap-1 shadow-2xs"
+                className="px-2.5 py-1.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs rounded-lg transition-all shrink-0 flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
                 title="Register New Customer"
               >
-                <UserPlus className="w-3.5 h-3.5" />
+                <UserPlus className="w-3.5 h-3.5 text-slate-950" />
                 <span>+ New</span>
               </button>
             </div>
@@ -636,8 +640,13 @@ export default function POSPage() {
           {/* Amount Paid Input */}
           <div>
             <div className="flex justify-between items-center mb-0.5">
-              <label className="text-[11px] font-bold text-slate-700">
-                Amount Paid
+              <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                <span>Amount Paid</span>
+                {amountPaid === '' && total > 0 && (
+                  <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200">
+                    Auto: Full Cash (Rs. {total.toLocaleString()})
+                  </span>
+                )}
               </label>
               <div className="flex gap-1.5">
                 <button
@@ -661,7 +670,7 @@ export default function POSPage() {
               min={0}
               value={amountPaid === '' ? '' : amountPaid}
               onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-              placeholder="0 (Enter Amount)"
+              placeholder={total > 0 ? `Full: Rs. ${total.toLocaleString()}` : '0 (Enter Amount)'}
               className="w-full text-right font-black text-sm rounded-lg py-1 px-2.5 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
             />
             {amountPaid !== '' && Number(amountPaid) > total && (
@@ -682,35 +691,36 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Payment Method Dropdown */}
+          {/* Payment Method Dropdown (Cash in Drawer or Bank Transfer) */}
           <div>
             <select
-              disabled={isCashier}
-              value={isCashier ? 'CASH' : paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              className={`w-full text-xs font-bold rounded-lg py-1 px-2 border ${
-                isCashier
-                  ? 'bg-slate-100 text-slate-600 cursor-not-allowed border-slate-300 font-mono'
-                  : 'bg-white border-slate-300 focus:ring-1 focus:ring-blue-500'
-              }`}
+              value={paymentMethod}
+              onChange={(e) => {
+                const val = e.target.value;
+                setPaymentMethod(val);
+                if (val === 'BANK' && !selectedBankAccountId && bankAccounts.length > 0) {
+                  setSelectedBankAccountId(bankAccounts[0].id);
+                }
+              }}
+              className="w-full text-xs font-bold rounded-lg py-1.5 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer"
             >
-              <option value="CASH">Cash in Drawer (CASH)</option>
-              <option value="BANK">Bank Transfer</option>
-              <option value="CHEQUE">Cheque</option>
+              <option value="CASH">💵 Cash in Drawer (CASH)</option>
+              <option value="BANK">🏦 Bank Transfer</option>
             </select>
           </div>
 
-          {!isCashier && (paymentMethod === 'BANK' || paymentMethod === 'CHEQUE') && (
+          {paymentMethod === 'BANK' && (
             <div>
               <select
                 value={selectedBankAccountId}
                 onChange={(e) => setSelectedBankAccountId(e.target.value)}
-                className="w-full text-xs font-bold rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500"
+                className="w-full text-xs font-bold rounded-lg py-1.5 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                required
               >
-                <option value="">Select Bank Account...</option>
+                <option value="">-- Select Bank Account --</option>
                 {bankAccounts.map((acc: any) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.bank_name} — {acc.account_title}
+                    {acc.bank_name} — {acc.account_title || acc.name}
                   </option>
                 ))}
               </select>
@@ -723,9 +733,9 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setSlipMode('SINGLE')}
-                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 ${
+                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 cursor-pointer ${
                   slipMode === 'SINGLE'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                    ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold border-amber-500 shadow-sm'
                     : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                 }`}
               >
@@ -735,9 +745,9 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setSlipMode('DUPLICATE')}
-                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 ${
+                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 cursor-pointer ${
                   slipMode === 'DUPLICATE'
-                    ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                    ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold border-amber-500 shadow-sm'
                     : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                 }`}
               >
@@ -748,9 +758,15 @@ export default function POSPage() {
           </div>
 
           <button
-            onClick={() => checkoutMutation.mutate()}
+            onClick={() => {
+              if (paymentMethod === 'BANK' && !selectedBankAccountId) {
+                alert('Please select a Bank Account for Bank Transfer payment');
+                return;
+              }
+              checkoutMutation.mutate();
+            }}
             disabled={!isCartValid || checkoutMutation.isPending}
-            className="w-full mt-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold rounded-lg text-sm transition-all shadow-sm active:scale-[0.98] flex justify-center items-center gap-2"
+            className="w-full mt-1 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold rounded-lg text-sm transition-all shadow-md shadow-amber-500/20 active:scale-[0.98] flex justify-center items-center gap-2 cursor-pointer"
           >
             {checkoutMutation.isPending ? 'Processing POS Sale...' : 'Complete POS Sale'}
           </button>

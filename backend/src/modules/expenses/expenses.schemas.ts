@@ -17,7 +17,7 @@ export const createExpenseSchema = z.object({
   description: z.string().optional().nullable(),
   expense_date: z.string().optional().default(() => new Date().toISOString().split('T')[0]),
   payment_method: z.string().optional().default('BANK'),
-  bank_account_id: z.string().min(1, 'Bank Account ID is required'),
+  bank_account_id: z.string().optional().nullable(),
 });
 
 export const expenseQuerySchema = z.object({

@@ -193,9 +193,9 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
               <button
                 type="submit"
                 disabled={mutation.isPending}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition cursor-pointer"
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 disabled:opacity-60 transition cursor-pointer"
               >
-                {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-slate-950" />}
                 {isEdit ? 'Save Changes' : 'Add Customer'}
               </button>
             </div>

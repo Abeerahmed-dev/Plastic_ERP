@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
@@ -78,6 +79,12 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
   const [printMode, setPrintMode] = useState<'A4' | 'POS' | null>(null);
 
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove('printing-a4', 'printing-pos');
+    };
+  }, []);
+
   const { data: allProducts = [] } = useQuery({
     queryKey: ['products'],
     queryFn: () => productsService.getProducts(),
@@ -115,6 +122,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
   const isDebitNote = invoice.invoice_type === 'DEBIT_NOTE' || invoice.invoice_number?.startsWith('DN-');
   const isCreditNote = invoice.invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || (!isDebitNote && totalAmount < 0);
   const isReturnNote = isDebitNote || isCreditNote;
+  const isPosInvoice = type !== 'purchase' && (String(invoice.invoice_number || '').startsWith('POS-') || Boolean(invoice.notes && invoice.notes.includes('POS')));
   const statusUpper = (invoice.status || 'UNPAID').toUpperCase();
 
   // Child Returns Calculation (Credit Notes for sales, Debit Notes for purchases)
@@ -183,15 +191,24 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
   const triggerPrint = (mode: 'A4' | 'POS') => {
     setPrintMode(mode);
+    if (mode === 'A4') {
+      document.body.classList.add('printing-a4');
+    } else if (mode === 'POS') {
+      document.body.classList.add('printing-pos');
+    }
+
     const handleAfterPrint = () => {
       setPrintMode(null);
+      document.body.classList.remove('printing-a4', 'printing-pos');
       window.removeEventListener('afterprint', handleAfterPrint);
     };
+
     window.addEventListener('afterprint', handleAfterPrint);
     setTimeout(() => {
       window.print();
-    }, 100);
+    }, 150);
   };
+
 
   return (
     <>
@@ -209,24 +226,8 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
             <div className="flex items-center gap-2">
               <button
-                type="button"
-                onClick={() => triggerPrint('POS')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
-                title="Print 80mm Thermal POS Receipt"
-              >
-                🖨️ Print POS Receipt (80mm)
-              </button>
-              <button
-                type="button"
-                onClick={() => triggerPrint('A4')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
-                title="Print Standard A4 Credit/Sales Invoice"
-              >
-                🖨️ Print A4 Invoice
-              </button>
-              <button
                 onClick={onClose}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition ml-1"
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition"
                 title="Close"
               >
                 <X className="w-5 h-5" />
@@ -568,38 +569,60 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => triggerPrint('POS')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold shadow-md transition active:scale-95 cursor-pointer"
-            >
-              🖨️ POS Receipt (80mm)
-            </button>
+            {isPosInvoice && (
+              <button
+                type="button"
+                onClick={() => triggerPrint('POS')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+              >
+                🖨️ POS Receipt (80mm)
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => triggerPrint('A4')}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-md transition active:scale-95 cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              Print A4 Invoice
-            </button>
+            {!isPosInvoice && (
+              <button
+                type="button"
+                onClick={() => triggerPrint('A4')}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-slate-950" />
+                Print A4 Invoice
+              </button>
+            )}
           </div>
         </div>
       </div>
     </div>
 
     {/* Print-Only Targeted Invoice Components */}
-    {printMode === 'POS' && (
-      <div className="hidden print:block absolute top-0 left-0 w-full bg-white z-[9999]">
+    {printMode === 'POS' && createPortal(
+      <div className="pos-print-portal hidden print:block">
+        <style dangerouslySetInnerHTML={{ __html: `
+          @page {
+            size: 80mm auto !important;
+            margin: 0 !important;
+          }
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        ` }} />
         <ThermalReceipt80mm data={invoice} />
-      </div>
+      </div>,
+      document.body
     )}
 
-    {printMode === 'A4' && (
-      <div className="hidden print:block absolute top-0 left-0 w-full bg-white z-[9999]">
+    {printMode === 'A4' && createPortal(
+      <div className="invoice-print-portal hidden print:block">
+        <style dangerouslySetInnerHTML={{ __html: `
+          @page {
+            size: A4 portrait !important;
+            margin: 8mm !important;
+          }
+        ` }} />
         <A4SalesInvoice data={invoice} />
-      </div>
+      </div>,
+      document.body
     )}
   </>
 );

@@ -334,7 +334,7 @@ export const SupplierPaymentFormModal = ({
             form="payment-form"
             disabled={mutation.isPending || Boolean(selectedBill && selectedBillBalance <= 0)}
             title={selectedBill && selectedBillBalance <= 0 ? 'Cannot save payment on a settled or overpaid bill' : undefined}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            className="px-5 py-2.5 text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center cursor-pointer"
           >
             {mutation.isPending ? 'Saving...' : 'Save Payment'}
           </button>

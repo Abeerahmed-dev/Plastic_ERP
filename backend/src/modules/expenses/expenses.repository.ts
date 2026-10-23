@@ -1,11 +1,47 @@
 import db from '../../db/knex';
 import { parseDateFilter } from '../../shared/dateFilter';
 import { CreateExpenseInput, ExpenseQuery } from './expenses.schemas';
+import { getCashDrawerBalance } from '../bank-accounts/bank-accounts.repository';
 
 export async function createExpenseRecord(input: CreateExpenseInput, userId?: string) {
   return await db.transaction(async (trx) => {
     const payload = input;
-    // Liquidity Wall
+    const isCashDrawer = !payload.bank_account_id || payload.bank_account_id === 'CASH_DRAWER' || String(payload.payment_method || '').toUpperCase() === 'CASH';
+
+    if (isCashDrawer) {
+      const cashBalance = await getCashDrawerBalance(trx);
+      if (cashBalance < Number(payload.amount)) {
+        throw new Error(`INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than Cash in Drawer balance (Available: Rs. ${cashBalance.toLocaleString()}).`);
+      }
+
+      const [expense] = await trx('expenses')
+        .insert({
+          amount: payload.amount,
+          category: payload.category || 'Other',
+          description: payload.description || null,
+          expense_date: payload.expense_date || new Date(),
+          payment_method: 'CASH',
+          bank_account_id: null,
+          created_by: userId || null,
+        })
+        .returning('*');
+
+      const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+      if (hasCdl) {
+        await trx('cash_drawer_ledger').insert({
+          type: 'OUTFLOW',
+          amount: payload.amount,
+          source_type: 'OPEX',
+          reference_id: expense.id,
+          description: payload.description || `OPEX Expense: ${payload.category || 'General'}`,
+          created_by: userId || null,
+        });
+      }
+
+      return expense;
+    }
+
+    // Bank Account Liquidity Wall
     const account = await trx('bank_accounts').where('id', payload.bank_account_id).first();
     if (!account || Number(account.current_balance) < Number(payload.amount)) {
       throw new Error('INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.');
@@ -97,6 +133,13 @@ export async function deleteExpenseRecord(id: string) {
         await trx('bank_transactions')
           .where('reference_id', id)
           .del();
+      } else if (exp.amount) {
+        const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+        if (hasCdl) {
+          await trx('cash_drawer_ledger')
+            .where('reference_id', id)
+            .del();
+        }
       }
       return trx('expenses').where('id', id).del();
     }

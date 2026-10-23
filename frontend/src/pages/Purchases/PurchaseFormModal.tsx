@@ -631,7 +631,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
             type="submit"
             form="purchase-form"
             disabled={mutation.isPending || hasAnyEmptySize}
-            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            className="px-5 py-2.5 text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center cursor-pointer"
             title={hasAnyEmptySize ? "All line items must have a size/variant selected" : undefined}
           >
             {mutation.isPending ? 'Saving...' : 'Save Purchase'}

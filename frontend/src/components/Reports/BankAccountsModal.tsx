@@ -284,10 +284,10 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
                   <button
                     type="submit"
                     disabled={createMutation.isPending || updateMutation.isPending}
-                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition flex items-center gap-1.5"
+                    className="px-5 py-2.5 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition flex items-center gap-1.5 cursor-pointer"
                   >
                     {(createMutation.isPending || updateMutation.isPending) && (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
                     )}
                     {editingAccount ? 'Update Account' : 'Save Account'}
                   </button>

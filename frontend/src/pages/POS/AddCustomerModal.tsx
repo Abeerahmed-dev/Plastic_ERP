@@ -208,7 +208,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl shadow-sm transition-all"
+              className="px-5 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
             >
               {isSubmitting ? 'Saving...' : 'Save & Select Customer'}
             </button>

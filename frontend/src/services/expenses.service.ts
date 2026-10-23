@@ -21,7 +21,7 @@ export interface CreateExpenseData {
   description?: string;
   expense_date?: string;
   payment_method?: string;
-  bank_account_id: string;
+  bank_account_id?: string | null;
 }
 
 export interface ExpenseFilters {

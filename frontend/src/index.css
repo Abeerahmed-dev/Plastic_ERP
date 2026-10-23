@@ -101,12 +101,30 @@
 
 /* ─── Global Print Media CSS Architecture ─── */
 @media print {
-  @page {
-    margin: 0;
-  }
   body {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
     background-color: #ffffff !important;
+  }
+
+  /* When printing an ERP A4 Invoice or POS Receipt, completely hide background app (#root) and show only targeted print portal */
+  body.printing-a4 > #root,
+  body.printing-pos > #root {
+    display: none !important;
+  }
+  body.printing-a4 .invoice-print-portal {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing-pos .pos-print-portal {
+    display: block !important;
+    position: static !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
   }
 }

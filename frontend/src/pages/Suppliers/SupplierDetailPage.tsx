@@ -164,10 +164,10 @@ export default function SupplierDetailPage() {
             <button
               type="button"
               onClick={() => setIsPaymentModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 text-xs font-bold transition shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 px-3.5 py-2 text-xs font-bold transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
               title="Record Payment against Purchase Bill"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3.5 h-3.5 text-slate-950" />
               <span>Record Payment</span>
             </button>
 

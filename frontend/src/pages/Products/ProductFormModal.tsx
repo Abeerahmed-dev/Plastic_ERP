@@ -174,24 +174,10 @@ export const ProductFormModal = ({
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Product Name (English) <span className="text-red-500">*</span>
+                  Product Name <span className="text-red-500">*</span>
                 </label>
                 <input {...register('name')} placeholder="e.g. Shopping Bag / 30/s Poly" className={inputCls(!!errors.name)} />
                 {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
-              </div>
-
-              <div>
-                <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-slate-700">
-                  <span>Urdu Name / پروڈکٹ کا نام اردو میں</span>
-                  <span className="text-slate-400 font-normal text-xs">(اختیاری)</span>
-                </label>
-                <input
-                  {...register('name_urdu')}
-                  placeholder="مثال: شاپنگ بیگ یا رول"
-                  dir="rtl"
-                  className={`${inputCls(!!errors.name_urdu)} font-serif`}
-                />
-                {errors.name_urdu && <p className="mt-1 text-xs text-red-600">{errors.name_urdu.message}</p>}
               </div>
 
               <div>
@@ -379,11 +365,11 @@ export const ProductFormModal = ({
             type="submit"
             form="product-form"
             disabled={isSubmitting}
-            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition shadow-sm"
+            className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed transition cursor-pointer"
           >
             {isSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="mr-2 h-4 w-4 animate-spin text-slate-950" />
                 Saving...
               </>
             ) : (

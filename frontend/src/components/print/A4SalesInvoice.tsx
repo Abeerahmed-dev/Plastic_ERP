@@ -144,18 +144,18 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
     : (isCreditNote ? 'OFFICIAL CREDIT NOTE' : 'OFFICIAL SALES INVOICE');
 
   return (
-    <div className="w-[210mm] min-h-[297mm] mx-auto bg-white text-black p-8 font-sans box-border print:w-[210mm] print:p-8">
+    <div className="w-full max-w-[210mm] mx-auto bg-white text-black p-6 font-sans box-border print:w-full print:max-w-none print:p-2 print:m-0 break-inside-avoid page-break-inside-avoid">
       {/* Top Header Banner */}
-      <div className="text-center mb-6">
+      <div className="text-center mb-4 print:mb-3">
         <img
           src={sabirLogo}
           alt="Sabir Plastic"
-          className="h-16 w-auto object-contain mx-auto mb-1.5"
+          className="h-14 w-auto object-contain mx-auto mb-1.5"
         />
         <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight leading-tight">
           SABIR PLASTIC
         </h1>
-        <p className="text-xs font-bold uppercase tracking-widest text-amber-500 mt-0.5 mb-2.5">
+        <p className="text-xs font-bold uppercase tracking-widest text-amber-500 mt-0.5 mb-2">
           {invoiceTitle}
         </p>
 
@@ -169,7 +169,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
       </div>
 
       {/* Customer & Invoice Details Card */}
-      <div className="rounded-2xl border border-slate-200 p-5 mb-6 bg-white space-y-3.5">
+      <div className="rounded-2xl border border-slate-200 p-4 print:p-3 mb-4 print:mb-3 bg-white space-y-3">
         <div>
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
             {isPurchase ? 'SUPPLIER DETAILS' : 'BILLED TO'}
@@ -311,7 +311,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
       </div>
 
       {/* Signatures */}
-      <div className="pt-20 pb-4 flex justify-between items-end px-4">
+      <div className="pt-8 print:pt-6 pb-2 flex justify-between items-end px-4">
         <div className="text-center">
           <div className="w-52 border-b border-dashed border-slate-400 mb-1.5"></div>
           <p className="text-xs text-slate-600">Receiver's Signature</p>

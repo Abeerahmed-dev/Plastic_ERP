@@ -185,9 +185,9 @@ export default function PaymentsListPage() {
           {canWrite && (
             <button
               onClick={() => setIsModalOpen(true)}
-              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all cursor-pointer"
+              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
             >
-              <Plus className="-ml-1 mr-2 h-5 w-5" />
+              <Plus className="-ml-1 mr-2 h-5 w-5 text-slate-950" />
               Record Payment
             </button>
           )}

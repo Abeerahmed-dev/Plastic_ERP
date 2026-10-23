@@ -143,10 +143,10 @@ export default function ExpensesListPage() {
 
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-red-700 active:bg-red-800 transition"
+            className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 transition cursor-pointer"
           >
-            <Plus className="h-4 w-4" />
-             Expense
+            <Plus className="h-4 w-4 text-slate-950" />
+            + Add Expense
           </button>
         </div>
 

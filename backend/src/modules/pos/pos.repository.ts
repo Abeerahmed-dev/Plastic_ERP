@@ -277,13 +277,24 @@ export async function processPOSCheckout(
       changeReturned = 0;
       balanceDue = 0;
     } else {
-      cashTendered = amountPaidInput !== undefined ? Number(amountPaidInput) : totalAmount;
+      cashTendered = (amountPaidInput !== undefined && amountPaidInput !== null) ? Number(amountPaidInput) : totalAmount;
       changeReturned = Math.max(0, Math.round((cashTendered - totalAmount) * 100) / 100);
       effectiveAmountPaid = Math.min(cashTendered, totalAmount);
       balanceDue = Math.max(0, Math.round((totalAmount - effectiveAmountPaid) * 100) / 100);
     }
 
-    const effectivePaymentMethod = isCashier ? 'CASH' : (paymentMethodInput || 'CASH');
+    const isBank = String(paymentMethodInput || '').toUpperCase() === 'BANK';
+    const effectivePaymentMethod = isBank ? 'BANK' : 'CASH';
+
+    let targetBankId: string | null = null;
+    if (isBank) {
+      if (bankAccountId) {
+        targetBankId = bankAccountId;
+      } else {
+        const primaryBank = await trx('bank_accounts').where('is_active', true).orderBy('created_at', 'asc').first();
+        targetBankId = primaryBank?.id || null;
+      }
+    }
 
     // 2. Determine Next Sequential POS Bill Number
     const posRows = await trx('sales_invoices')
@@ -324,7 +335,7 @@ export async function processPOSCheckout(
 
     (invoice as any).bill_number = nextBillNo;
     (invoice as any).payment_method = effectivePaymentMethod;
-    (invoice as any).bank_account_id = bankAccountId || null;
+    (invoice as any).bank_account_id = targetBankId;
     (invoice as any).balance_due = balanceDue;
 
     // 3. Insert Sales Invoice Items
@@ -334,19 +345,110 @@ export async function processPOSCheckout(
     }));
     await trx('sales_invoice_items').insert(finalItems);
 
-    // 4. Create Customer Payment (Direct Inflow to Cash Drawer)
-    if (effectiveAmountPaid !== 0) {
+    // 4. Create Customer Payment & Liquidity Inflow (Cash in Drawer OR Bank Balance)
+    if (effectiveAmountPaid > 0) {
       await trx('customer_payments').insert({
         customer_id: targetCustomer.id,
         invoice_id: invoice.id,
         payment_number: `RCV-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         payment_date: new Date(),
         amount: effectiveAmountPaid,
-        payment_method: 'CASH',
-        bank_account_id: null,
-        notes: effectiveAmountPaid < 0 ? 'POS Refund (Cash Drawer)' : 'POS Retail Cash Sale (Cash Drawer)',
+        payment_method: isBank ? 'BANK_TRANSFER' : 'CASH',
+        bank_account_id: isBank ? targetBankId : null,
+        notes: isBank
+          ? `POS Retail Bank Sale (Invoice #${invoice.invoice_number})`
+          : `POS Retail Cash Sale (Invoice #${invoice.invoice_number})`,
+        cheque_status: 'CLEARED',
         created_by: userId,
       });
+
+      if (isBank && targetBankId) {
+        // Increment bank account balance
+        await trx('bank_accounts')
+          .where('id', targetBankId)
+          .increment('current_balance', effectiveAmountPaid);
+
+        // Record Bank Transaction inflow
+        const hasBankTx = await trx.schema.hasTable('bank_transactions');
+        if (hasBankTx) {
+          await trx('bank_transactions').insert({
+            bank_account_id: targetBankId,
+            transaction_type: 'DEPOSIT',
+            type: 'INFLOW',
+            amount: effectiveAmountPaid,
+            source_type: 'POS',
+            source: 'POS',
+            reference_id: invoice.id,
+            description: `POS Retail Sale: Invoice #${invoice.invoice_number}`,
+            transaction_date: new Date(),
+            category: 'SALES',
+            created_by: userId,
+          });
+        }
+      } else {
+        // Inflow to Cash Drawer ledger
+        const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+        if (hasCdl) {
+          await trx('cash_drawer_ledger').insert({
+            type: 'INFLOW',
+            amount: effectiveAmountPaid,
+            reference_id: invoice.id,
+            description: `POS Retail Cash Sale: Invoice #${invoice.invoice_number}`,
+            created_by: userId,
+          });
+        }
+      }
+    } else if (effectiveAmountPaid < 0) {
+      // Refund Handling
+      const refundAmt = Math.abs(effectiveAmountPaid);
+      await trx('customer_payments').insert({
+        customer_id: targetCustomer.id,
+        invoice_id: invoice.id,
+        payment_number: `REF-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        payment_date: new Date(),
+        amount: -refundAmt,
+        payment_method: isBank ? 'BANK_TRANSFER' : 'CASH_REFUND',
+        bank_account_id: isBank ? targetBankId : null,
+        notes: isBank
+          ? `POS Refund via Bank (Invoice #${invoice.invoice_number})`
+          : `POS Cash Refund (Invoice #${invoice.invoice_number})`,
+        cheque_status: 'CLEARED',
+        created_by: userId,
+      });
+
+      if (isBank && targetBankId) {
+        await trx('bank_accounts')
+          .where('id', targetBankId)
+          .decrement('current_balance', refundAmt);
+
+        const hasBankTx = await trx.schema.hasTable('bank_transactions');
+        if (hasBankTx) {
+          await trx('bank_transactions').insert({
+            bank_account_id: targetBankId,
+            transaction_type: 'WITHDRAWAL',
+            type: 'OUTFLOW',
+            amount: refundAmt,
+            source_type: 'POS',
+            source: 'POS',
+            reference_id: invoice.id,
+            description: `POS Refund: Invoice #${invoice.invoice_number}`,
+            transaction_date: new Date(),
+            category: 'REFUND',
+            created_by: userId,
+          });
+        }
+      } else {
+        const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+        if (hasCdl) {
+          await trx('cash_drawer_ledger').insert({
+            type: 'OUTFLOW',
+            amount: refundAmt,
+            reference_id: invoice.id,
+            description: `POS Cash Refund: Invoice #${invoice.invoice_number}`,
+            created_by: userId,
+          });
+        }
+      }
     }
 
     return invoice;

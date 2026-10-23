@@ -229,10 +229,10 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
               <button
                 type="button"
                 onClick={onRecordPayment}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 px-3.5 py-2 text-xs font-bold text-white transition shadow-2xs cursor-pointer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-3.5 py-2 text-xs font-bold text-slate-950 transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
                 title="Record Payment against Invoice"
               >
-                <Plus className="w-4 h-4 text-white" />
+                <Plus className="w-4 h-4 text-slate-950" />
                 + Record Payment
               </button>
             )}

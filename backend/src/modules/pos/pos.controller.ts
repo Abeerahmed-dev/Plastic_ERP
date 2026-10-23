@@ -10,9 +10,6 @@ export async function checkoutController(
 ): Promise<void> {
   try {
     const parsed = checkoutSchema.parse(req.body);
-    // Strict Retail Cash-and-Carry: Ignore any client overrides for payment_method and bank_account_id
-    parsed.payment_method = 'CASH';
-    parsed.bank_account_id = null;
     const invoice = await posService.checkout(req.user!.id, parsed, req.user?.roleName);
     res.status(201).json(ok(invoice));
   } catch (err: any) {

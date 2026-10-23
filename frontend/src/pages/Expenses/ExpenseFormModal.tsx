@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, Loader2, AlertCircle, AlertTriangle, Receipt } from 'lucide-react';
+import { X, Loader2, AlertCircle, AlertTriangle, Receipt, ChevronDown } from 'lucide-react';
 import { expensesService, CreateExpenseData } from '../../services/expenses.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { toast, handleApiError } from '../../utils/toast';
@@ -23,11 +23,6 @@ const CATEGORIES = [
   'Maintenance',
 ];
 
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash in Drawer (Shift Cash)' },
-  { value: 'BANK', label: 'Bank Account' },
-];
-
 export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onClose }) => {
   const queryClient = useQueryClient();
 
@@ -47,6 +42,15 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
     enabled: isOpen,
   });
 
+  // Fetch cash drawer balance
+  const { data: cashDrawerData } = useQuery({
+    queryKey: ['cash-drawer-balance'],
+    queryFn: bankAccountsService.getCashDrawerBalance,
+    enabled: isOpen,
+  });
+
+  const cashDrawerBalance = Number(cashDrawerData?.balance ?? 0);
+
   useEffect(() => {
     if (isOpen) {
       setAmount('');
@@ -63,6 +67,7 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
+      queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
       toast.success('Operating expense logged successfully');
       onClose();
@@ -94,9 +99,23 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
       return;
     }
 
-    const selectedAcc = bankAccounts.find((a: any) => a.id === selectedBankId);
-    if (selectedAcc && Number(selectedAcc.current_balance) < numAmount) {
-      const err = 'INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.';
+    const isCash = selectedBankId === 'CASH_DRAWER';
+    const selectedAcc = isCash
+      ? { name: 'Cash in Drawer (Galla)', balance: cashDrawerBalance }
+      : (() => {
+          const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
+          return acc ? { name: acc.account_title || acc.bank_name || 'Bank Account', balance: Number(acc.current_balance || 0) } : null;
+        })();
+
+    if (!selectedAcc) {
+      const err = 'Selected Outflow Account was not found.';
+      setErrorMsg(err);
+      toast.error(err);
+      return;
+    }
+
+    if (selectedAcc.balance < numAmount) {
+      const err = `INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than ${selectedAcc.name} balance (Rs. ${selectedAcc.balance.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}).`;
       setErrorMsg(err);
       toast.error(err);
       return;
@@ -112,8 +131,8 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
     createMutation.mutate({
       amount: numAmount,
       category,
-      payment_method: selectedAcc?.account_title || selectedAcc?.bank_name || 'BANK',
-      bank_account_id: selectedBankId,
+      payment_method: isCash ? 'CASH' : (selectedAcc.name || 'BANK'),
+      bank_account_id: isCash ? null : selectedBankId,
       description: description.trim(),
       expense_date: expenseDate || today,
     });
@@ -121,7 +140,7 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden">
+      <div className="relative w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-100 overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50/50">
           <div className="flex items-center gap-3">
@@ -188,36 +207,52 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Category <span className="text-red-500">*</span>
               </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
-              >
-                {CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full appearance-none rounded-xl border border-slate-200 pl-3.5 pr-10 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer"
+                >
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400">
+                  <ChevronDown className="h-4 w-4" />
+                </div>
+              </div>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
                 Outflow Account <span className="text-red-500">*</span>
               </label>
-              <select
-                value={selectedBankId}
-                onChange={(e) => setSelectedBankId(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
-                required
-              >
-                <option value="">-- Choose an Outflow Account --</option>
-                {bankAccounts.map((acc: any) => (
-                  <option key={acc.id} value={acc.id} disabled={acc.current_balance <= 0}>
-                    {acc.name || acc.account_title || acc.bank_name} (Balance: Rs. {acc.current_balance})
+              <div className="relative">
+                <select
+                  value={selectedBankId}
+                  onChange={(e) => setSelectedBankId(e.target.value)}
+                  className="w-full appearance-none rounded-xl border border-slate-200 pl-3.5 pr-10 py-2.5 text-sm text-slate-900 bg-white focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer truncate"
+                  required
+                >
+                  <option value="">-- Select Outflow Account --</option>
+                  <option value="CASH_DRAWER" disabled={cashDrawerBalance <= 0}>
+                    💵 Cash in Drawer (Balance: Rs. {cashDrawerBalance.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
                   </option>
-                ))}
-              </select>
+                  {bankAccounts.map((acc: any) => {
+                    const bal = Number(acc.current_balance || 0);
+                    return (
+                      <option key={acc.id} value={acc.id} disabled={bal <= 0}>
+                        🏦 {acc.account_title || acc.bank_name} (Balance: Rs. {bal.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                      </option>
+                    );
+                  })}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400">
+                  <ChevronDown className="h-4 w-4" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -239,10 +274,18 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
           {/* Liquidity Wall Status Banner */}
           {selectedBankId && (
             (() => {
-              const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
-              if (!acc) return null;
-              const bal = Number(acc.current_balance || 0);
-              const isInsufficient = parseFloat(amount) > bal;
+              const selectedAcc = selectedBankId === 'CASH_DRAWER'
+                ? { name: 'Cash in Drawer (Galla)', balance: cashDrawerBalance, isCash: true }
+                : (() => {
+                    const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
+                    return acc ? { name: acc.account_title || acc.bank_name, balance: Number(acc.current_balance || 0), isCash: false } : null;
+                  })();
+
+              if (!selectedAcc) return null;
+              const bal = selectedAcc.balance;
+              const numAmt = parseFloat(amount) || 0;
+              const isInsufficient = numAmt > bal;
+
               return (
                 <div className={`rounded-xl border p-3.5 flex items-start gap-3 text-xs ${
                   isInsufficient 
@@ -254,14 +297,14 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
                     <span className={`font-bold block mb-0.5 ${isInsufficient ? 'text-red-900' : 'text-emerald-900'}`}>
                       {isInsufficient ? 'Insufficient Liquidity Warning' : 'Account Balance Available'}
                     </span>
-                    Available balance in <span className="font-semibold">{acc.account_title || acc.bank_name}</span> is{' '}
-                    <span className="font-bold">Rs. {bal.toLocaleString()}</span>.
-                    {parseFloat(amount) > 0 && !isInsufficient && (
-                      <span> Balance after expense: <span className="font-bold">Rs. {(bal - parseFloat(amount)).toLocaleString()}</span>.</span>
+                    Available balance in <span className="font-semibold">{selectedAcc.name}</span> is{' '}
+                    <span className="font-bold">Rs. {bal.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>.
+                    {numAmt > 0 && !isInsufficient && (
+                      <span> Balance after expense: <span className="font-bold">Rs. {(bal - numAmt).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>.</span>
                     )}
                     {isInsufficient && (
                       <span className="block mt-1 font-semibold text-red-700">
-                        INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.
+                        INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than {selectedAcc.name} balance.
                       </span>
                     )}
                   </div>
@@ -282,9 +325,9 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({ isOpen, onCl
             <button
               type="submit"
               disabled={createMutation.isPending}
-              className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-red-700 active:bg-red-800 disabled:opacity-50 transition"
+              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 disabled:opacity-50 transition cursor-pointer"
             >
-              {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-slate-950" />}
               Save Expense
             </button>
           </div>
