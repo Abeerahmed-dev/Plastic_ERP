@@ -59,4 +59,46 @@ export async function getPosInvoicesController(
   }
 }
 
+export async function getHeldOrdersController(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const orders = await posService.getHeldOrders();
+    res.json(ok(orders));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createHeldOrderController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { createHeldOrderSchema } = await import('./pos.schemas');
+    const parsed = createHeldOrderSchema.parse(req.body);
+    const order = await posService.saveHeldOrder(req.user!.id, parsed);
+    res.status(201).json(ok(order));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteHeldOrderController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    await posService.removeHeldOrder(id);
+    res.json(ok({ deleted: true }));
+  } catch (err) {
+    next(err);
+  }
+}
+
 

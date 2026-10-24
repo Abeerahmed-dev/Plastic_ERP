@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { X, Loader2, CreditCard, Building2, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Loader2, CreditCard, Building2, User, CheckCircle2, AlertCircle, Split, Wallet } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../../services/payments.service';
 import { supplierPaymentsService } from '../../services/supplier-payments.service';
@@ -15,7 +15,7 @@ import { useAuthStore } from '../../store/auth.store';
 
 const paymentFormSchema = z.object({
   entity_id: z.string().min(1, 'Entity is required'),
-  invoice_id: z.string().min(1, 'Please select an invoice to settle'),
+  invoice_id: z.string().optional().or(z.literal('')),
   payment_date: z.string().min(1, 'Payment date is required'),
   amount: z.preprocess((val) => {
     if (typeof val === 'string') {
@@ -68,6 +68,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   const { user } = useAuthStore();
   const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
   const [serverError, setServerError] = useState<string | null>(null);
+  const [splitCashAmount, setSplitCashAmount] = useState<number | ''>('');
+  const [splitBankAmount, setSplitBankAmount] = useState<number | ''>('');
 
   // Determine effective entity type (handles type="SUPPLIER", entityType="supplier", or id props)
   const resolvedType = (type || initialEntityType || (supplierId ? 'SUPPLIER' : 'CUSTOMER')).toString().toUpperCase();
@@ -175,12 +177,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   // Liquidity Wall: Calculate maximum available balance for selected source account/drawer
   const availableOutflowBalance = useMemo(() => {
     if (!isSupplier) return Infinity;
+    // PDC / Cheques are post-dated liabilities with upcoming due dates; they do not withdraw money immediately
+    if (selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') {
+      return Infinity;
+    }
     if (selectedPaymentMethod === 'CASH') return cashDrawerBalance;
     if (
       selectedPaymentMethod === 'BANK' ||
-      selectedPaymentMethod === 'BANK_TRANSFER' ||
-      selectedPaymentMethod === 'CHEQUE' ||
-      selectedPaymentMethod === 'PDC'
+      selectedPaymentMethod === 'BANK_TRANSFER'
     ) {
       return selectedBankAccount ? Number(selectedBankAccount.current_balance || 0) : 0;
     }
@@ -203,7 +207,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       // Customer sales invoices
       const list = Array.isArray(salesInvoices) ? salesInvoices : [];
       return list
-        .filter((inv) => inv && inv.customer_id === selectedEntityId && ['UNPAID', 'PARTIAL'].includes(inv.status))
+        .filter((inv) => inv && inv.customer_id === selectedEntityId)
         .map((inv) => {
           const original_total = Number(inv.total_amount || 0);
           const returned_total = Number((inv as any).linked_returns_total || 0);
@@ -227,12 +231,12 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
             balance_due,
             payments: (inv as any).payments || (inv as any).customer_payments || [],
           };
-        });
+        })
+        .filter((inv) => inv.status !== 'PAID' && inv.balance_due > 0);
     } else {
       // Supplier purchase bills
       const list = purchasesResponse?.data || [];
       return list
-        .filter((inv) => inv && inv.status !== 'PAID')
         .map((inv) => {
           const original_total = Number(inv.total_amount || 0);
           const returned_total = Number((inv as any).linked_returns_total || 0);
@@ -256,7 +260,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
             balance_due,
             payments: (inv as any).payments || (inv as any).supplier_payments || [],
           };
-        });
+        })
+        .filter((inv) => inv.status !== 'PAID' && inv.balance_due > 0);
     }
   }, [isSupplier, selectedEntityId, salesInvoices, purchasesResponse]);
 
@@ -265,6 +270,22 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   const activeInvoice = availableInvoices.find((inv) => String(inv.id) === String(currentInvoiceId));
   const selectedInvoice = activeInvoice;
   const selectedInvoiceBalance = activeInvoice ? activeInvoice.balance_due : 0;
+
+  const selectedEntity = useMemo(() => {
+    if (!selectedEntityId) return null;
+    if (isSupplier) {
+      return suppliers.find((s) => String(s.id) === String(selectedEntityId));
+    }
+    return customers.find((c) => String(c.id) === String(selectedEntityId));
+  }, [selectedEntityId, isSupplier, suppliers, customers]);
+
+  const selectedEntityClosingBalance = useMemo(() => {
+    if (!selectedEntity) return 0;
+    if (isSupplier) {
+      return Number(selectedEntity.outstanding_payable ?? selectedEntity.outstanding_balance ?? 0);
+    }
+    return Number(selectedEntity.outstanding_receivable ?? selectedEntity.outstanding_balance ?? 0);
+  }, [selectedEntity, isSupplier]);
 
   const formatDate = (dateStr?: string | Date) => {
     if (!dateStr) return '';
@@ -290,10 +311,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
   // Clear Full Balance button handler
   const handleClearFullBalance = () => {
-    if (selectedInvoice && selectedInvoice.balance_due > 0) {
+    const targetBalance = selectedInvoice && selectedInvoice.balance_due > 0
+      ? selectedInvoice.balance_due
+      : (selectedEntityClosingBalance > 0 ? selectedEntityClosingBalance : 0);
+
+    if (targetBalance > 0) {
       const targetAmount = calculatedMaxAmount !== undefined
-        ? Math.min(selectedInvoice.balance_due, calculatedMaxAmount)
-        : selectedInvoice.balance_due;
+        ? Math.min(targetBalance, calculatedMaxAmount)
+        : targetBalance;
       setValue('amount', Math.round(targetAmount * 100) / 100, {
         shouldValidate: true,
         shouldDirty: true,
@@ -302,11 +327,51 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     }
   };
 
+  const handleSplitChange = (type: 'cash' | 'bank', val: string) => {
+    const num = val === '' ? '' : Math.max(0, Number(val));
+    if (type === 'cash') {
+      setSplitCashAmount(num);
+      const b = Number(splitBankAmount || 0);
+      const total = (num === '' ? 0 : num) + b;
+      setValue('amount', Math.round(total * 100) / 100, { shouldValidate: true, shouldDirty: true });
+    } else {
+      setSplitBankAmount(num);
+      const c = Number(splitCashAmount || 0);
+      const total = c + (num === '' ? 0 : num);
+      setValue('amount', Math.round(total * 100) / 100, { shouldValidate: true, shouldDirty: true });
+    }
+  };
 
-  // Reset or initialize values when modal opens or entity changes
+  const handleQuickSplit = (ratio: '50-50' | 'all-cash' | 'all-bank') => {
+    const target = (selectedInvoice && selectedInvoice.balance_due > 0)
+      ? selectedInvoice.balance_due
+      : (selectedEntityClosingBalance > 0 ? selectedEntityClosingBalance : 0);
+
+    if (target <= 0) return;
+
+    if (ratio === '50-50') {
+      const half = Math.round((target / 2) * 100) / 100;
+      const otherHalf = Math.round((target - half) * 100) / 100;
+      setSplitCashAmount(half);
+      setSplitBankAmount(otherHalf);
+      setValue('amount', target, { shouldValidate: true, shouldDirty: true });
+    } else if (ratio === 'all-cash') {
+      setSplitCashAmount(target);
+      setSplitBankAmount(0);
+      setValue('amount', target, { shouldValidate: true, shouldDirty: true });
+    } else if (ratio === 'all-bank') {
+      setSplitCashAmount(0);
+      setSplitBankAmount(target);
+      setValue('amount', target, { shouldValidate: true, shouldDirty: true });
+    }
+  };
+
+
   useEffect(() => {
     if (isOpen) {
       setServerError(null);
+      setSplitCashAmount('');
+      setSplitBankAmount('');
       reset({
         entity_id: preselectedEntityId,
         invoice_id: preselectedInvoiceId,
@@ -323,15 +388,42 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     }
   }, [isOpen, preselectedEntityId, preselectedInvoiceId, isSupplier, reset]);
 
-  // Auto-select first bank account with balance if supplier payment
+  // Auto-initialize split amounts when switching to SPLIT
   useEffect(() => {
-    if (isOpen && isSupplier && bankAccounts && bankAccounts.length > 0 && !watch('bank_account_id')) {
+    if (isOpen && selectedPaymentMethod === 'SPLIT' && !isSupplier) {
+      const currentAmt = Number(watch('amount') || 0);
+      const target = currentAmt > 0
+        ? currentAmt
+        : (selectedInvoice && selectedInvoice.balance_due > 0
+            ? selectedInvoice.balance_due
+            : (selectedEntityClosingBalance > 0 ? selectedEntityClosingBalance : 0));
+
+      if (target > 0 && splitCashAmount === '' && splitBankAmount === '') {
+        const half = Math.round((target / 2) * 100) / 100;
+        const otherHalf = Math.round((target - half) * 100) / 100;
+        setSplitCashAmount(half);
+        setSplitBankAmount(otherHalf);
+        setValue('amount', target, { shouldValidate: true, shouldDirty: true });
+      }
+    }
+  }, [isOpen, selectedPaymentMethod, selectedInvoice, selectedEntityClosingBalance]);
+
+  // Auto-select first bank account with balance if supplier payment and payment method requires a bank
+  useEffect(() => {
+    if (
+      isOpen &&
+      isSupplier &&
+      selectedPaymentMethod !== 'CASH' &&
+      bankAccounts &&
+      bankAccounts.length > 0 &&
+      !watch('bank_account_id')
+    ) {
       const activeAccount = bankAccounts.find((acc) => Number(acc.current_balance) > 0) || bankAccounts[0];
       if (activeAccount) {
         setValue('bank_account_id', activeAccount.id, { shouldValidate: true, shouldDirty: true });
       }
     }
-  }, [isOpen, isSupplier, bankAccounts, setValue, watch]);
+  }, [isOpen, isSupplier, selectedPaymentMethod, bankAccounts, setValue, watch]);
 
   // If preselected invoice is provided and found in available invoices, set it
   useEffect(() => {
@@ -345,7 +437,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     mutationFn: (data: any) => {
       const rawAmount = String(data.amount ?? '0').replace(/,/g, '').trim();
       const cleanAmount = parseFloat(rawAmount) || 0;
-      const targetBankAccountId = data.bank_account_id || selectedBankAccountId || null;
+      const isCash = (data.payment_method as string) === 'CASH' || (data.payment_method as string) === 'Cash';
+      const targetBankAccountId = isCash ? null : (data.bank_account_id || selectedBankAccountId || null);
 
       return paymentsService.createPayment({
         customer_id: data.entity_id,
@@ -354,6 +447,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
         amount: cleanAmount,
         payment_method: data.payment_method,
         bank_account_id: targetBankAccountId,
+        split_cash_amount: data.payment_method === 'SPLIT' ? Number(splitCashAmount || 0) : undefined,
+        split_bank_amount: data.payment_method === 'SPLIT' ? Number(splitBankAmount || 0) : undefined,
         supplier_id: data.supplier_id || null,
         notes: data.notes || null,
         cheque_number: data.cheque_number || null,
@@ -391,7 +486,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       // Clean number coercion: strip out any commas
       const rawAmount = String(data.amount ?? '0').replace(/,/g, '').trim();
       const cleanAmount = parseFloat(rawAmount) || 0;
-      const targetBankAccountId = data.bank_account_id || selectedBankAccountId || null;
+      const isCash = (data.payment_method as string) === 'CASH' || (data.payment_method as string) === 'Cash';
+      const targetBankAccountId = isCash ? null : (data.bank_account_id || selectedBankAccountId || null);
 
       const payload = {
         supplier_id: data.entity_id,
@@ -447,11 +543,29 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       data.payment_method === 'CHEQUE' ||
       data.payment_method === 'PDC';
 
-    const effectiveBankAccountId = data.bank_account_id || selectedBankAccountId;
+    const isSplit = data.payment_method === 'SPLIT';
+
+    const isCash = (data.payment_method as string) === 'CASH' || (data.payment_method as string) === 'Cash';
+    const effectiveBankAccountId = isCash
+      ? ''
+      : (data.bank_account_id || selectedBankAccountId || '');
 
     if (isBankOrCheque && !effectiveBankAccountId) {
       setServerError(`Please select a ${isSupplier ? 'source' : 'target'} bank account.`);
       return;
+    }
+
+    if (isSplit) {
+      const c = Number(splitCashAmount || 0);
+      const b = Number(splitBankAmount || 0);
+      if (c <= 0 && b <= 0) {
+        setServerError('Please enter a valid Cash or Bank amount for Split Payment.');
+        return;
+      }
+      if (b > 0 && !effectiveBankAccountId) {
+        setServerError('Please select a target Bank Account for the bank transfer portion.');
+        return;
+      }
     }
 
     // Safeguard: Prevent payment entries on settled or overpaid invoices
@@ -483,7 +597,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     const payloadData = {
       ...data,
       amount: cleanAmount,
-      bank_account_id: effectiveBankAccountId || '',
+      bank_account_id: effectiveBankAccountId,
     };
 
     if (isSupplier) {
@@ -592,7 +706,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
               {/* Link to Invoice Dropdown */}
               <div>
                 <label htmlFor="invoice_id" className="mb-1.5 block text-sm font-medium text-slate-700">
-                  {isSupplier ? 'Link to Purchase Bill' : 'Link to Invoice'} <span className="text-red-500">*</span>
+                  {isSupplier ? 'Link to Purchase Bill (Optional)' : 'Link to Invoice (Optional)'}
                 </label>
                 <select
                   id="invoice_id"
@@ -611,7 +725,9 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                   className={inputCls(!!errors.invoice_id)}
                 >
                   <option value="">
-                    {isSupplier ? '-- Choose a Purchase Bill to Settle --' : '-- Choose an Invoice to Settle --'}
+                    {isSupplier
+                      ? '-- No Specific Bill (On-Account / Closing Balance) --'
+                      : '-- No Specific Invoice (On-Account / Closing Balance) --'}
                   </option>
                   {availableInvoices.map((invoice) => (
                     <option key={invoice.id} value={invoice.id}>
@@ -639,8 +755,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                   </p>
                 )}
                 {selectedEntityId && !(isSupplier && isLoadingPurchases) && availableInvoices.length === 0 && (
-                  <p className="mt-1 text-xs text-amber-600 font-medium">
-                    No unpaid {isSupplier ? 'bills' : 'invoices'} found for this {isSupplier ? 'supplier' : 'customer'}. For advance payments, use "Log Advance Deposit".
+                  <p className="mt-1 text-xs text-slate-500 font-medium">
+                    No unpaid {isSupplier ? 'bills' : 'invoices'} found for this {isSupplier ? 'supplier' : 'customer'}. Payment will be logged directly on-account towards closing balance.
                   </p>
                 )}
                 {errors.invoice_id && <p className="mt-1 text-xs text-red-600">{errors.invoice_id.message}</p>}
@@ -668,11 +784,13 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 <select
                   id="payment_method"
                   {...register('payment_method')}
-                  disabled={!isSupplier && isCashier}
-                  className={
-                    inputCls(!!errors.payment_method) +
-                    (!isSupplier && isCashier ? ' bg-slate-100 font-semibold text-slate-700 cursor-not-allowed' : '')
-                  }
+                  onChange={(e) => {
+                    register('payment_method').onChange(e);
+                    if (e.target.value === 'CASH') {
+                      setValue('bank_account_id', '');
+                    }
+                  }}
+                  className={inputCls(!!errors.payment_method)}
                 >
                   <option value="CASH" disabled={isSupplier && cashDrawerBalance <= 0}>
                     {isSupplier ? `Cash in Drawer (Balance: Rs. ${cashDrawerBalance.toLocaleString()})` : 'Cash in Drawer (Galla)'}
@@ -684,6 +802,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                     </>
                   ) : (
                     <>
+                      <option value="SPLIT">🔀 Split Payment (Cash + Bank)</option>
                       {!isCashier && <option value="BANK">Bank Account</option>}
                       {!isCashier && <option value="CHEQUE">Post-Dated Cheque (PDC)</option>}
                       {!isCashier && <option value="DIRECT_TO_SUPPLIER">Direct to Supplier (Tripartite)</option>}
@@ -692,7 +811,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 </select>
                 {!isSupplier && isCashier && (
                   <p className="mt-1 text-[11px] text-slate-500 font-medium">
-                    Cashier payments are automatically routed to Cash in Drawer (Galla).
+                    Cashier can accept Cash in Drawer or Split Payment (Cash + Bank).
                   </p>
                 )}
                 {errors.payment_method && <p className="mt-1 text-xs text-red-600">{errors.payment_method.message}</p>}
@@ -716,7 +835,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 </div>
               )}
 
-              {/* Bank Account Selection (for Bank or Cheque) */}
+              {/* Bank Account Selection (for Bank or Cheque when NOT split) */}
               {(selectedPaymentMethod === 'BANK' ||
                 selectedPaymentMethod === 'BANK_TRANSFER' ||
                 selectedPaymentMethod === 'CHEQUE' ||
@@ -743,7 +862,12 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                       <option
                         key={acc.id}
                         value={acc.id}
-                        disabled={isSupplier && Number(acc.current_balance) <= 0}
+                        disabled={
+                          isSupplier &&
+                          selectedPaymentMethod !== 'CHEQUE' &&
+                          selectedPaymentMethod !== 'PDC' &&
+                          Number(acc.current_balance) <= 0
+                        }
                       >
                         {acc.bank_name} — {acc.account_title} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
                       </option>
@@ -796,8 +920,147 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 </div>
               )}
 
-              {/* Amount Received / Paid with strict ceiling cap & settlement safeguard */}
-              {selectedInvoice && selectedInvoice.balance_due <= 0 ? (
+              {/* Split Payment UI (Cash + Bank) */}
+              {selectedPaymentMethod === 'SPLIT' && !isSupplier ? (
+                <div className="md:col-span-2 p-5 bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/70 rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-indigo-100">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
+                        <Split className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-800">Split Payment Breakdown</h4>
+                        <p className="text-xs text-slate-500">Divide payment between Cash in Drawer and Bank Transfer</p>
+                      </div>
+                    </div>
+                    {((selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0)) && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-500 font-medium mr-1">Quick Split:</span>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickSplit('50-50')}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition cursor-pointer"
+                        >
+                          50 / 50
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickSplit('all-cash')}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition cursor-pointer"
+                        >
+                          All Cash
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickSplit('all-bank')}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition cursor-pointer"
+                        >
+                          All Bank
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Target Bank Account selection inside split */}
+                  <div>
+                    <label htmlFor="split_bank_account_id" className="mb-1 block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Select Target Bank Account (For Bank Transfer Portion) <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      id="split_bank_account_id"
+                      {...register('bank_account_id')}
+                      value={selectedBankAccountId || ''}
+                      onChange={(e) => {
+                        setValue('bank_account_id', e.target.value, {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                          shouldTouch: true,
+                        });
+                      }}
+                      className={inputCls(!!errors.bank_account_id)}
+                    >
+                      <option value="">Select Bank Account...</option>
+                      {(bankAccounts || []).map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.bank_name} — {acc.account_title} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Split amounts inputs */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-3.5 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="split_cash_input" className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                          Cash Portion (Rs.)
+                        </label>
+                        <span className="text-[11px] text-emerald-600 font-semibold">Cash Drawer</span>
+                      </div>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 text-sm">Rs.</span>
+                        <input
+                          id="split_cash_input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={splitCashAmount}
+                          onChange={(e) => handleSplitChange('cash', e.target.value)}
+                          placeholder="0.00"
+                          className="block w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 bg-blue-50/60 rounded-xl border border-blue-200 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="split_bank_input" className="text-xs font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                          Bank Transfer Portion (Rs.)
+                        </label>
+                        <span className="text-[11px] text-blue-600 font-semibold">Direct Deposit</span>
+                      </div>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 text-sm">Rs.</span>
+                        <input
+                          id="split_bank_input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={splitBankAmount}
+                          onChange={(e) => handleSplitChange('bank', e.target.value)}
+                          placeholder="0.00"
+                          className="block w-full rounded-lg border border-blue-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Bar */}
+                  <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-indigo-100 flex-wrap gap-2 text-xs">
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-500">
+                        Cash: <strong className="text-emerald-700 font-mono">Rs. {Number(splitCashAmount || 0).toLocaleString()}</strong>
+                      </span>
+                      <span className="text-slate-300">|</span>
+                      <span className="text-slate-500">
+                        Bank: <strong className="text-blue-700 font-mono">Rs. {Number(splitBankAmount || 0).toLocaleString()}</strong>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 font-semibold">
+                      <span className="text-slate-700">
+                        Total Recorded: <strong className="text-indigo-700 text-sm font-bold font-mono">Rs. {((Number(splitCashAmount || 0)) + (Number(splitBankAmount || 0))).toLocaleString()}</strong>
+                      </span>
+                      {selectedInvoice && selectedInvoice.balance_due > 0 && (
+                        <span className="text-slate-500">
+                          (Remaining Due: <strong className="font-mono text-amber-700">Rs. {Math.max(0, selectedInvoice.balance_due - ((Number(splitCashAmount || 0)) + (Number(splitBankAmount || 0)))).toLocaleString()}</strong>)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : selectedInvoice && selectedInvoice.balance_due <= 0 ? (
                 <div className="md:col-span-2 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
                   <div className="flex items-center gap-2 font-bold">
                     <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
@@ -828,11 +1091,15 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                       {isSupplier ? 'Amount to Pay' : 'Amount Received'} <span className="text-red-500">*</span>
                     </label>
                     <div className="flex items-center gap-3">
-                      {selectedInvoice && (
+                      {selectedInvoice ? (
                         <span className="text-xs font-bold text-slate-600">
                           Balance Due: <span className="font-mono text-emerald-700 font-extrabold">{formatCurrency(selectedInvoice.balance_due)}</span>
                         </span>
-                      )}
+                      ) : selectedEntityClosingBalance > 0 ? (
+                        <span className="text-xs font-bold text-slate-600">
+                          Closing Balance: <span className="font-mono text-emerald-700 font-extrabold">{formatCurrency(selectedEntityClosingBalance)}</span>
+                        </span>
+                      ) : null}
                       {isSupplier && availableOutflowBalance !== Infinity && (
                         <span className={`text-xs font-bold ${availableOutflowBalance <= 0 ? 'text-red-600' : 'text-slate-600'}`}>
                           Available Balance: <span className="font-mono">{formatCurrency(availableOutflowBalance)}</span>
@@ -852,7 +1119,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                       max={calculatedMaxAmount !== undefined ? calculatedMaxAmount : (selectedInvoice ? Math.max(0, selectedInvoice.balance_due) : undefined)}
                       {...register('amount')}
                       className={`block w-full rounded-xl border px-3 py-3 pl-10 text-lg font-medium transition-colors focus:outline-none focus:ring-2 ${
-                        selectedInvoice && selectedInvoice.balance_due > 0 ? 'pr-36' : ''
+                        (selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0) ? 'pr-36' : ''
                       } ${
 
                         errors.amount
@@ -860,7 +1127,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           : 'border-emerald-200 focus:border-emerald-500 focus:ring-emerald-500/20 text-emerald-900 bg-emerald-50/50'
                       }`}
                     />
-                    {selectedInvoice && selectedInvoice.balance_due > 0 && (
+                    {((selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0)) && (
                       <button
                         type="button"
                         onClick={handleClearFullBalance}

@@ -63,14 +63,18 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
 
   // Payment method & tender calculation
   const paymentMethod = String(invoice.payment_method || invoice.paymentMethod || 'CASH').toUpperCase();
-  const isBank = paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name;
-  const isCheque = paymentMethod === 'CHEQUE';
+  const isSplit = paymentMethod === 'SPLIT' || (Number(invoice.split_cash_amount) > 0 && Number(invoice.split_bank_amount) > 0);
+  const isBank = !isSplit && (paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name);
+  const isCheque = !isSplit && paymentMethod === 'CHEQUE';
   const bankNameStr = invoice.bank_name ? ` (${invoice.bank_name})` : '';
 
+  const splitCash = Number(invoice.split_cash_amount ?? invoice.cash_tendered ?? 0);
+  const splitBank = Number(invoice.split_bank_amount ?? 0);
+
   const paidAmount = Number(invoice.paid_amount ?? invoice.amount_paid ?? 0);
-  const cashTendered = isBank || isCheque ? paidAmount : Number(invoice.cash_tendered ?? paidAmount);
+  const cashTendered = isSplit ? splitCash : (isBank || isCheque ? paidAmount : Number(invoice.cash_tendered ?? paidAmount));
   const balanceDue = Number(invoice.balance_due ?? Math.max(0, totalAmount - paidAmount));
-  const changeReturn = isBank || isCheque ? 0 : Number(invoice.change_returned ?? Math.max(0, cashTendered - totalAmount));
+  const changeReturn = isBank || isCheque ? 0 : Number(invoice.change_returned ?? Math.max(0, (isSplit ? (splitCash + splitBank) : cashTendered) - totalAmount));
 
   // Safe printable width for Black Copper BC-86AC: 66mm
   // Column distribution: 52% Item & Urdu, 14% Qty, 17% Rate, 17% Total
@@ -199,7 +203,20 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
             <span>Rs. ${Math.abs(totalAmount).toLocaleString()}</span>
           </div>
           ${!isRefund ? `
-            ${isBank ? `
+            ${isSplit ? `
+              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+                <span>Payment Mode:</span>
+                <span style="font-weight: bold;">Split (Cash + Bank)</span>
+              </div>
+              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+                <span>Cash Paid / نقد:</span>
+                <span style="font-weight: bold;">Rs. ${splitCash.toLocaleString()}</span>
+              </div>
+              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+                <span>Bank Transfer${bankNameStr} / بینک:</span>
+                <span style="font-weight: bold;">Rs. ${splitBank.toLocaleString()}</span>
+              </div>
+            ` : isBank ? `
               <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
                 <span>Bank Transfer${bankNameStr}:</span>
                 <span>Rs. ${paidAmount.toLocaleString()}</span>

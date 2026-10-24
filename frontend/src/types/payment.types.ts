@@ -68,8 +68,10 @@ export interface CreatePaymentData {
   invoice_id?: string | null;
   payment_date: string;
   amount: number;
-  payment_method: 'CASH' | 'BANK' | 'BANK_TRANSFER' | 'CHEQUE' | 'PDC' | 'DIRECT_TO_SUPPLIER';
+  payment_method: 'CASH' | 'BANK' | 'BANK_TRANSFER' | 'CHEQUE' | 'PDC' | 'DIRECT_TO_SUPPLIER' | 'SPLIT';
   bank_account_id?: string | null;
+  split_cash_amount?: number;
+  split_bank_amount?: number;
   notes?: string;
   cheque_number?: string;
   cheque_bank_name?: string;

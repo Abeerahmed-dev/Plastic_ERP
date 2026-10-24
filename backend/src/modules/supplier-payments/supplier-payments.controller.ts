@@ -15,22 +15,40 @@ export async function createPaymentController(req: Request, res: Response, next:
     const payload = parsed.data;
     const trx = db;
 
-    if (!payload.bank_account_id) {
+    const isCash = (payload.payment_method as string) === 'CASH' || (payload.payment_method as string) === 'Cash';
+    const isCheque = payload.payment_method === 'CHEQUE' || payload.payment_method === 'PDC';
+    const chequeStatus = isCheque ? (payload.cheque_status || 'PENDING') : 'CLEARED';
+
+    if (isCash) {
+      payload.bank_account_id = null as any;
+      const { getCashDrawerBalance } = await import('../bank-accounts/bank-accounts.repository');
+      const cashBalance = await getCashDrawerBalance(trx);
+      const availableBalance = parseFloat(String(cashBalance || 0));
+      const requestedAmount = parseFloat((payload.amount as any) || 0);
+
+      if (availableBalance < requestedAmount) {
+        throw new Error(`INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Cash drawer only holds ${availableBalance}.`);
+      }
+    } else if (payload.bank_account_id) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.bank_account_id);
+      const account = isUuid ? await trx('bank_accounts').where('id', payload.bank_account_id).first() : null;
+
+      if (!account) {
+        throw new Error(`NOT_FOUND: Bank account with ID ${payload.bank_account_id} does not exist.`);
+      }
+
+      const availableBalance = parseFloat(account.current_balance || 0);
+      const requestedAmount = parseFloat((payload.amount as any) || 0);
+
+      // Cheques / PDCs are post-dated liabilities with upcoming due dates.
+      // Bypass liquidity wall unless the cheque is immediately CLEARED.
+      if (!isCheque || chequeStatus === 'CLEARED') {
+        if (availableBalance < requestedAmount) {
+          throw new Error(`INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`);
+        }
+      }
+    } else if (!isCheque) {
       throw new Error('VALIDATION_ERROR: No bank_account_id provided in the request payload.');
-    }
-
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.bank_account_id);
-    const account = isUuid ? await trx('bank_accounts').where('id', payload.bank_account_id).first() : null;
-
-    if (!account) {
-      throw new Error(`NOT_FOUND: Bank account with ID ${payload.bank_account_id} does not exist.`);
-    }
-
-    const availableBalance = parseFloat(account.current_balance || 0);
-    const requestedAmount = parseFloat((payload.amount as any) || 0);
-
-    if (availableBalance < requestedAmount) {
-      throw new Error(`INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`);
     }
 
     // Phase 1: Strict settlement cap

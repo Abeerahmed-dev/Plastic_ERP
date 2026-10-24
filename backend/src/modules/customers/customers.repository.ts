@@ -168,11 +168,15 @@ export async function computeCustomerNetBalance(
   const totalPaid = Math.round(Number(paidResult?.total_paid || 0) * 100) / 100;
   const totalAllocatedFromPayments = Number(allocFromPaymentsResult?.total_allocated || 0);
 
-  // The New Split Math:
-  // customer.outstanding = total_billed - total_allocated_to_invoices
-  // customer.advance_credit = total_paid - total_allocated_from_payments
-  const outstanding = Math.max(0, Math.round((totalBilled - totalAllocatedToInvoices) * 100) / 100);
-  const advance_credit = Math.max(0, Math.round((totalPaid - totalAllocatedFromPayments) * 100) / 100);
+  let outstanding = 0;
+  let advance_credit = 0;
+  if (totalPaid >= totalBilled) {
+    outstanding = 0;
+    advance_credit = Math.round((totalPaid - totalBilled) * 100) / 100;
+  } else {
+    outstanding = Math.round((totalBilled - totalPaid) * 100) / 100;
+    advance_credit = 0;
+  }
   const netBalance = Math.round((outstanding - advance_credit) * 100) / 100;
 
   return {

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy, Clock, PauseCircle, Play } from 'lucide-react';
 import { productsService } from '../../services/products.service';
-import { posService } from '../../services/pos.service';
+import { posService, POSHeldOrder } from '../../services/pos.service';
 import { reportsService } from '../../services/reports.service';
 import { getCustomers } from '../../services/customers.service';
 import { useAuthStore } from '../../store/auth.store';
@@ -10,6 +10,8 @@ import { useReportStore } from '../../store/useReportStore';
 import { printThermalReceipt } from '../../utils/printThermal';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ShiftAuditModal } from './ShiftAuditModal';
+import { HeldOrdersModal } from './HeldOrdersModal';
+import { HoldConfirmModal } from './HoldConfirmModal';
 
 interface CartItem {
   product_id: string;
@@ -35,10 +37,14 @@ export default function POSPage() {
   const [discount, setDiscount] = useState<number>(0);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
+  const [splitCashAmount, setSplitCashAmount] = useState<number | ''>('');
+  const [splitBankAmount, setSplitBankAmount] = useState<number | ''>('');
   const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('');
 
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isShiftAuditOpen, setIsShiftAuditOpen] = useState(false);
+  const [isHeldOrdersOpen, setIsHeldOrdersOpen] = useState(false);
+  const [isHoldConfirmOpen, setIsHoldConfirmOpen] = useState(false);
   const [slipMode, setSlipMode] = useState<'SINGLE' | 'DUPLICATE'>('SINGLE');
 
   const [lastInvoice, setLastInvoice] = useState<any>(null);
@@ -77,6 +83,12 @@ export default function POSPage() {
   const { data: metrics } = useQuery({
     queryKey: ['dashboardMetrics'],
     queryFn: () => reportsService.getDashboardMetrics(),
+  });
+
+  // Query Held Orders
+  const { data: heldOrders = [], isLoading: isLoadingHeldOrders } = useQuery({
+    queryKey: ['posHeldOrders'],
+    queryFn: () => posService.getHeldOrders(),
   });
 
   const addToCart = (product: any) => {
@@ -152,7 +164,13 @@ export default function POSPage() {
   const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
-  const effectiveAmountPaid = amountPaid === '' ? total : Number(amountPaid);
+
+  const isSplit = paymentMethod === 'SPLIT';
+  const effectiveSplitCash = splitCashAmount === '' ? 0 : Number(splitCashAmount);
+  const effectiveSplitBank = splitBankAmount === '' ? 0 : Number(splitBankAmount);
+  const effectiveAmountPaid = isSplit
+    ? (effectiveSplitCash + effectiveSplitBank)
+    : (amountPaid === '' ? total : Number(amountPaid));
 
   const hasPriceFloorViolation = !isCashier && cart.some((item) => {
     const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
@@ -181,14 +199,20 @@ export default function POSPage() {
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
-        bank_account_id: paymentMethod === 'BANK' ? (selectedBankAccountId || undefined) : undefined,
+        bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
+        split_cash_amount: isSplit ? effectiveSplitCash : undefined,
+        split_bank_amount: isSplit ? effectiveSplitBank : undefined,
       }),
     onSuccess: (invoice: any) => {
       const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
       const selectedBank = bankAccounts.find((b: any) => b.id === selectedBankAccountId);
       const activeMethod = paymentMethod;
-      const tendered = activeMethod === 'CASH' ? (invoice.cash_tendered ?? effectiveAmountPaid) : 0;
-      const returned = activeMethod === 'CASH' ? (invoice.change_returned ?? Math.max(0, effectiveAmountPaid - total)) : 0;
+      const tendered = activeMethod === 'CASH'
+        ? (invoice.cash_tendered ?? effectiveAmountPaid)
+        : (activeMethod === 'SPLIT' ? effectiveSplitCash : 0);
+      const returned = activeMethod === 'BANK'
+        ? 0
+        : (invoice.change_returned ?? Math.max(0, (activeMethod === 'SPLIT' ? (effectiveSplitCash + effectiveSplitBank) : effectiveAmountPaid) - total));
       const balanceDue = Math.max(0, total - effectiveAmountPaid);
 
       const isDuplicateMode = slipMode === 'DUPLICATE';
@@ -196,11 +220,13 @@ export default function POSPage() {
         invoice: {
           ...invoice,
           payment_method: activeMethod,
-          bank_name: selectedBank ? selectedBank.bank_name : undefined,
+          bank_name: selectedBank ? selectedBank.bank_name : (invoice.bank_name || undefined),
           paid_amount: effectiveAmountPaid,
           cash_tendered: tendered,
           change_returned: returned,
           balance_due: balanceDue,
+          split_cash_amount: activeMethod === 'SPLIT' ? effectiveSplitCash : undefined,
+          split_bank_amount: activeMethod === 'SPLIT' ? effectiveSplitBank : undefined,
         },
         items: [...cart],
         cashierName: user?.name || 'Cashier',
@@ -212,6 +238,8 @@ export default function POSPage() {
       setCart([]);
       setDiscount(0);
       setAmountPaid('');
+      setSplitCashAmount('');
+      setSplitBankAmount('');
       setSelectedCustomerId('');
       setSelectedBankAccountId('');
       printThermalReceipt(receiptData);
@@ -236,38 +264,130 @@ export default function POSPage() {
     },
   });
 
+  // Hold Order Mutation
+  const createHeldOrderMutation = useMutation({
+    mutationFn: (refNote: string) => {
+      const customer = customers.find((c) => c.id === selectedCustomerId);
+      return posService.createHeldOrder({
+        reference_note: refNote,
+        customer_id: selectedCustomerId || null,
+        customer_name: customer ? customer.name : 'Walk-In Customer',
+        items: cart,
+        subtotal,
+        discount,
+        total_amount: total,
+        payment_method: paymentMethod,
+        split_cash_amount: splitCashAmount !== '' ? Number(splitCashAmount) : null,
+        split_bank_amount: splitBankAmount !== '' ? Number(splitBankAmount) : null,
+        bank_account_id: selectedBankAccountId || null,
+        slip_mode: slipMode,
+      });
+    },
+    onSuccess: () => {
+      setIsHoldConfirmOpen(false);
+      setCart([]);
+      setDiscount(0);
+      setAmountPaid('');
+      setSplitCashAmount('');
+      setSplitBankAmount('');
+      setSelectedCustomerId('');
+      setSelectedBankAccountId('');
+      queryClient.invalidateQueries({ queryKey: ['posHeldOrders'] });
+    },
+    onError: (err: any) => {
+      alert(err?.response?.data?.error || err?.message || 'Failed to hold order');
+    },
+  });
+
+  // Delete Held Order Mutation
+  const deleteHeldOrderMutation = useMutation({
+    mutationFn: (orderId: string) => posService.deleteHeldOrder(orderId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posHeldOrders'] });
+    },
+  });
+
+  // Resume Held Order Handler
+  const handleResumeHeldOrder = (order: POSHeldOrder) => {
+    if (cart.length > 0) {
+      const confirmOverwrite = window.confirm(
+        'Your current cart already contains items. Do you want to replace the current cart with this held bill?'
+      );
+      if (!confirmOverwrite) return;
+    }
+
+    setCart(order.items || []);
+    setSelectedCustomerId(order.customer_id || '');
+    setDiscount(Number(order.discount || 0));
+    setPaymentMethod(order.payment_method || 'CASH');
+    setSplitCashAmount(order.split_cash_amount !== null && order.split_cash_amount !== undefined ? Number(order.split_cash_amount) : '');
+    setSplitBankAmount(order.split_bank_amount !== null && order.split_bank_amount !== undefined ? Number(order.split_bank_amount) : '');
+    setSelectedBankAccountId(order.bank_account_id || '');
+    if (order.slip_mode === 'DUPLICATE' || order.slip_mode === 'SINGLE') {
+      setSlipMode(order.slip_mode as any);
+    }
+
+    deleteHeldOrderMutation.mutate(order.id);
+    setIsHeldOrdersOpen(false);
+  };
+
   return (
     <>
       <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden">
         {/* LEFT: Product Search & Customer Selection */}
         <div className="flex-1 flex flex-col p-3.5 sm:p-4 border-r border-slate-200 overflow-hidden">
-          {/* Reprint Slip Bar (if last invoice exists) */}
-          {lastInvoice && (
-            <div className="flex items-center justify-end gap-1.5 mb-2 shrink-0">
+          {/* Top Actions Bar: Held Orders & Reprint Slips */}
+          <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => {
-                  if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: false });
-                }}
-                className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs"
-                title="Reprint Single Original Slip"
+                onClick={() => setIsHeldOrdersOpen(true)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-2xs border cursor-pointer ${
+                  heldOrders.length > 0
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+                title="View and resume held transactions"
               >
-                <Printer className="w-3 h-3 text-blue-600" />
-                <span>Reprint Original (1 Slip)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: true });
-                }}
-                className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs"
-                title="Reprint Both Slips: Original + Duplicate"
-              >
-                <Copy className="w-3 h-3 text-amber-600" />
-                <span>Reprint Both (2 Slips)</span>
+                <Clock className="w-3.5 h-3.5" />
+                <span>Held Bills</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  heldOrders.length > 0 ? 'bg-white text-amber-900' : 'bg-slate-100 text-slate-600'
+                }`}>
+                  {heldOrders.length}
+                </span>
               </button>
             </div>
-          )}
+
+            <div className="flex items-center gap-1.5">
+              {lastInvoice && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: false });
+                    }}
+                    className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer"
+                    title="Reprint Single Original Slip"
+                  >
+                    <Printer className="w-3 h-3 text-blue-600" />
+                    <span>Reprint Original (1 Slip)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: true });
+                    }}
+                    className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer"
+                    title="Reprint Both Slips: Original + Duplicate"
+                  >
+                    <Copy className="w-3 h-3 text-amber-600" />
+                    <span>Reprint Both (2 Slips)</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
 
           {/* TOP: Direct Side-by-Side Customer Selection (Left) & Product Search (Right) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-2.5 shrink-0">
@@ -499,9 +619,22 @@ export default function POSPage() {
               </span>
             </div>
           </div>
-          <span className="text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
-            {cart.length} Items
-          </span>
+          <div className="flex items-center gap-1.5">
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsHoldConfirmOpen(true)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition cursor-pointer shadow-2xs"
+                title="Hold this transaction and serve next customer"
+              >
+                <PauseCircle className="w-3 h-3 text-amber-700" />
+                <span>Hold</span>
+              </button>
+            )}
+            <span className="text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+              {cart.length} Items
+            </span>
+          </div>
         </div>
 
         {/* Cart Item List */}
@@ -637,80 +770,95 @@ export default function POSPage() {
             <span className="text-base text-blue-600 font-black font-mono">Rs. {total.toLocaleString()}</span>
           </div>
 
-          {/* Amount Paid Input */}
+          {/* Payment Method Dropdown (Cash in Drawer, Bank Transfer, or Split Payment) */}
           <div>
-            <div className="flex justify-between items-center mb-0.5">
-              <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                <span>Amount Paid</span>
-                {amountPaid === '' && total > 0 && (
-                  <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200">
-                    Auto: Full Cash (Rs. {total.toLocaleString()})
-                  </span>
-                )}
-              </label>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setAmountPaid(0)}
-                  className="text-[9px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition"
-                >
-                  Rs. 0 (Credit)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAmountPaid(total)}
-                  className="text-[9px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 transition"
-                >
-                  Full (Rs. {total.toLocaleString()})
-                </button>
-              </div>
-            </div>
-            <input
-              type="number"
-              min={0}
-              value={amountPaid === '' ? '' : amountPaid}
-              onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-              placeholder={total > 0 ? `Full: Rs. ${total.toLocaleString()}` : '0 (Enter Amount)'}
-              className="w-full text-right font-black text-sm rounded-lg py-1 px-2.5 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
-            />
-            {amountPaid !== '' && Number(amountPaid) > total && (
-              <div className="mt-1 flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded text-[11px] font-bold">
-                <span>Change Return:</span>
-                <span className="font-mono text-xs text-emerald-700">
-                  Rs. {(Number(amountPaid) - total).toLocaleString()}
-                </span>
-              </div>
-            )}
-            {amountPaid !== '' && Number(amountPaid) < total && (
-              <div className="mt-1 flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1 rounded text-[11px] font-bold">
-                <span>Remaining Due:</span>
-                <span className="font-mono text-xs text-amber-700">
-                  Rs. {(total - Number(amountPaid)).toLocaleString()}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Payment Method Dropdown (Cash in Drawer or Bank Transfer) */}
-          <div>
+            <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+              Payment Method
+            </label>
             <select
               value={paymentMethod}
               onChange={(e) => {
                 const val = e.target.value;
                 setPaymentMethod(val);
-                if (val === 'BANK' && !selectedBankAccountId && bankAccounts.length > 0) {
+                if ((val === 'BANK' || val === 'SPLIT') && !selectedBankAccountId && bankAccounts.length > 0) {
                   setSelectedBankAccountId(bankAccounts[0].id);
+                }
+                if (val === 'SPLIT') {
+                  const half = Math.round((total / 2) * 100) / 100;
+                  setSplitCashAmount(half);
+                  setSplitBankAmount(Math.round((total - half) * 100) / 100);
                 }
               }}
               className="w-full text-xs font-bold rounded-lg py-1.5 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer"
             >
               <option value="CASH">💵 Cash in Drawer (CASH)</option>
               <option value="BANK">🏦 Bank Transfer</option>
+              <option value="SPLIT">🔀 Split Payment (Cash + Bank)</option>
             </select>
           </div>
 
+          {/* Standard Single Amount Paid Input (when CASH or BANK) */}
+          {paymentMethod !== 'SPLIT' && (
+            <div>
+              <div className="flex justify-between items-center mb-0.5">
+                <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                  <span>Amount Paid</span>
+                  {amountPaid === '' && total > 0 && (
+                    <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200">
+                      Auto: Full (Rs. {total.toLocaleString()})
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAmountPaid(0)}
+                    className="text-[9px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition"
+                  >
+                    Rs. 0 (Credit)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAmountPaid(total)}
+                    className="text-[9px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 transition"
+                  >
+                    Full (Rs. {total.toLocaleString()})
+                  </button>
+                </div>
+              </div>
+              <input
+                type="number"
+                min={0}
+                value={amountPaid === '' ? '' : amountPaid}
+                onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                placeholder={total > 0 ? `Full: Rs. ${total.toLocaleString()}` : '0 (Enter Amount)'}
+                className="w-full text-right font-black text-sm rounded-lg py-1 px-2.5 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
+              />
+              {amountPaid !== '' && Number(amountPaid) > total && (
+                <div className="mt-1 flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded text-[11px] font-bold">
+                  <span>Change Return:</span>
+                  <span className="font-mono text-xs text-emerald-700">
+                    Rs. {(Number(amountPaid) - total).toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {amountPaid !== '' && Number(amountPaid) < total && (
+                <div className="mt-1 flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1 rounded text-[11px] font-bold">
+                  <span>Remaining Due:</span>
+                  <span className="font-mono text-xs text-amber-700">
+                    Rs. {(total - Number(amountPaid)).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bank Account Dropdown for BANK method */}
           {paymentMethod === 'BANK' && (
             <div>
+              <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                Select Bank Account <span className="text-red-500">*</span>
+              </label>
               <select
                 value={selectedBankAccountId}
                 onChange={(e) => setSelectedBankAccountId(e.target.value)}
@@ -724,6 +872,146 @@ export default function POSPage() {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* Split Payment Dedicated Section */}
+          {paymentMethod === 'SPLIT' && (
+            <div className="p-2.5 bg-blue-50/80 border border-blue-200 rounded-lg flex flex-col gap-2">
+              <div className="flex justify-between items-center text-[11px] font-bold text-blue-900 border-b border-blue-200/60 pb-1">
+                <span>🔀 Split Payment Allocation</span>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const half = Math.round((total / 2) * 100) / 100;
+                      setSplitCashAmount(half);
+                      setSplitBankAmount(Math.round((total - half) * 100) / 100);
+                    }}
+                    className="text-[9px] bg-white border border-blue-300 text-blue-700 px-1.5 py-0.5 rounded font-semibold hover:bg-blue-100 transition cursor-pointer"
+                  >
+                    50 / 50
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSplitCashAmount(total);
+                      setSplitBankAmount(0);
+                    }}
+                    className="text-[9px] bg-white border border-blue-300 text-blue-700 px-1.5 py-0.5 rounded font-semibold hover:bg-blue-100 transition cursor-pointer"
+                  >
+                    All Cash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSplitCashAmount(0);
+                      setSplitBankAmount(total);
+                    }}
+                    className="text-[9px] bg-white border border-blue-300 text-blue-700 px-1.5 py-0.5 rounded font-semibold hover:bg-blue-100 transition cursor-pointer"
+                  >
+                    All Bank
+                  </button>
+                </div>
+              </div>
+
+              {/* Cash Portion */}
+              <div>
+                <div className="flex justify-between items-center mb-0.5">
+                  <label className="text-[10px] font-bold text-slate-700">
+                    💵 Cash Portion (Rs.)
+                  </label>
+                  {splitBankAmount !== '' && Number(splitBankAmount) < total && (
+                    <button
+                      type="button"
+                      onClick={() => setSplitCashAmount(Math.max(0, total - Number(splitBankAmount)))}
+                      className="text-[9px] text-blue-600 hover:underline font-semibold"
+                    >
+                      Fill Remaining (Rs. {Math.max(0, total - Number(splitBankAmount)).toLocaleString()})
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  value={splitCashAmount === '' ? '' : splitCashAmount}
+                  onChange={(e) => setSplitCashAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                  placeholder="0"
+                  className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              {/* Bank Portion */}
+              <div>
+                <div className="flex justify-between items-center mb-0.5">
+                  <label className="text-[10px] font-bold text-slate-700">
+                    🏦 Bank Transfer Portion (Rs.)
+                  </label>
+                  {splitCashAmount !== '' && Number(splitCashAmount) < total && (
+                    <button
+                      type="button"
+                      onClick={() => setSplitBankAmount(Math.max(0, total - Number(splitCashAmount)))}
+                      className="text-[9px] text-blue-600 hover:underline font-semibold"
+                    >
+                      Fill Remaining (Rs. {Math.max(0, total - Number(splitCashAmount)).toLocaleString()})
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  value={splitBankAmount === '' ? '' : splitBankAmount}
+                  onChange={(e) => setSplitBankAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                  placeholder="0"
+                  className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              {/* Bank Selector for the transfer portion */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-0.5">
+                  Select Destination Bank Account <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedBankAccountId}
+                  onChange={(e) => setSelectedBankAccountId(e.target.value)}
+                  className="w-full text-xs font-bold rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  required
+                >
+                  <option value="">-- Select Bank Account --</option>
+                  {bankAccounts.map((acc: any) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.bank_name} — {acc.account_title || acc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Split Summary Footer */}
+              <div className="flex justify-between items-center pt-1 border-t border-blue-200 text-xs">
+                <span className="font-semibold text-slate-600">Total Tendered:</span>
+                <span className="font-bold font-mono text-slate-900">
+                  Rs. {(effectiveSplitCash + effectiveSplitBank).toLocaleString()}
+                </span>
+              </div>
+
+              {(effectiveSplitCash + effectiveSplitBank) > total && (
+                <div className="flex items-center justify-between bg-emerald-100/90 text-emerald-900 px-2 py-0.5 rounded text-[10px] font-bold">
+                  <span>Change Return (from Cash):</span>
+                  <span className="font-mono text-xs">
+                    Rs. {((effectiveSplitCash + effectiveSplitBank) - total).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              {(effectiveSplitCash + effectiveSplitBank) < total && (
+                <div className="flex items-center justify-between bg-amber-100/90 text-amber-900 px-2 py-0.5 rounded text-[10px] font-bold">
+                  <span>Remaining Due:</span>
+                  <span className="font-mono text-xs">
+                    Rs. {(total - (effectiveSplitCash + effectiveSplitBank)).toLocaleString()}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -757,19 +1045,48 @@ export default function POSPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => {
-              if (paymentMethod === 'BANK' && !selectedBankAccountId) {
-                alert('Please select a Bank Account for Bank Transfer payment');
-                return;
-              }
-              checkoutMutation.mutate();
-            }}
-            disabled={!isCartValid || checkoutMutation.isPending}
-            className="w-full mt-1 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold rounded-lg text-sm transition-all shadow-md shadow-amber-500/20 active:scale-[0.98] flex justify-center items-center gap-2 cursor-pointer"
-          >
-            {checkoutMutation.isPending ? 'Processing POS Sale...' : 'Complete POS Sale'}
-          </button>
+          <div className="grid grid-cols-3 gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (cart.length === 0) {
+                  alert('Cart is empty. Add items first to hold.');
+                  return;
+                }
+                setIsHoldConfirmOpen(true);
+              }}
+              disabled={cart.length === 0 || createHeldOrderMutation.isPending}
+              className="col-span-1 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold rounded-lg text-xs transition border border-amber-300 flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer shadow-2xs"
+              title="Hold current cart and clear screen for next customer"
+            >
+              <PauseCircle className="w-3.5 h-3.5 text-amber-800" />
+              <span>Hold Bill</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (paymentMethod === 'BANK' && !selectedBankAccountId) {
+                  alert('Please select a Bank Account for Bank Transfer payment');
+                  return;
+                }
+                if (paymentMethod === 'SPLIT') {
+                  if (effectiveSplitBank > 0 && !selectedBankAccountId) {
+                    alert('Please select a Bank Account for the Bank Transfer portion');
+                    return;
+                  }
+                  if (effectiveSplitCash <= 0 && effectiveSplitBank <= 0) {
+                    alert('Please enter at least Cash or Bank amount for Split Payment');
+                    return;
+                  }
+                }
+                checkoutMutation.mutate();
+              }}
+              disabled={!isCartValid || checkoutMutation.isPending}
+              className="col-span-2 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold rounded-lg text-sm transition-all shadow-md shadow-amber-500/20 active:scale-[0.98] flex justify-center items-center gap-2 cursor-pointer"
+            >
+              {checkoutMutation.isPending ? 'Processing POS Sale...' : 'Complete POS Sale'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -787,6 +1104,28 @@ export default function POSPage() {
       <ShiftAuditModal
         isOpen={isShiftAuditOpen}
         onClose={() => setIsShiftAuditOpen(false)}
+      />
+
+      {/* Held Orders Review & Resume Modal */}
+      <HeldOrdersModal
+        isOpen={isHeldOrdersOpen}
+        onClose={() => setIsHeldOrdersOpen(false)}
+        heldOrders={heldOrders}
+        isLoading={isLoadingHeldOrders}
+        onResume={handleResumeHeldOrder}
+        onDelete={(orderId) => deleteHeldOrderMutation.mutate(orderId)}
+        isDeleting={deleteHeldOrderMutation.isPending}
+      />
+
+      {/* Hold Confirmation Modal */}
+      <HoldConfirmModal
+        isOpen={isHoldConfirmOpen}
+        onClose={() => setIsHoldConfirmOpen(false)}
+        onConfirm={(refNote) => createHeldOrderMutation.mutate(refNote)}
+        customerName={selectedCustomerId ? (customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer') : 'Walk-In Customer'}
+        itemsCount={cart.length}
+        totalAmount={total}
+        isPending={createHeldOrderMutation.isPending}
       />
 
       </div>

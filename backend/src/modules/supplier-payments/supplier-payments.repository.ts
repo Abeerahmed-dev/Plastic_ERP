@@ -27,7 +27,21 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
   return await db.transaction(async (trx: Knex.Transaction) => {
     // ── Liquidity Wall: Intercept outgoing supplier payments ──
     const paymentAmount = parseFloat((data.amount as any) || 0);
-    if (data.bank_account_id) {
+    const requestedAmount = paymentAmount;
+    const isCash = (data.payment_method as string) === 'CASH' || (data.payment_method as string) === 'Cash';
+    const isCheque = data.payment_method === 'CHEQUE' || data.payment_method === 'PDC';
+    const chequeStatus = isCheque ? (data.cheque_status || 'PENDING') : 'CLEARED';
+
+    if (isCash) {
+      const cashBalance = await getCashDrawerBalance(trx);
+      const availableBalance = parseFloat(String(cashBalance || 0));
+
+      if (availableBalance < requestedAmount) {
+        throw new InsufficientLiquidityError(
+          `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Cash drawer only holds ${availableBalance}.`
+        );
+      }
+    } else if (data.bank_account_id) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.bank_account_id);
       const account = isUuid ? await trx('bank_accounts').where('id', data.bank_account_id).first() : null;
 
@@ -36,34 +50,25 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       }
 
       const availableBalance = parseFloat(account.current_balance || 0);
-      const requestedAmount = parseFloat((data.amount as any) || 0);
 
-      if (availableBalance < requestedAmount) {
-        throw new InsufficientLiquidityError(
-          `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`
-        );
+      // Post-dated cheques (PDCs) are future liabilities and do not immediately debit the bank balance.
+      // Enforce the liquidity check only for immediate withdrawals or cheques that are already CLEARED.
+      if (!isCheque || chequeStatus === 'CLEARED') {
+        if (availableBalance < requestedAmount) {
+          throw new InsufficientLiquidityError(
+            `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`
+          );
+        }
       }
-    } else if ((data.payment_method as string) === 'CASH' || (data.payment_method as string) === 'Cash') {
-      const cashBalance = await getCashDrawerBalance(trx);
-      const availableBalance = parseFloat(String(cashBalance || 0));
-      const requestedAmount = parseFloat((data.amount as any) || 0);
-
-      if (availableBalance < requestedAmount) {
-        throw new InsufficientLiquidityError(
-          `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${requestedAmount}. Account only holds ${availableBalance}.`
-        );
-      }
-    } else {
+    } else if (!isCheque) {
       throw new Error('VALIDATION_ERROR: No bank_account_id provided in the request payload.');
     }
 
     const payment_number = await generatePaymentNumber(trx);
-    const isCheque = data.payment_method === 'CHEQUE' || data.payment_method === 'PDC';
-    const chequeStatus = isCheque ? (data.cheque_status || 'PENDING') : 'CLEARED';
 
     const [payment] = await trx('supplier_payments').insert({
       ...data,
-      bank_account_id: data.bank_account_id || null,
+      bank_account_id: isCash ? null : (data.bank_account_id || null),
       cheque_number: data.cheque_number || null,
       cheque_bank_name: data.cheque_bank_name || null,
       cheque_due_date: data.cheque_due_date || null,
@@ -124,7 +129,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
 
       const newPaidAmount = currentAllocated + allocatedAmount;
       let newStatus = 'UNPAID';
-      if (newPaidAmount >= invTotal) {
+      if (newPaidAmount >= netInvoiceTotal) {
         newStatus = 'PAID';
       } else if (newPaidAmount > 0) {
         newStatus = 'PARTIAL';
@@ -137,6 +142,89 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
           status: newStatus,
           updated_at: new Date()
         });
+    } else {
+      // ON-ACCOUNT PAYMENT: Automatically allocate FIFO across supplier's unpaid purchase invoices
+      let remainingToAllocate = paymentAmount;
+
+      const unpaidInvoices = await trx('purchase_invoices')
+        .where('supplier_id', data.supplier_id)
+        .whereNot('status', 'CANCELLED')
+        .whereNot('status', 'PAID')
+        .where(function() {
+          this.whereNull('invoice_type')
+            .orWhere(function() {
+              this.whereNot('invoice_type', 'DEBIT_NOTE')
+                .whereNot('invoice_type', 'RETURN')
+                .whereNot('invoice_number', 'like', 'DN-%');
+            });
+        })
+        .orderBy('date', 'asc')
+        .orderBy('created_at', 'asc');
+
+      let anyAllocated = false;
+
+      for (const inv of unpaidInvoices) {
+        if (remainingToAllocate <= 0) break;
+
+        const allocRes = await trx('supplier_payment_allocations')
+          .where('purchase_invoice_id', inv.id)
+          .sum('allocated_amount as total_allocated')
+          .first();
+
+        const retRes = await trx('purchase_invoices')
+          .where('parent_invoice_id', inv.id)
+          .where(function() {
+            this.where('invoice_type', 'DEBIT_NOTE')
+              .orWhere('invoice_type', 'RETURN')
+              .orWhere('invoice_number', 'like', 'DN-%');
+          })
+          .whereNot('status', 'CANCELLED')
+          .sum('total_amount as total_returned')
+          .first();
+
+        const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
+        const currentAllocated = Number(allocRes?.total_allocated || 0);
+        const invTotal = Number(inv.total_amount || 0);
+        const netInvoiceTotal = invTotal - returnedTotal;
+        const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
+
+        if (remainingUnpaid > 0) {
+          const allocationForThisInv = Math.min(remainingToAllocate, remainingUnpaid);
+          await trx('supplier_payment_allocations').insert({
+            payment_id: payment.id,
+            purchase_invoice_id: inv.id,
+            allocated_amount: allocationForThisInv,
+          });
+
+          const newPaidAmount = currentAllocated + allocationForThisInv;
+          let newStatus = 'UNPAID';
+          if (newPaidAmount >= netInvoiceTotal) {
+            newStatus = 'PAID';
+          } else if (newPaidAmount > 0) {
+            newStatus = 'PARTIAL';
+          }
+
+          await trx('purchase_invoices')
+            .where('id', inv.id)
+            .update({
+              paid_amount: newPaidAmount,
+              status: newStatus,
+              updated_at: new Date(),
+            });
+
+          remainingToAllocate = Math.round((remainingToAllocate - allocationForThisInv) * 100) / 100;
+          anyAllocated = true;
+        }
+      }
+
+      if (anyAllocated) {
+        await trx('supplier_payments')
+          .where('id', payment.id)
+          .update({
+            payment_type: 'INVOICE_SETTLEMENT',
+          });
+        payment.payment_type = 'INVOICE_SETTLEMENT';
+      }
     }
 
     return payment;

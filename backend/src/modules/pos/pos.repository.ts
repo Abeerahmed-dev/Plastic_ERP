@@ -15,7 +15,9 @@ export async function processPOSCheckout(
   customerId?: string,
   amountPaidInput?: number,
   paymentMethodInput?: string,
-  bankAccountId?: string | null
+  bankAccountId?: string | null,
+  splitCashAmountInput?: number,
+  splitBankAmountInput?: number
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
     const isCashier = userRole?.toUpperCase() === 'CASHIER';
@@ -266,34 +268,55 @@ export async function processPOSCheckout(
 
     const totalAmount = subtotal - effectiveDiscount;
 
-    let cashTendered: number;
-    let changeReturned = 0;
-    let effectiveAmountPaid: number;
-    let balanceDue: number;
-
-    if (totalAmount <= 0) {
-      effectiveAmountPaid = totalAmount;
-      cashTendered = totalAmount;
-      changeReturned = 0;
-      balanceDue = 0;
-    } else {
-      cashTendered = (amountPaidInput !== undefined && amountPaidInput !== null) ? Number(amountPaidInput) : totalAmount;
-      changeReturned = Math.max(0, Math.round((cashTendered - totalAmount) * 100) / 100);
-      effectiveAmountPaid = Math.min(cashTendered, totalAmount);
-      balanceDue = Math.max(0, Math.round((totalAmount - effectiveAmountPaid) * 100) / 100);
-    }
-
+    const isSplit = String(paymentMethodInput || '').toUpperCase() === 'SPLIT';
     const isBank = String(paymentMethodInput || '').toUpperCase() === 'BANK';
-    const effectivePaymentMethod = isBank ? 'BANK' : 'CASH';
+    const effectivePaymentMethod = isSplit ? 'SPLIT' : (isBank ? 'BANK' : 'CASH');
 
     let targetBankId: string | null = null;
-    if (isBank) {
+    let targetBankName = '';
+    if (isBank || isSplit) {
       if (bankAccountId) {
         targetBankId = bankAccountId;
       } else {
         const primaryBank = await trx('bank_accounts').where('is_active', true).orderBy('created_at', 'asc').first();
         targetBankId = primaryBank?.id || null;
       }
+      if (targetBankId) {
+        const bRow = await trx('bank_accounts').where('id', targetBankId).first();
+        targetBankName = bRow?.bank_name || '';
+      }
+    }
+
+    let cashTendered: number;
+    let changeReturned = 0;
+    let effectiveAmountPaid: number;
+    let balanceDue: number;
+    let splitCashNet = 0;
+    let splitBankNet = 0;
+
+    if (totalAmount <= 0) {
+      effectiveAmountPaid = totalAmount;
+      cashTendered = totalAmount;
+      changeReturned = 0;
+      balanceDue = 0;
+    } else if (isSplit) {
+      const splitCashTendered = Math.round(Number(splitCashAmountInput || 0) * 100) / 100;
+      const splitBankPortion = Math.round(Number(splitBankAmountInput || 0) * 100) / 100;
+      const totalTendered = Math.round((splitCashTendered + splitBankPortion) * 100) / 100;
+
+      changeReturned = Math.max(0, Math.round((totalTendered - totalAmount) * 100) / 100);
+      effectiveAmountPaid = Math.min(totalTendered, totalAmount);
+      balanceDue = Math.max(0, Math.round((totalAmount - effectiveAmountPaid) * 100) / 100);
+
+      // Any change return is returned from the cash tender
+      splitCashNet = Math.max(0, Math.round((splitCashTendered - changeReturned) * 100) / 100);
+      splitBankNet = splitBankPortion;
+      cashTendered = splitCashTendered;
+    } else {
+      cashTendered = (amountPaidInput !== undefined && amountPaidInput !== null) ? Number(amountPaidInput) : totalAmount;
+      changeReturned = Math.max(0, Math.round((cashTendered - totalAmount) * 100) / 100);
+      effectiveAmountPaid = Math.min(cashTendered, totalAmount);
+      balanceDue = Math.max(0, Math.round((totalAmount - effectiveAmountPaid) * 100) / 100);
     }
 
     // 2. Determine Next Sequential POS Bill Number
@@ -328,7 +351,11 @@ export async function processPOSCheckout(
         cash_tendered: cashTendered,
         change_returned: changeReturned,
         status: balanceDue <= 0 ? 'PAID' : (effectiveAmountPaid > 0 ? 'PARTIAL' : 'UNPAID'),
-        notes: totalAmount < 0 ? `POS Refund (${targetCustomer.name})` : `POS Sale (${targetCustomer.name})`,
+        notes: totalAmount < 0
+          ? `POS Refund (${targetCustomer.name})`
+          : isSplit
+            ? `POS Sale (${targetCustomer.name}) [Split: Rs. ${splitCashNet} Cash + Rs. ${splitBankNet} Bank]`
+            : `POS Sale (${targetCustomer.name})`,
         created_by: userId,
       })
       .returning('*');
@@ -336,7 +363,10 @@ export async function processPOSCheckout(
     (invoice as any).bill_number = nextBillNo;
     (invoice as any).payment_method = effectivePaymentMethod;
     (invoice as any).bank_account_id = targetBankId;
+    (invoice as any).bank_name = targetBankName;
     (invoice as any).balance_due = balanceDue;
+    (invoice as any).split_cash_amount = isSplit ? splitCashNet : (isBank ? 0 : effectiveAmountPaid);
+    (invoice as any).split_bank_amount = isSplit ? splitBankNet : (isBank ? effectiveAmountPaid : 0);
 
     // 3. Insert Sales Invoice Items
     const finalItems = invoiceItemsToInsert.map((i) => ({
@@ -345,57 +375,123 @@ export async function processPOSCheckout(
     }));
     await trx('sales_invoice_items').insert(finalItems);
 
-    // 4. Create Customer Payment & Liquidity Inflow (Cash in Drawer OR Bank Balance)
+    // 4. Create Customer Payment & Liquidity Inflow (Cash in Drawer OR Bank Balance OR Split)
     if (effectiveAmountPaid > 0) {
-      await trx('customer_payments').insert({
-        customer_id: targetCustomer.id,
-        invoice_id: invoice.id,
-        payment_number: `RCV-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        payment_date: new Date(),
-        amount: effectiveAmountPaid,
-        payment_method: isBank ? 'BANK_TRANSFER' : 'CASH',
-        bank_account_id: isBank ? targetBankId : null,
-        notes: isBank
-          ? `POS Retail Bank Sale (Invoice #${invoice.invoice_number})`
-          : `POS Retail Cash Sale (Invoice #${invoice.invoice_number})`,
-        cheque_status: 'CLEARED',
-        created_by: userId,
-      });
-
-      if (isBank && targetBankId) {
-        // Increment bank account balance
-        await trx('bank_accounts')
-          .where('id', targetBankId)
-          .increment('current_balance', effectiveAmountPaid);
-
-        // Record Bank Transaction inflow
-        const hasBankTx = await trx.schema.hasTable('bank_transactions');
-        if (hasBankTx) {
-          await trx('bank_transactions').insert({
-            bank_account_id: targetBankId,
-            transaction_type: 'DEPOSIT',
-            type: 'INFLOW',
-            amount: effectiveAmountPaid,
-            source_type: 'POS',
-            source: 'POS',
-            reference_id: invoice.id,
-            description: `POS Retail Sale: Invoice #${invoice.invoice_number}`,
-            transaction_date: new Date(),
-            category: 'SALES',
+      if (isSplit) {
+        // 4a. Cash portion
+        if (splitCashNet > 0) {
+          await trx('customer_payments').insert({
+            customer_id: targetCustomer.id,
+            invoice_id: invoice.id,
+            payment_number: `RCV-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}-CASH`,
+            payment_date: new Date(),
+            amount: splitCashNet,
+            payment_method: 'CASH',
+            bank_account_id: null,
+            notes: `POS Retail Cash Split Sale (Invoice #${invoice.invoice_number})`,
+            cheque_status: 'CLEARED',
             created_by: userId,
           });
+
+          const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+          if (hasCdl) {
+            await trx('cash_drawer_ledger').insert({
+              type: 'INFLOW',
+              amount: splitCashNet,
+              reference_id: invoice.id,
+              description: `POS Retail Cash Split Sale: Invoice #${invoice.invoice_number}`,
+              created_by: userId,
+            });
+          }
+        }
+
+        // 4b. Bank portion
+        if (splitBankNet > 0 && targetBankId) {
+          await trx('customer_payments').insert({
+            customer_id: targetCustomer.id,
+            invoice_id: invoice.id,
+            payment_number: `RCV-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}-BANK`,
+            payment_date: new Date(),
+            amount: splitBankNet,
+            payment_method: 'BANK_TRANSFER',
+            bank_account_id: targetBankId,
+            notes: `POS Retail Bank Split Sale (Invoice #${invoice.invoice_number})`,
+            cheque_status: 'CLEARED',
+            created_by: userId,
+          });
+
+          await trx('bank_accounts')
+            .where('id', targetBankId)
+            .increment('current_balance', splitBankNet);
+
+          const hasBankTx = await trx.schema.hasTable('bank_transactions');
+          if (hasBankTx) {
+            await trx('bank_transactions').insert({
+              bank_account_id: targetBankId,
+              transaction_type: 'DEPOSIT',
+              type: 'INFLOW',
+              amount: splitBankNet,
+              source_type: 'POS',
+              source: 'POS',
+              reference_id: invoice.id,
+              description: `POS Retail Split Sale: Invoice #${invoice.invoice_number}`,
+              transaction_date: new Date(),
+              category: 'SALES',
+              created_by: userId,
+            });
+          }
         }
       } else {
-        // Inflow to Cash Drawer ledger
-        const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
-        if (hasCdl) {
-          await trx('cash_drawer_ledger').insert({
-            type: 'INFLOW',
-            amount: effectiveAmountPaid,
-            reference_id: invoice.id,
-            description: `POS Retail Cash Sale: Invoice #${invoice.invoice_number}`,
-            created_by: userId,
-          });
+        await trx('customer_payments').insert({
+          customer_id: targetCustomer.id,
+          invoice_id: invoice.id,
+          payment_number: `RCV-POS-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          payment_date: new Date(),
+          amount: effectiveAmountPaid,
+          payment_method: isBank ? 'BANK_TRANSFER' : 'CASH',
+          bank_account_id: isBank ? targetBankId : null,
+          notes: isBank
+            ? `POS Retail Bank Sale (Invoice #${invoice.invoice_number})`
+            : `POS Retail Cash Sale (Invoice #${invoice.invoice_number})`,
+          cheque_status: 'CLEARED',
+          created_by: userId,
+        });
+
+        if (isBank && targetBankId) {
+          // Increment bank account balance
+          await trx('bank_accounts')
+            .where('id', targetBankId)
+            .increment('current_balance', effectiveAmountPaid);
+
+          // Record Bank Transaction inflow
+          const hasBankTx = await trx.schema.hasTable('bank_transactions');
+          if (hasBankTx) {
+            await trx('bank_transactions').insert({
+              bank_account_id: targetBankId,
+              transaction_type: 'DEPOSIT',
+              type: 'INFLOW',
+              amount: effectiveAmountPaid,
+              source_type: 'POS',
+              source: 'POS',
+              reference_id: invoice.id,
+              description: `POS Retail Sale: Invoice #${invoice.invoice_number}`,
+              transaction_date: new Date(),
+              category: 'SALES',
+              created_by: userId,
+            });
+          }
+        } else {
+          // Inflow to Cash Drawer ledger
+          const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+          if (hasCdl) {
+            await trx('cash_drawer_ledger').insert({
+              type: 'INFLOW',
+              amount: effectiveAmountPaid,
+              reference_id: invoice.id,
+              description: `POS Retail Cash Sale: Invoice #${invoice.invoice_number}`,
+              created_by: userId,
+            });
+          }
         }
       }
     } else if (effectiveAmountPaid < 0) {
@@ -463,33 +559,24 @@ export async function getTodayCashTally(_userId?: string) {
   const endOfDay = new Date();
   endOfDay.setHours(23, 59, 59, 999);
 
-  // 1. Total POS Sales cash collected today
-  const salesResult = await db('sales_invoices')
-    .where(function() {
-      this.whereRaw('date::text = ?', [todayStr])
-        .orWhereBetween('date', [startOfDay, endOfDay])
-        .orWhereBetween('created_at', [startOfDay, endOfDay]);
-    })
-    .whereNot('status', 'CANCELLED')
-    .sum('paid_amount as total_cash')
-    .first();
-
-  const totalSalesCash = Number(salesResult?.total_cash || 0);
-
-  // Standalone Customer Payments in cash today not linked to a sales_invoice
-  const extraCashResult = await db('customer_payments')
+  // 1. Total Customer cash payments collected today (both POS retail sales and standalone payments)
+  const salesCashResult = await db('customer_payments')
     .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
-    .whereNull('invoice_id')
     .andWhere('amount', '>', 0)
     .where(function() {
       this.whereRaw('payment_date::text = ?', [todayStr])
         .orWhereBetween('payment_date', [startOfDay, endOfDay])
         .orWhereBetween('created_at', [startOfDay, endOfDay]);
     })
-    .sum('amount as total_extra')
+    .where(function() {
+      this.whereNull('cheque_status')
+        .orWhereNotIn('cheque_status', ['BOUNCED', 'FAILED']);
+    })
+    .sum('amount as total_cash')
     .first();
 
-  const totalExtraCash = Number(extraCashResult?.total_extra || 0);
+  const totalSalesCash = Number(salesCashResult?.total_cash || 0);
+  const totalExtraCash = 0;
 
   // 2. Total Cash Refunds paid out to customers today
   const refundsResult = await db('customer_payments')
@@ -766,6 +853,68 @@ export async function getPosInvoicesList(filter?: { created_by?: string }) {
       role: inv.created_by_role || 'CASHIER',
     },
   }));
+}
+
+export async function createHeldOrder(input: any, userId?: string) {
+  const countRes = await db('pos_held_orders').count('id as total').first();
+  const currentCount = Number(countRes?.total || 0);
+
+  const timeStr = new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  const refNote = input.reference_note && String(input.reference_note).trim()
+    ? String(input.reference_note).trim()
+    : `Hold #${currentCount + 1} - ${input.customer_name || 'Walk-In'} (${timeStr})`;
+
+  const [heldOrder] = await db('pos_held_orders')
+    .insert({
+      reference_note: refNote,
+      customer_id: input.customer_id || null,
+      customer_name: input.customer_name || null,
+      items: JSON.stringify(input.items),
+      subtotal: input.subtotal || 0,
+      discount: input.discount || 0,
+      total_amount: input.total_amount,
+      payment_method: input.payment_method || 'CASH',
+      split_cash_amount: input.split_cash_amount || null,
+      split_bank_amount: input.split_bank_amount || null,
+      bank_account_id: input.bank_account_id || null,
+      slip_mode: input.slip_mode || 'SINGLE',
+      created_by: userId || null,
+    })
+    .returning('*');
+
+  return {
+    ...heldOrder,
+    items: typeof heldOrder.items === 'string' ? JSON.parse(heldOrder.items) : heldOrder.items,
+  };
+}
+
+export async function getHeldOrdersList() {
+  const held = await db('pos_held_orders as pho')
+    .leftJoin('users as u', 'pho.created_by', 'u.id')
+    .select(
+      'pho.*',
+      'u.name as creator_name'
+    )
+    .orderBy('pho.created_at', 'desc');
+
+  return held.map((order) => ({
+    ...order,
+    items: typeof order.items === 'string' ? JSON.parse(order.items) : order.items,
+    creator_name: order.creator_name || 'Cashier',
+  }));
+}
+
+export async function deleteHeldOrder(id: string) {
+  const deletedCount = await db('pos_held_orders')
+    .where('id', id)
+    .delete();
+
+  return deletedCount > 0;
 }
 
 

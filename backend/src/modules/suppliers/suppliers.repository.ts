@@ -189,9 +189,7 @@ export async function computeSupplierNetBalance(
     advance_payable = Math.round((total_paid - total_billed_liability) * 100) / 100;
   } else {
     outstanding_payable = Math.round((total_billed_liability - total_paid) * 100) / 100;
-    // Check if any unallocated advance payments exist
-    const unallocated_from_payments = Math.max(0, total_paid - total_allocated_from_payments);
-    advance_payable = Math.round(unallocated_from_payments * 100) / 100;
+    advance_payable = 0;
   }
 
   const net_balance = Math.round((outstanding_payable - advance_payable) * 100) / 100;

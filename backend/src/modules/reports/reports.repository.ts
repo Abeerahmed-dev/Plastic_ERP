@@ -3,6 +3,7 @@ import { parseDateFilter, toDateOnlyString } from '../../shared/dateFilter';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
 import { computeCustomerNetBalance } from '../customers/customers.repository';
 import { computeSupplierNetBalance } from '../suppliers/suppliers.repository';
+import { getCashDrawerBalance, findAllBankAccounts } from '../bank-accounts/bank-accounts.repository';
 
 export async function getDashboardMetrics() {
   const walkin = await db('customers').where({ phone: WALKIN_CUSTOMER_PHONE }).first();
@@ -162,124 +163,10 @@ export async function getInventoryLedgerReport() {
  * GET /api/reports/liquidity
  */
 export async function getLiquidityLedgerReport() {
-  // 1. Cash in from customers
-  const cashPayments = await db('customer_payments')
-    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
-    .andWhere('amount', '>', 0)
-    .sum('amount as total')
-    .first();
+  const cash_drawer = await getCashDrawerBalance();
 
-  // 2. Cash refunds out to customers
-  const customerRefunds = await db('customer_payments')
-    .where(function() {
-      this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
-        .orWhere(function() {
-          this.whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
-            .andWhere('amount', '<', 0);
-        });
-    })
-    .sum('amount as total')
-    .first();
-
-  // 3. Cash paid to suppliers directly from counter drawer
-  const supplierCash = await db('supplier_payments')
-    .whereIn('payment_method', ['CASH_DRAWER', 'Cash in Drawer'])
-    .sum('amount as total')
-    .first();
-
-  // 4. Petty cash expenses paid from drawer
-  const expensesCash = await db('expenses')
-    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
-    .sum('amount as total')
-    .first();
-
-  const totalIn = Number(cashPayments?.total || 0);
-  const totalRefunds = Math.abs(Number(customerRefunds?.total || 0));
-  const totalSupplier = Number(supplierCash?.total || 0);
-  const totalExpenses = Number(expensesCash?.total || 0);
-
-  const cash_drawer = Math.max(0, Math.round((totalIn - totalRefunds - totalSupplier - totalExpenses) * 100) / 100);
-
-  const bankInDirect = await db('customer_payments')
-    .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-    .sum('amount as total')
-    .first();
-
-  const bankInClearedCheques = await db('customer_payments')
-    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-    .andWhere('cheque_status', 'CLEARED')
-    .sum('amount as total')
-    .first();
-
-  const bankOutDirect = await db('supplier_payments')
-    .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-    .sum('amount as total')
-    .first();
-
-  const bankOutClearedCheques = await db('supplier_payments')
-    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-    .andWhere('cheque_status', 'CLEARED')
-    .sum('amount as total')
-    .first();
-
-  const bankInTotal = Number(bankInDirect?.total || 0) + Number(bankInClearedCheques?.total || 0);
-  const bankOutTotal = Number(bankOutDirect?.total || 0) + Number(bankOutClearedCheques?.total || 0);
-
-  // Dynamic Multi-Bank Account Funds Aggregation
-  const bankAccounts = await db('bank_accounts').where('is_active', true);
-  let bank_balances = 0;
-
-  if (bankAccounts.length > 0) {
-    const primaryId = bankAccounts[0].id;
-
-    // Aggregate customer payments per bank account
-    const custByBank = await db('customer_payments')
-      .where((qb) => {
-        qb.whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-          .orWhere((inner) => {
-            inner.whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-                 .andWhere('cheque_status', 'CLEARED');
-          });
-      })
-      .select('bank_account_id')
-      .sum('amount as total')
-      .groupBy('bank_account_id');
-
-    // Aggregate supplier payments per bank account
-    const suppByBank = await db('supplier_payments')
-      .where((qb) => {
-        qb.whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-          .orWhere((inner) => {
-            inner.whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-                 .andWhere('cheque_status', 'CLEARED');
-          });
-      })
-      .select('bank_account_id')
-      .sum('amount as total')
-      .groupBy('bank_account_id');
-
-    const cMap = new Map<string | null, number>();
-    for (const c of custByBank) cMap.set(c.bank_account_id || null, Number(c.total || 0));
-
-    const sMap = new Map<string | null, number>();
-    for (const s of suppByBank) sMap.set(s.bank_account_id || null, Number(s.total || 0));
-
-    const unassignedIn = cMap.get(null) || 0;
-    const unassignedOut = sMap.get(null) || 0;
-
-    for (const acc of bankAccounts) {
-      let tIn = cMap.get(acc.id) || 0;
-      let tOut = sMap.get(acc.id) || 0;
-      if (acc.id === primaryId) {
-        tIn += unassignedIn;
-        tOut += unassignedOut;
-      }
-      const accBal = Number(acc.initial_balance || 0) + tIn - tOut;
-      bank_balances += accBal;
-    }
-  } else {
-    bank_balances = Math.max(0, bankInTotal - bankOutTotal);
-  }
+  const allBankAccounts = await findAllBankAccounts();
+  const bank_balances = allBankAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || 0), 0);
 
   const pdcs = await db('customer_payments')
     .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
@@ -745,6 +632,21 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     )
     .orderBy('e.created_at', 'desc');
 
+  let transferQuery = db('cash_drawer_ledger as cdl')
+    .where(function() {
+      this.whereNull('cdl.reference_id')
+        .orWhereILike('cdl.description', '%transfer%');
+    })
+    .select(
+      'cdl.id',
+      'cdl.transaction_date as date',
+      'cdl.created_at',
+      'cdl.type',
+      'cdl.description',
+      'cdl.amount'
+    )
+    .orderBy('cdl.created_at', 'desc');
+
   if (startDate) {
     const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
     custQuery = custQuery.where(function () {
@@ -755,6 +657,9 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     });
     expQuery = expQuery.where(function () {
       this.where('e.created_at', '>=', startDate).orWhereRaw('e.expense_date::text >= ?', [startDateOnly]);
+    });
+    transferQuery = transferQuery.where(function () {
+      this.where('cdl.created_at', '>=', startDate).orWhereRaw('cdl.transaction_date::text >= ?', [startDateOnly]);
     });
   }
 
@@ -770,9 +675,17 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     expQuery = expQuery.where(function () {
       this.where('e.created_at', '<=', endTimestamp).orWhereRaw('e.expense_date::text <= ?', [endDateOnly]);
     });
+    transferQuery = transferQuery.where(function () {
+      this.where('cdl.created_at', '<=', endTimestamp).orWhereRaw('cdl.transaction_date::text <= ?', [endDateOnly]);
+    });
   }
 
-  const [custRows, suppRows, expRows] = await Promise.all([custQuery, suppQuery, expQuery]);
+  const [custRows, suppRows, expRows, transferRows] = await Promise.all([
+    custQuery,
+    suppQuery,
+    expQuery,
+    transferQuery.catch(() => []),
+  ]);
 
   const results: any[] = [];
 
@@ -876,6 +789,25 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
       amount: amt,
       cash_out: amt,
       cash_in: 0,
+      order_details: [],
+    });
+  }
+
+  for (const t of (transferRows || [])) {
+    const amt = Number(t.amount || 0);
+    const isInflow = String(t.type || '').toUpperCase() === 'INFLOW' || String(t.type || '').toUpperCase() === 'DEPOSIT';
+    results.push({
+      id: t.id,
+      date: t.date,
+      created_at: t.created_at,
+      entry_type: 'BANK TRANSFER',
+      source: isInflow ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
+      source_type: isInflow ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
+      transaction_type: isInflow ? 'DEPOSIT' : 'WITHDRAWAL',
+      description: t.description || (isInflow ? 'Internal Bank Transfer to Drawer' : 'Internal Transfer from Drawer to Bank'),
+      amount: amt,
+      cash_in: isInflow ? amt : 0,
+      cash_out: isInflow ? 0 : amt,
       order_details: [],
     });
   }

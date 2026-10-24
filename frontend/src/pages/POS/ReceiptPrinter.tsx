@@ -32,14 +32,18 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
     const totalAmount = Number(invoice.total_amount || 0);
 
     const paymentMethod = String(invoice.payment_method || invoice.paymentMethod || 'CASH').toUpperCase();
-    const isBank = paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name;
-    const isCheque = paymentMethod === 'CHEQUE';
+    const isSplit = paymentMethod === 'SPLIT' || (Number(invoice.split_cash_amount) > 0 && Number(invoice.split_bank_amount) > 0);
+    const isBank = !isSplit && (paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name);
+    const isCheque = !isSplit && paymentMethod === 'CHEQUE';
     const bankNameStr = invoice.bank_name ? ` (${invoice.bank_name})` : '';
 
+    const splitCash = Number(invoice.split_cash_amount ?? invoice.cash_tendered ?? 0);
+    const splitBank = Number(invoice.split_bank_amount ?? 0);
+
     const paidAmount = Number(invoice.paid_amount ?? invoice.amount_paid ?? 0);
-    const cashTendered = isBank || isCheque ? paidAmount : Number(invoice.cash_tendered ?? paidAmount);
+    const cashTendered = isSplit ? splitCash : (isBank || isCheque ? paidAmount : Number(invoice.cash_tendered ?? paidAmount));
     const balanceDue = Number(invoice.balance_due ?? Math.max(0, totalAmount - paidAmount));
-    const changeReturn = isBank || isCheque ? 0 : Number(invoice.change_returned ?? Math.max(0, cashTendered - totalAmount));
+    const changeReturn = isBank || isCheque ? 0 : Number(invoice.change_returned ?? Math.max(0, (isSplit ? (splitCash + splitBank) : cashTendered) - totalAmount));
 
     const receiptContent = (
       <div
@@ -202,7 +206,22 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
               </div>
               {!isRefund && (
                 <>
-                  {isBank ? (
+                  {isSplit ? (
+                    <>
+                      <div className="flex justify-between font-semibold text-gray-800">
+                        <span>Payment Mode / طریقہ:</span>
+                        <span className="font-bold">Split Payment / مشترکہ</span>
+                      </div>
+                      <div className="flex justify-between font-semibold">
+                        <span>Cash Paid / نقد وصول:</span>
+                        <span className="font-bold">Rs. {splitCash.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold">
+                        <span>Bank Transfer{bankNameStr} / بینک:</span>
+                        <span className="font-bold">Rs. {splitBank.toLocaleString()}</span>
+                      </div>
+                    </>
+                  ) : isBank ? (
                     <div className="flex justify-between font-semibold">
                       <span>Bank Transfer{bankNameStr} / بینک ٹرانسفر:</span>
                       <span>Rs. {paidAmount.toLocaleString()}</span>

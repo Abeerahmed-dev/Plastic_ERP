@@ -454,7 +454,7 @@ export const MainLayout = () => {
       {/* Right: slim topbar + page content (full width when on POS) */}
       <div className={`flex flex-col flex-1 ${!hideSidebar ? 'lg:ml-60' : ''} min-h-screen min-w-0 overflow-x-hidden print:ml-0 print:p-0`}>
         {/* Top bar */}
-        <header className="relative sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 justify-between shrink-0 shadow-sm print:hidden">
+        <header className="sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 justify-between shrink-0 shadow-sm print:hidden">
           {/* Left: Hamburger & Brand logo */}
           <div className="flex items-center gap-2.5 z-10">
             {!isPOSPage && (

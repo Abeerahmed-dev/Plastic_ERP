@@ -6,9 +6,33 @@ import {
   getTodayCashTallyController,
   getCashierShiftAuditController,
   getPosInvoicesController,
+  getHeldOrdersController,
+  createHeldOrderController,
+  deleteHeldOrderController,
 } from './pos.controller';
 
 const router = Router();
+
+router.get(
+  '/held-orders',
+  requireAuth,
+  requirePermission('sales:read'),
+  getHeldOrdersController
+);
+
+router.post(
+  '/held-orders',
+  requireAuth,
+  requirePermission('sales:write'),
+  createHeldOrderController
+);
+
+router.delete(
+  '/held-orders/:id',
+  requireAuth,
+  requirePermission('sales:write'),
+  deleteHeldOrderController
+);
 
 router.get(
   '/',

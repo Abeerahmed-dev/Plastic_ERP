@@ -211,8 +211,13 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
     const payments = paymentsByInvoice.get(r.id) || [];
     const linked_debit_notes = debitNotesByInvoice.get(r.id) || [];
 
+    const dynamicStatus = r.status === 'CANCELLED'
+      ? 'CANCELLED'
+      : (balance_due <= 0 ? 'PAID' : (amount_paid > 0 ? 'PARTIAL' : 'UNPAID'));
+
     return {
       ...r,
+      status: dynamicStatus,
       total_amount: original_total,
       linked_returns_total: returned_total,
       net_total: net_invoice_total,
@@ -279,6 +284,9 @@ export async function findPurchaseInvoiceById(id: string) {
   invoice.paid_amount = amount_paid;
   invoice.amount_paid = amount_paid;
   invoice.balance_due = balance_due;
+  invoice.status = invoice.status === 'CANCELLED'
+    ? 'CANCELLED'
+    : (balance_due <= 0 ? 'PAID' : (amount_paid > 0 ? 'PARTIAL' : 'UNPAID'));
 
   const hasAllocationsTable = await db.schema.hasTable('supplier_payment_allocations');
   const allocatedPayments = hasAllocationsTable

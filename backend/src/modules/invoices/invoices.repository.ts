@@ -991,8 +991,13 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
     const payments = paymentsByInvoice.get(r.id) || [];
     const credit_notes = creditNotesByInvoice.get(r.id) || [];
 
+    const dynamicStatus = r.status === 'CANCELLED'
+      ? 'CANCELLED'
+      : (balance_due <= 0 ? 'PAID' : (amount_paid > 0 ? 'PARTIAL' : 'UNPAID'));
+
     return {
       ...r,
+      status: dynamicStatus,
       total_amount: original_total,
       linked_returns_total: returned_total,
       net_total: net_invoice_total,
@@ -1086,6 +1091,9 @@ export async function findInvoiceById(id: string) {
   invoice.paid_amount = amount_paid;
   invoice.amount_paid = amount_paid;
   invoice.balance_due = balance_due;
+  invoice.status = invoice.status === 'CANCELLED'
+    ? 'CANCELLED'
+    : (balance_due <= 0 ? 'PAID' : (amount_paid > 0 ? 'PARTIAL' : 'UNPAID'));
 
   const hasAllocationsTable = await db.schema.hasTable('payment_allocations');
   const allocatedPayments = hasAllocationsTable
@@ -1099,6 +1107,7 @@ export async function findInvoiceById(id: string) {
           'cp.payment_date',
           'pa.allocated_amount as amount',
           'cp.payment_method',
+          'cp.bank_account_id',
           'cp.notes',
           'cp.cheque_number',
           'cp.created_at'
@@ -1116,6 +1125,7 @@ export async function findInvoiceById(id: string) {
       'payment_date',
       'amount',
       'payment_method',
+      'bank_account_id',
       'notes',
       'cheque_number',
       'created_at'
@@ -1134,11 +1144,25 @@ export async function findInvoiceById(id: string) {
         amount: Number(p.amount || 0),
         payment_method: p.payment_method,
         payment_number: p.payment_number,
+        bank_account_id: p.bank_account_id || null,
         reference_number: p.payment_number || p.cheque_number || p.notes || '',
         reference_notes: p.notes || '',
         notes: p.notes || '',
         cheque_number: p.cheque_number || null,
       });
+    }
+  }
+
+  const cashPayments = payments.filter((p: any) => ['CASH', 'Cash', 'CASH_DRAWER'].includes(p.payment_method));
+  const bankPayments = payments.filter((p: any) => ['BANK', 'BANK_TRANSFER', 'Bank Transfer', 'Online'].includes(p.payment_method));
+  if (cashPayments.length > 0 && bankPayments.length > 0) {
+    invoice.payment_method = 'SPLIT';
+    invoice.split_cash_amount = cashPayments.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+    invoice.split_bank_amount = bankPayments.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+    const bankP = bankPayments.find((p: any) => p.bank_account_id);
+    if (bankP?.bank_account_id) {
+      const bRow = await db('bank_accounts').where('id', bankP.bank_account_id).first();
+      if (bRow) invoice.bank_name = bRow.bank_name;
     }
   }
 

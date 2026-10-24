@@ -396,9 +396,6 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                     Balance Due
                   </th>
                 )}
-                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Status
-                </th>
                 <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Actions
                 </th>
@@ -407,7 +404,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={isCashier || activeTab === 'pos' ? 7 : 8} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isCashier || activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       <span className="mt-2">Loading invoices...</span>
@@ -416,7 +413,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                 </tr>
               ) : filteredTableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isCashier || activeTab === 'pos' ? 7 : 8} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={isCashier || activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     {selectedCity || selectedName || selectedInvoice
                       ? 'No invoices match the active cascading filters. Try resetting filters.'
                       : activeTab === 'pos'
@@ -530,9 +527,6 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                           {formatCurrency(balanceDue)}
                         </td>
                       )}
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(invoice)}
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-xs">
                         <div className="flex items-center justify-end gap-1.5">
                           {isPos && (

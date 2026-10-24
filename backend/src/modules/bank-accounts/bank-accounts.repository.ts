@@ -139,38 +139,83 @@ export async function getBankAccountBalance(accountId: string, trx: Knex.Transac
 }
 
 export async function getCashDrawerBalance(trx: Knex.Transaction | Knex = db): Promise<number> {
+  // 1. Inflow from customer cash payments (POS retail sales, invoice payments, customer advances)
   const custRes = await trx('customer_payments')
-    .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'CASH_REFUND'])
+    .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+    .andWhere('amount', '>', 0)
+    .where(function() {
+      this.whereNull('cheque_status')
+        .orWhereNotIn('cheque_status', ['BOUNCED', 'FAILED']);
+    })
     .sum('amount as total')
     .first();
 
+  // 2. Outflow from customer refunds in cash
+  const custRefundRes = await trx('customer_payments')
+    .where(function() {
+      this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
+        .orWhere(function() {
+          this.whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+            .andWhere('amount', '<', 0);
+        });
+    })
+    .sum('amount as total')
+    .first();
+
+  // 3. Outflow from supplier payments in cash
   const suppRes = await trx('supplier_payments')
-    .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'CASH_REFUND'])
+    .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+    .andWhere('amount', '>', 0)
+    .where(function() {
+      this.whereNull('cheque_status')
+        .orWhereNotIn('cheque_status', ['BOUNCED', 'FAILED']);
+    })
     .sum('amount as total')
     .first();
 
+  // 4. Inflow from supplier refunds in cash
+  const suppRefundRes = await trx('supplier_payments')
+    .where(function() {
+      this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
+        .orWhere(function() {
+          this.whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+            .andWhere('amount', '<', 0);
+        });
+    })
+    .sum('amount as total')
+    .first();
+
+  // 5. Outflow from cash expenses
   const expRes = await trx('expenses')
-    .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer'])
+    .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
+    .andWhere('amount', '>', 0)
     .sum('amount as total')
     .first();
 
-  let cdlInflow = 0;
-  let cdlOutflow = 0;
+  // 6. Net internal bank transfers to/from cash drawer (only internal transfers without reference_id)
+  let transferIn = 0;
+  let transferOut = 0;
   const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
   if (hasCdl) {
-    const cdlRows = await trx('cash_drawer_ledger').select('type', 'amount');
-    for (const r of cdlRows) {
+    const transferRows = await trx('cash_drawer_ledger')
+      .where(function() {
+        this.whereNull('reference_id')
+          .orWhereILike('description', '%transfer%');
+      })
+      .select('type', 'amount');
+
+    for (const r of transferRows) {
       const t = String(r.type || '').toUpperCase();
       if (t === 'INFLOW' || t === 'DEPOSIT') {
-        cdlInflow += Number(r.amount || 0);
+        transferIn += Number(r.amount || 0);
       } else if (t === 'OUTFLOW' || t === 'WITHDRAWAL') {
-        cdlOutflow += Number(r.amount || 0);
+        transferOut += Number(r.amount || 0);
       }
     }
   }
 
-  const totalIn = Number(custRes?.total || 0) + cdlInflow;
-  const totalOut = Number(suppRes?.total || 0) + Number(expRes?.total || 0) + cdlOutflow;
+  const totalIn = Number(custRes?.total || 0) + Math.abs(Number(suppRefundRes?.total || 0)) + transferIn;
+  const totalOut = Number(suppRes?.total || 0) + Number(expRes?.total || 0) + Math.abs(Number(custRefundRes?.total || 0)) + transferOut;
 
   return Math.round((totalIn - totalOut) * 100) / 100;
 }

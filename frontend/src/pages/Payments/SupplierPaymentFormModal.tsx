@@ -70,7 +70,15 @@ export const SupplierPaymentFormModal = ({
     queryFn: bankAccountsService.getBankAccounts,
   });
 
-  const invoices = invoicesResponse?.data?.filter(inv => inv.status !== 'PAID') || [];
+  const invoices = (invoicesResponse?.data || []).filter((inv: any) => {
+    if (inv.status === 'PAID') return false;
+    const original = Number(inv.total_amount || 0);
+    const returned = Number(inv.linked_returns_total || 0);
+    const net = inv.net_invoice_total !== undefined ? Number(inv.net_invoice_total) : (original - returned);
+    const paid = Number(inv.paid_amount || inv.amount_paid || 0);
+    const balance = inv.balance_due !== undefined ? Number(inv.balance_due) : Math.round((net - paid) * 100) / 100;
+    return balance > 0;
+  });
   const currentInvoiceId = selectedInvoiceId;
   const activeInvoice = invoices.find((inv) => String(inv.id) === String(currentInvoiceId));
   const selectedBill = activeInvoice;
@@ -87,6 +95,9 @@ export const SupplierPaymentFormModal = ({
     (selectedBill as any).balance_due = selectedBillBalance;
   }
 
+  const selectedSupplier = suppliersResponse?.data?.find((s) => s.id === selectedSupplierId);
+  const supplierOutstanding = Number(selectedSupplier?.outstanding_payable ?? (selectedSupplier as any)?.outstanding_balance ?? 0);
+
   const formatDate = (dateStr?: string | Date) => {
     if (!dateStr) return '';
     try {
@@ -99,8 +110,9 @@ export const SupplierPaymentFormModal = ({
   };
 
   const handleClearFullBalance = () => {
-    if (selectedBillBalance > 0) {
-      setValue('amount', Math.round(selectedBillBalance * 100) / 100, {
+    const target = selectedBillBalance > 0 ? selectedBillBalance : (supplierOutstanding > 0 ? supplierOutstanding : 0);
+    if (target > 0) {
+      setValue('amount', Math.round(target * 100) / 100, {
         shouldValidate: true,
         shouldDirty: true,
         shouldTouch: true,
@@ -175,10 +187,10 @@ export const SupplierPaymentFormModal = ({
             {selectedSupplierId && (
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Select Purchase Bill to Settle <span className="text-red-500">*</span>
+                  Select Purchase Bill to Settle (Optional)
                 </label>
                 <select {...register('purchase_invoice_id')} className={inputCls(!!errors.purchase_invoice_id)}>
-                  <option value="">-- Choose a Purchase Bill to Settle --</option>
+                  <option value="">-- No Specific Bill (On-Account / Closing Balance) --</option>
                   {invoices.map((invoice: any) => (
                     <option key={invoice.id} value={invoice.id}>
                       {invoice.invoice_number} — Total: Rs. {invoice.total_amount} | Due: Rs. {invoice.balance_due !== undefined ? invoice.balance_due : Math.max(0, Math.round((Number(invoice.total_amount) - Number(invoice.paid_amount || 0)) * 100) / 100)}
@@ -200,8 +212,8 @@ export const SupplierPaymentFormModal = ({
                   </div>
                 )}
                 {invoices.length === 0 && (
-                  <p className="mt-1 text-xs text-amber-600 font-medium">
-                    No unpaid bills found for this supplier. For advance payments, use "Log Advance Deposit".
+                  <p className="mt-1 text-xs text-slate-500 font-medium">
+                    No unpaid bills found. Payment will be credited directly towards the supplier's closing ledger balance.
                   </p>
                 )}
                 {errors.purchase_invoice_id && <p className="mt-1 text-xs text-red-600">{errors.purchase_invoice_id.message}</p>}
@@ -232,11 +244,15 @@ export const SupplierPaymentFormModal = ({
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm font-medium text-slate-700">Amount</label>
-                  {selectedBill && (
+                  {selectedBill ? (
                     <span className="text-xs font-bold text-slate-600">
                       Balance Due: <span className="font-mono text-blue-700 font-extrabold">PKR {selectedBillBalance.toFixed(2)}</span>
                     </span>
-                  )}
+                  ) : supplierOutstanding > 0 ? (
+                    <span className="text-xs font-bold text-slate-600">
+                      Closing Balance: <span className="font-mono text-blue-700 font-extrabold">PKR {supplierOutstanding.toFixed(2)}</span>
+                    </span>
+                  ) : null}
                 </div>
                 <div className="relative w-full">
                   <input
@@ -245,9 +261,9 @@ export const SupplierPaymentFormModal = ({
                     min="0.01"
                     max={selectedBill ? Math.max(0, (selectedBill as any).balance_due) : undefined}
                     {...register('amount')}
-                    className={inputCls(!!errors.amount) + (selectedBill && selectedBillBalance > 0 ? ' pr-36' : '')}
+                    className={inputCls(!!errors.amount) + ((selectedBill && selectedBillBalance > 0) || (!selectedBill && supplierOutstanding > 0) ? ' pr-36' : '')}
                   />
-                  {selectedBill && selectedBillBalance > 0 && (
+                  {((selectedBill && selectedBillBalance > 0) || (!selectedBill && supplierOutstanding > 0)) && (
                     <button
                       type="button"
                       onClick={handleClearFullBalance}

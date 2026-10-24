@@ -16,6 +16,7 @@ async function listAndClean() {
 
     // Tables that hold business transactions & operational data
     const candidateTables = [
+      'pending_deliveries',
       'payment_allocations',
       'supplier_payment_allocations',
       'customer_payments',
@@ -49,8 +50,8 @@ async function listAndClean() {
 
     // Reset bank accounts balance to 0 if bank_accounts exists
     if (tableNames.includes('bank_accounts')) {
-      console.log('\n--- Step 2: Resetting bank_accounts initial_balance to 0.00 ---');
-      await db('bank_accounts').update({ initial_balance: 0.00 });
+      console.log('\n--- Step 2: Resetting bank_accounts initial_balance and current_balance to 0.00 ---');
+      await db('bank_accounts').update({ initial_balance: 0.00, current_balance: 0.00 });
       // Ensure primary account exists
       const primaryBank = await db('bank_accounts').first();
       if (!primaryBank) {
@@ -59,6 +60,7 @@ async function listAndClean() {
           bank_name: 'Main Commercial Bank',
           account_number: '000000000000',
           initial_balance: 0.00,
+          current_balance: 0.00,
           is_active: true,
         });
       }
@@ -89,6 +91,7 @@ async function listAndClean() {
 
     console.log('\n--- Step 4: Verification of Table Counts ---');
     const verificationTables = [
+      'pending_deliveries',
       'sales_invoices',
       'sales_invoice_items',
       'purchase_invoices',

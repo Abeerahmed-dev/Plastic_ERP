@@ -231,7 +231,6 @@ export default function PurchasesListPage() {
                   <th className="px-6 py-4 font-semibold">Party / Supplier</th>
                   <th className="px-6 py-4 font-semibold">Billed By</th>
                   {!isCashier && <th className="px-6 py-4 font-semibold text-right">Total Amount</th>}
-                  <th className="px-6 py-4 font-semibold text-center">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -275,21 +274,6 @@ export default function PurchasesListPage() {
                     {!isCashier && (
                       <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
                     )}
-                    <td className="px-6 py-4 text-center">
-                      {inv.balance_due !== undefined && Number(inv.balance_due) < 0 ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          OVERPAID
-                        </span>
-                      ) : (
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                          inv.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                          inv.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {inv.status}
-                        </span>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>

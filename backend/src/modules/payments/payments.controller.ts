@@ -21,7 +21,7 @@ export async function listPayments(req: Request, res: Response, next: NextFuncti
 export async function createPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const userRole = (req.user?.roleName || '').toUpperCase();
-    if (userRole === 'CASHIER') {
+    if (userRole === 'CASHIER' && req.body.payment_method !== 'SPLIT') {
       req.body.payment_method = 'CASH';
     }
 
