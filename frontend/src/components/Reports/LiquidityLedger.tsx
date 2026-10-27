@@ -118,16 +118,8 @@ export function LiquidityLedger() {
               title="Move funds between Bank Accounts and Cash Drawer"
             >
               <ArrowRightLeft className="w-3.5 h-3.5 text-slate-950" />
-              ⇄ Transfer Funds
+              Transfer Funds
             </button>
-            <Link
-              to="/pos"
-              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all active:scale-95 border border-amber-500/30"
-              title="Open Walk-in POS"
-            >
-              <ShoppingCart className="w-4 h-4 text-slate-950" />
-              <span>Walk-in POS</span>
-            </Link>
             {isLoadingLiquidity && (
               <span className="text-xs text-blue-600 animate-pulse font-medium">Loading...</span>
             )}

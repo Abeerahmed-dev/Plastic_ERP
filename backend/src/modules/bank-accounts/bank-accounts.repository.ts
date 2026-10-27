@@ -214,8 +214,21 @@ export async function getCashDrawerBalance(trx: Knex.Transaction | Knex = db): P
     }
   }
 
+  // 7. Outflow from legacy unlinked employee salary advances / payments in cash (not tracked via expenses)
+  let empCashOut = 0;
+  const hasEmpLedger = await trx.schema.hasTable('employee_ledger');
+  if (hasEmpLedger) {
+    const empRes = await trx('employee_ledger')
+      .where('payment_method', 'CASH')
+      .whereIn('transaction_type', ['ADVANCE', 'PAYMENT'])
+      .whereNull('expense_id')
+      .sum('amount as total')
+      .first();
+    empCashOut = Number(empRes?.total || 0);
+  }
+
   const totalIn = Number(custRes?.total || 0) + Math.abs(Number(suppRefundRes?.total || 0)) + transferIn;
-  const totalOut = Number(suppRes?.total || 0) + Number(expRes?.total || 0) + Math.abs(Number(custRefundRes?.total || 0)) + transferOut;
+  const totalOut = Number(suppRes?.total || 0) + Number(expRes?.total || 0) + Math.abs(Number(custRefundRes?.total || 0)) + transferOut + empCashOut;
 
   return Math.round((totalIn - totalOut) * 100) / 100;
 }

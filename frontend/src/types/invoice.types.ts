@@ -30,6 +30,13 @@ export interface Invoice {
   change_returned?: number | null;
   status: 'DRAFT' | 'UNPAID' | 'PARTIAL' | 'PAID' | 'CANCELLED';
   notes: string | null;
+  created_by?: string | null;
+  created_by_name?: string | null;
+  created_by_role?: string | null;
+  creator?: {
+    name?: string;
+    role?: string;
+  };
   created_at: string;
   updated_at: string;
   items?: InvoiceItem[];

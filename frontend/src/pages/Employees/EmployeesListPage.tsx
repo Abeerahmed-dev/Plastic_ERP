@@ -1,14 +1,16 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus, Search, Edit2, Trash2, Users, Clock, DollarSign,
-  Briefcase, Phone, CheckCircle2, Sparkles,
+  Briefcase, Phone, CheckCircle2, Sparkles, BookOpen, ChevronRight,
 } from 'lucide-react';
 import { employeesService } from '../../services/employees.service';
 import { Employee, CreateEmployeeData } from '../../types/employee.types';
 import { EmployeeFormModal } from './EmployeeFormModal';
 
 export default function EmployeesListPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -127,7 +129,7 @@ export default function EmployeesListPage() {
               <Users className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Store Employees</h1>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight">Staff</h1>
               <p className="text-sm font-medium text-slate-500 mt-0.5">
                 Physical store, factory & warehouse workers directory (timings, designation & salaries)
               </p>
@@ -264,19 +266,22 @@ export default function EmployeesListPage() {
             <thead className="bg-slate-50/80">
               <tr>
                 <th className="px-5 py-3.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
-                  ID & Worker Name
-                </th>
-                <th className="px-5 py-3.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
-                  Phone Number
+                  Worker & ID
                 </th>
                 <th className="px-5 py-3.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Designation
                 </th>
                 <th className="px-5 py-3.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
-                  Store Timing
+                  Timing
                 </th>
                 <th className="px-5 py-3.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Monthly Salary
+                </th>
+                <th className="px-5 py-3.5 text-xs font-bold text-rose-700 uppercase tracking-wider">
+                  Advance Taken
+                </th>
+                <th className="px-5 py-3.5 text-xs font-bold text-emerald-700 uppercase tracking-wider">
+                  Remaining Salary
                 </th>
                 <th className="px-5 py-3.5 text-xs font-bold text-slate-600 uppercase tracking-wider">
                   Status
@@ -289,16 +294,16 @@ export default function EmployeesListPage() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-16 text-center text-sm text-slate-500">
+                  <td colSpan={8} className="px-6 py-16 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
-                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
+                      <div className="h-7 w-7 animate-spin rounded-full border-2 border-amber-500 border-t-transparent"></div>
                       <span className="mt-2.5 font-medium">Loading store workers...</span>
                     </div>
                   </td>
                 </tr>
               ) : filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={8} className="px-6 py-16 text-center text-sm text-slate-400">
                     <Users className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                     <p className="font-semibold text-slate-600">No store workers found</p>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -307,118 +312,159 @@ export default function EmployeesListPage() {
                   </td>
                 </tr>
               ) : (
-                filteredEmployees.map((emp) => (
-                  <tr key={emp.id} className="hover:bg-slate-50/70 transition-colors">
-                    {/* ID & Worker Name */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 text-blue-700 font-black text-sm shadow-2xs">
-                          {emp.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">{emp.name}</div>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[11px] font-mono font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
-                              {emp.employee_id}
-                            </span>
-                            {emp.cnic && (
-                              <span className="text-[11px] text-slate-400">
-                                • {emp.cnic}
+                filteredEmployees.map((emp) => {
+                  const advances = Number(emp.current_month_advances || 0);
+                  const baseSalary = Number(emp.salary || 0);
+                  const remaining = Number(
+                    emp.current_month_remaining !== undefined
+                      ? emp.current_month_remaining
+                      : baseSalary - advances
+                  );
+
+                  return (
+                    <tr
+                      key={emp.id}
+                      onClick={() => navigate(`/employees/${emp.id}`)}
+                      className="hover:bg-amber-50/40 transition-colors cursor-pointer group"
+                    >
+                      {/* ID & Worker Name */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-black text-sm shadow-2xs group-hover:scale-105 transition-transform">
+                            {emp.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-sm font-bold text-slate-900 group-hover:text-amber-700 transition-colors flex items-center gap-1.5">
+                              <span>{emp.name}</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[11px] font-mono font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                                {emp.employee_id}
                               </span>
-                            )}
+                              {emp.phone && (
+                                <span className="text-[11px] text-slate-500">
+                                  • {emp.phone}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Phone Number */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      {emp.phone ? (
-                        <a
-                          href={`tel:${emp.phone}`}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-blue-600 transition"
-                        >
-                          <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>{emp.phone}</span>
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-400 italic">No phone</span>
-                      )}
-                    </td>
+                      {/* Designation */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                          <Briefcase className="w-3 h-3 text-slate-500" />
+                          {emp.designation}
+                        </span>
+                      </td>
 
-                    {/* Designation */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200/80">
-                        <Briefcase className="w-3 h-3 text-amber-600" />
-                        {emp.designation}
-                      </span>
-                    </td>
+                      {/* Store Timing */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700">
+                          <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          <span>{emp.store_timing || 'Standard Hours'}</span>
+                        </div>
+                      </td>
 
-                    {/* Store Timing */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700">
-                        <Clock className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                        <span>{emp.store_timing || 'Standard Hours'}</span>
-                      </div>
-                    </td>
+                      {/* Monthly Salary */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className="text-sm font-bold font-mono text-slate-900">
+                          Rs. {baseSalary.toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block font-medium">/ month</span>
+                      </td>
 
-                    {/* Monthly Salary */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <span className="text-sm font-black font-mono text-slate-900">
-                        Rs. {Number(emp.salary || 0).toLocaleString()}
-                      </span>
-                      <span className="text-[10px] text-slate-400 block font-medium">/ month</span>
-                    </td>
+                      {/* Advance Taken (This Month) */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        {advances > 0 ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold font-mono bg-rose-50 text-rose-700 border border-rose-200">
+                            - Rs. {advances.toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400 font-mono">—</span>
+                        )}
+                      </td>
 
-                    {/* Status */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                          emp.status === 'ACTIVE'
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : emp.status === 'ON_LEAVE'
-                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                            : 'bg-rose-50 text-rose-700 border border-rose-200'
-                        }`}
-                      >
+                      {/* Remaining Salary (This Month) */}
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className="text-sm font-black font-mono text-emerald-700">
+                          Rs. {remaining.toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-emerald-600 block font-medium">payable</span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-5 py-4 whitespace-nowrap">
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${
                             emp.status === 'ACTIVE'
-                              ? 'bg-emerald-500'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : emp.status === 'ON_LEAVE'
-                              ? 'bg-amber-500'
-                              : 'bg-rose-500'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200'
                           }`}
-                        />
-                        {emp.status === 'ACTIVE'
-                          ? 'Active'
-                          : emp.status === 'ON_LEAVE'
-                          ? 'On Leave'
-                          : 'Inactive'}
-                      </span>
-                    </td>
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              emp.status === 'ACTIVE'
+                                ? 'bg-emerald-500'
+                                : emp.status === 'ON_LEAVE'
+                                ? 'bg-amber-500'
+                                : 'bg-rose-500'
+                            }`}
+                          />
+                          {emp.status === 'ACTIVE'
+                            ? 'Active'
+                            : emp.status === 'ON_LEAVE'
+                            ? 'On Leave'
+                            : 'Inactive'}
+                        </span>
+                      </td>
 
-                    {/* Actions */}
-                    <td className="px-5 py-4 whitespace-nowrap text-right text-sm">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleOpenEdit(emp)}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                          title="Edit worker"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirmId(emp.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                          title="Delete worker"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      {/* Actions */}
+                      <td className="px-5 py-4 whitespace-nowrap text-right text-sm">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/employees/${emp.id}`);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs shadow-2xs transition active:scale-95 cursor-pointer"
+                            title="View Employee Ledger & Advances"
+                          >
+                            <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Ledger</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit(emp);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                            title="Edit worker"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmId(emp.id);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                            title="Delete worker"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -362,7 +362,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                   className="w-4 h-4 text-emerald-600 rounded-md border-slate-300 pointer-events-none"
                 />
                 <div>
-                  <span className="text-xs font-bold block flex items-center gap-1">
+                  <span className="text-xs font-bold flex items-center gap-1">
                     <ShoppingBag className="w-3.5 h-3.5 text-emerald-600" />
                     Inflow: POS
                   </span>
@@ -395,7 +395,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                   className="w-4 h-4 text-blue-600 rounded-md border-slate-300 pointer-events-none"
                 />
                 <div>
-                  <span className="text-xs font-bold block flex items-center gap-1">
+                  <span className="text-xs font-bold flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-blue-600" />
                     Inflow: Customer & Capital
                   </span>
@@ -428,7 +428,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                   className="w-4 h-4 text-rose-600 rounded-md border-slate-300 pointer-events-none"
                 />
                 <div>
-                  <span className="text-xs font-bold block flex items-center gap-1">
+                  <span className="text-xs font-bold flex items-center gap-1">
                     <ArrowUpRight className="w-3.5 h-3.5 text-rose-600" />
                     Outflows
                   </span>

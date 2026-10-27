@@ -24,6 +24,7 @@ import MarginAnalyticsPage from './pages/Reports/MarginAnalyticsPage';
 import InventoryValuationPage from './pages/Reports/InventoryValuationPage';
 import SettingsPage from './pages/Settings/SettingsPage';
 import EmployeesListPage from './pages/Employees/EmployeesListPage';
+import EmployeeDetailPage from './pages/Employees/EmployeeDetailPage';
 import ExchangePage from './pages/Exchange/ExchangePage';
 
 function App() {
@@ -47,6 +48,7 @@ function App() {
           <Route path="/dashboard" element={isCashier ? <Navigate to="/pos" replace /> : <Dashboard />} />
           <Route path="/users" element={isCashier ? <Navigate to="/pos" replace /> : <Navigate to="/settings?tab=employees" replace />} />
           <Route path="/employees" element={isCashier ? <Navigate to="/pos" replace /> : <EmployeesListPage />} />
+          <Route path="/employees/:id" element={isCashier ? <Navigate to="/pos" replace /> : <EmployeeDetailPage />} />
           <Route path="/settings" element={isCashier ? <Navigate to="/pos" replace /> : <SettingsPage />} />
           <Route path="/products" element={<ProductsListPage />} />
           <Route path="/categories" element={<CategoriesPage />} />

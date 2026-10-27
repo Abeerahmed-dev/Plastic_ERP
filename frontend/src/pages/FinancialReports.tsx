@@ -456,16 +456,8 @@ export default function FinancialReports() {
               title="Move funds between Bank Accounts and Cash Drawer"
             >
               <ArrowRightLeft className="w-4 h-4 text-slate-950" />
-              ⇄ Transfer Funds
+              Transfer Funds
             </button>
-            <Link
-              to="/pos"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-sm hover:shadow transition-all active:scale-95 border border-amber-500/30"
-              title="Open Walk-in POS"
-            >
-              <ShoppingCart className="w-4 h-4 text-slate-950" />
-              <span>Walk-in POS</span>
-            </Link>
             {isLoadingLiquidity && <span className="text-xs text-blue-600 animate-pulse font-medium">Loading liquidity...</span>}
           </div>
         </div>

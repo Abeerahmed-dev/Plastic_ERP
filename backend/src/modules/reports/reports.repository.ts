@@ -647,6 +647,26 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     )
     .orderBy('cdl.created_at', 'desc');
 
+  const hasEmpLedger = await db.schema.hasTable('employee_ledger');
+  let empCashQuery = hasEmpLedger
+    ? db('employee_ledger as el')
+        .leftJoin('employees as emp', 'el.employee_id', 'emp.id')
+        .where('el.payment_method', 'CASH')
+        .whereIn('el.transaction_type', ['ADVANCE', 'PAYMENT'])
+        .whereNull('el.expense_id')
+        .select(
+          'el.id',
+          'el.date as date',
+          'el.created_at',
+          'el.transaction_type',
+          'el.description',
+          'el.amount',
+          'emp.name as employee_name',
+          'emp.employee_id as employee_code'
+        )
+        .orderBy('el.created_at', 'desc')
+    : null;
+
   if (startDate) {
     const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
     custQuery = custQuery.where(function () {
@@ -661,6 +681,11 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     transferQuery = transferQuery.where(function () {
       this.where('cdl.created_at', '>=', startDate).orWhereRaw('cdl.transaction_date::text >= ?', [startDateOnly]);
     });
+    if (empCashQuery) {
+      empCashQuery = empCashQuery.where(function () {
+        this.where('el.created_at', '>=', startDate).orWhereRaw('el.date::text >= ?', [startDateOnly]);
+      });
+    }
   }
 
   if (endDate) {
@@ -678,13 +703,19 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     transferQuery = transferQuery.where(function () {
       this.where('cdl.created_at', '<=', endTimestamp).orWhereRaw('cdl.transaction_date::text <= ?', [endDateOnly]);
     });
+    if (empCashQuery) {
+      empCashQuery = empCashQuery.where(function () {
+        this.where('el.created_at', '<=', endTimestamp).orWhereRaw('el.date::text <= ?', [endDateOnly]);
+      });
+    }
   }
 
-  const [custRows, suppRows, expRows, transferRows] = await Promise.all([
+  const [custRows, suppRows, expRows, transferRows, empCashRows] = await Promise.all([
     custQuery,
     suppQuery,
     expQuery,
     transferQuery.catch(() => []),
+    empCashQuery ? empCashQuery.catch(() => []) : Promise.resolve([]),
   ]);
 
   const results: any[] = [];
@@ -813,6 +844,24 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
       amount: amt,
       cash_in: isInflow ? amt : 0,
       cash_out: isInflow ? 0 : amt,
+      order_details: [],
+    });
+  }
+
+  for (const emp of (empCashRows || [])) {
+    const amt = Number(emp.amount || 0);
+    results.push({
+      id: emp.id,
+      date: emp.date,
+      created_at: emp.created_at,
+      entry_type: 'STAFF SALARY / ADVANCE',
+      source: 'OUTFLOW',
+      source_type: 'OUTFLOW',
+      transaction_type: 'WITHDRAWAL',
+      description: `Staff Payout: ${emp.employee_name || 'Staff'}${emp.employee_code ? ` (${emp.employee_code})` : ''} - ${emp.description || emp.transaction_type}`,
+      amount: amt,
+      cash_out: amt,
+      cash_in: 0,
       order_details: [],
     });
   }

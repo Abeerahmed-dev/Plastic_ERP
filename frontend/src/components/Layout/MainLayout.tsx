@@ -69,7 +69,7 @@ const navSections: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'Management',
     items: [
-      { to: '/employees', label: 'Store Staff', icon: Users, permission: null },
+      { to: '/employees', label: 'Staff', icon: Users, permission: null },
       { to: '/settings', label: 'Settings', icon: Settings, permission: null },
     ],
   },
@@ -534,7 +534,7 @@ export const MainLayout = () => {
             </div>
           )}
 
-          {/* Right: POS Sale Invoices + Go to SBS ERP + User info chip */}
+          {/* Right: POS Sale Invoices + Walk-in POS + Go to SBS ERP + User info chip */}
           <div className="flex items-center gap-2.5 z-10">
             {/* POS Sale Invoices button: directly beside Go to SBS ERP */}
             {isPOSPage && (
@@ -545,6 +545,18 @@ export const MainLayout = () => {
               >
                 <FileText className="w-4 h-4 text-amber-400" />
                 <span>POS Sale Invoices</span>
+              </Link>
+            )}
+
+            {/* Walk-in POS button: In top navbar on all pages */}
+            {!isPOSPage && (
+              <Link
+                to="/pos"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md shadow-amber-500/20 transition-all active:scale-95 mr-1"
+                title="Open Walk-in POS Terminal"
+              >
+                <ShoppingCart className="w-4 h-4 text-slate-950" />
+                <span>Walk-in POS</span>
               </Link>
             )}
 

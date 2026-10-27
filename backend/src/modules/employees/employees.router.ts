@@ -6,6 +6,9 @@ import {
   getEmployeeByIdController,
   updateEmployeeController,
   deleteEmployeeController,
+  getEmployeeLedgerController,
+  addEmployeeLedgerEntryController,
+  deleteEmployeeLedgerEntryController,
 } from './employees.controller';
 
 const router = Router();
@@ -18,4 +21,10 @@ router.post('/', createEmployeeController);
 router.put('/:id', updateEmployeeController);
 router.delete('/:id', deleteEmployeeController);
 
+// Employee Ledger & Advances
+router.get('/:id/ledger', getEmployeeLedgerController);
+router.post('/:id/ledger', addEmployeeLedgerEntryController);
+router.delete('/:id/ledger/:entryId', deleteEmployeeLedgerEntryController);
+
 export { router as employeesRouter };
+

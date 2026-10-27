@@ -171,14 +171,14 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
                   title="Move funds between Bank Accounts and Cash Drawer"
                 >
                   <ArrowRightLeft className="w-4 h-4 text-emerald-200" />
-                  ⇄ Transfer Funds
+                  Transfer Funds
                 </button>
                 <button
                   onClick={handleOpenCreate}
                   className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white text-emerald-800 font-bold text-xs hover:bg-emerald-50 transition shadow-sm active:scale-95 shrink-0"
                 >
                   <Plus className="w-4 h-4 text-emerald-600" />
-                  + Add Bank Account
+                  Add Bank Account
                 </button>
               </div>
             )}
