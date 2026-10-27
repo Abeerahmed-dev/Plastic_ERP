@@ -27,6 +27,7 @@ import incomingPdcsRouter from './modules/incoming-pdcs/incoming-pdcs.router';
 import customerRefundsRouter from './modules/customer-refunds/customer-refunds.router';
 import inventoryRouter from './modules/inventory/inventory.router';
 import { employeesRouter } from './modules/employees/employees.router';
+import { exchangesRouter } from './modules/exchanges/exchanges.router';
 import devRouter from './modules/dev/dev.router';
 import { fail, ok } from './shared/apiResponse';
 
@@ -101,6 +102,8 @@ export function createApp(): Application {
   app.use('/api/customer-refunds', customerRefundsRouter);
   app.use('/api/v1/employees', employeesRouter);
   app.use('/api/employees', employeesRouter);
+  app.use('/api/v1/exchanges', exchangesRouter);
+  app.use('/api/exchanges', exchangesRouter);
   app.use('/api/v1/onboarding', onboardingRouter);
   app.use('/api/dev', devRouter);
   app.use('/api/v1/dev', devRouter);

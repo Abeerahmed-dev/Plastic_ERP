@@ -27,24 +27,18 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
   const [searchParams, setSearchParams] = useSearchParams();
   const typeParam = searchParams.get('type');
 
-  const initialTab = isCashier
-    ? 'pos'
-    : (defaultType || (typeParam === 'pos' ? 'pos' : typeParam === 'all' ? 'all' : 'erp')) as 'erp' | 'pos' | 'all';
+  const initialTab = (defaultType || (typeParam === 'pos' ? 'pos' : typeParam === 'all' ? 'all' : 'erp')) as 'erp' | 'pos' | 'all';
   const [activeTab, setActiveTab] = useState<'erp' | 'pos' | 'all'>(
-    isCashier ? 'pos' : (['erp', 'pos', 'all'].includes(initialTab) ? initialTab : 'erp')
+    ['erp', 'pos', 'all'].includes(initialTab) ? initialTab : 'erp'
   );
 
   useEffect(() => {
-    if (isCashier) {
-      if (activeTab !== 'pos') setActiveTab('pos');
-      return;
-    }
     if (defaultType && defaultType !== activeTab) {
       setActiveTab(defaultType);
     } else if (typeParam && ['erp', 'pos', 'all'].includes(typeParam) && typeParam !== activeTab) {
       setActiveTab(typeParam as 'erp' | 'pos' | 'all');
     }
-  }, [isCashier, defaultType, typeParam, activeTab]);
+  }, [defaultType, typeParam, activeTab]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 20;
@@ -391,7 +385,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Amount
                 </th>
-                {!isCashier && activeTab !== 'pos' && (
+                {activeTab !== 'pos' && (
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Balance Due
                   </th>
@@ -404,7 +398,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={isCashier || activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       <span className="mt-2">Loading invoices...</span>
@@ -413,7 +407,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                 </tr>
               ) : filteredTableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isCashier || activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     {selectedCity || selectedName || selectedInvoice
                       ? 'No invoices match the active cascading filters. Try resetting filters.'
                       : activeTab === 'pos'
@@ -522,7 +516,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                       <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isCreditNote ? 'text-red-700 font-bold font-mono' : 'text-slate-900 font-semibold'}`}>
                         {formatCurrency(invoice.total_amount)}
                       </td>
-                      {!isCashier && activeTab !== 'pos' && (
+                      {activeTab !== 'pos' && (
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-rose-600">
                           {formatCurrency(balanceDue)}
                         </td>

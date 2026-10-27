@@ -190,12 +190,12 @@ export const InventoryLedgerSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Link to Full Item-wise Valuation Page */}
+      {/* Link to Full Stocks & Valuation Page */}
       <Link
-        to="/reports/inventory-valuation"
+        to="/stocks"
         className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-indigo-50/70 border border-slate-200/80 transition-all text-xs font-semibold text-slate-700 hover:text-indigo-600 group"
       >
-        <span>View Item-wise Valuation &amp; FIFO Buckets</span>
+        <span>View Full Stocks &amp; FIFO Buckets</span>
         <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
       </Link>
     </div>

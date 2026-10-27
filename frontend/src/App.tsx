@@ -24,6 +24,7 @@ import MarginAnalyticsPage from './pages/Reports/MarginAnalyticsPage';
 import InventoryValuationPage from './pages/Reports/InventoryValuationPage';
 import SettingsPage from './pages/Settings/SettingsPage';
 import EmployeesListPage from './pages/Employees/EmployeesListPage';
+import ExchangePage from './pages/Exchange/ExchangePage';
 
 function App() {
   const { user } = useAuthStore();
@@ -54,11 +55,13 @@ function App() {
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/suppliers" element={isCashier ? <Navigate to="/pos" replace /> : <SuppliersListPage />} />
           <Route path="/suppliers/:id" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierDetailPage />} />
-          <Route path="/invoices" element={isCashier ? <Navigate to="/pos-invoices" replace /> : <InvoicesListPage />} />
-          <Route path="/sales" element={isCashier ? <Navigate to="/pos-invoices" replace /> : <InvoicesListPage />} />
+          <Route path="/invoices" element={<InvoicesListPage />} />
+          <Route path="/sales" element={<InvoicesListPage />} />
           <Route path="/pos/invoices" element={<InvoicesListPage defaultType="pos" />} />
           <Route path="/pos-invoices" element={<InvoicesListPage defaultType="pos" />} />
           <Route path="/purchases" element={<PurchasesListPage />} />
+          <Route path="/exchange" element={<ExchangePage />} />
+          <Route path="/exchanges" element={<ExchangePage />} />
           <Route path="/payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
           <Route path="/customer-payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
           <Route path="/supplier-payments" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierPaymentsListPage />} />
@@ -70,7 +73,8 @@ function App() {
           <Route path="/reports/pnl" element={isCashier ? <Navigate to="/pos" replace /> : <IncomeStatementPage />} />
           <Route path="/reports/margin-analytics" element={isCashier ? <Navigate to="/pos" replace /> : <MarginAnalyticsPage />} />
           <Route path="/reports/sales-margin" element={isCashier ? <Navigate to="/pos" replace /> : <MarginAnalyticsPage />} />
-          <Route path="/reports/inventory-valuation" element={isCashier ? <Navigate to="/pos" replace /> : <InventoryValuationPage />} />
+          <Route path="/stocks" element={isCashier ? <Navigate to="/pos" replace /> : <InventoryValuationPage />} />
+          <Route path="/reports/inventory-valuation" element={<Navigate to="/stocks" replace />} />
         </Route>
       </Route>
 

@@ -3,7 +3,7 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LogOut, Users, Box, FileText, Truck, Tag,
   ShoppingCart, LayoutDashboard, PieChart, Receipt, Boxes,
-  ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings,
+  ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings, ArrowLeftRight,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
 import { authService } from '../../services/auth.service';
@@ -46,6 +46,8 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/products', label: 'Products', icon: Box, permission: 'products:read' },
       { to: '/categories', label: 'Categories', icon: Tag, permission: 'products:read' },
+      { to: '/stocks', label: 'Stocks', icon: Boxes, permission: 'products:read' },
+      { to: '/exchange', label: 'Exchange', icon: ArrowLeftRight, permission: 'products:read' },
     ],
   },
   {
@@ -59,7 +61,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
         children: [
           { to: '/reports/income-statement', label: 'Income Statement', icon: TrendingUp, permission: null },
           { to: '/reports/margin-analytics', label: 'Margin Analytics', icon: TrendingUp, permission: null },
-          { to: '/reports/inventory-valuation', label: 'Inventory Valuation', icon: Boxes, permission: null },
           { to: '/reports', label: 'Financial Reports', icon: PieChart, permission: null },
         ],
       },
@@ -280,6 +281,9 @@ const getPageTitle = (pathname: string, search?: string): { title: string; subti
   if (pathname.startsWith('/categories') || pathname.startsWith('/uom')) {
     return { title: 'Categories', subtitle: 'Product Classifications' };
   }
+  if (pathname.startsWith('/exchange')) {
+    return { title: 'Product Exchange', subtitle: 'Product-to-Product Inventory Exchange' };
+  }
   if (pathname.startsWith('/expenses')) {
     return { title: 'Operating Expenses', subtitle: 'Overheads & Expense Ledger' };
   }
@@ -289,8 +293,8 @@ const getPageTitle = (pathname: string, search?: string): { title: string; subti
   if (pathname.startsWith('/reports/margin-analytics') || pathname.startsWith('/reports/sales-margin')) {
     return { title: 'Margin Analytics', subtitle: 'Sales & Profit Margin Analytics' };
   }
-  if (pathname.startsWith('/reports/inventory-valuation')) {
-    return { title: 'Inventory Valuation', subtitle: 'WAC Valuation & FIFO Batches' };
+  if (pathname === '/stocks' || pathname.startsWith('/stocks/') || pathname.startsWith('/reports/inventory-valuation')) {
+    return { title: 'Stocks', subtitle: 'Stock on Hand, Sizes & Valuation' };
   }
   if (pathname.startsWith('/reports')) {
     return { title: 'Financial Reports', subtitle: 'Financial & Inventory Intelligence' };
@@ -361,11 +365,30 @@ export const MainLayout = () => {
                   {[
                     { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
                     { to: '/pos-invoices', label: 'POS Sale Invoices', icon: FileText },
+                    { to: '/invoices', label: 'Sales Invoices', icon: FileText },
+                    { to: '/exchange', label: 'Exchange', icon: ArrowLeftRight },
                     { to: '/purchases', label: 'Purchasing', icon: Truck },
                     { to: '/products', label: 'Products', icon: Box },
                     { to: '/categories', label: 'Categories', icon: Tag },
                   ].map(({ to, label, icon: Icon }) => {
-                    const isActive = to === '/pos' ? location.pathname === '/pos' : location.pathname.startsWith(to);
+                    const searchParams = new URLSearchParams(location.search);
+                    const isPosTab = searchParams.get('type') === 'pos';
+                    const isPosRoute =
+                      location.pathname.startsWith('/pos-invoices') ||
+                      location.pathname.startsWith('/pos/invoices') ||
+                      ((location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && isPosTab);
+
+                    const isSalesInvoicesRoute =
+                      (location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && !isPosTab;
+
+                    const isActive =
+                      to === '/pos'
+                        ? location.pathname === '/pos'
+                        : to === '/pos-invoices'
+                        ? isPosRoute
+                        : to === '/invoices'
+                        ? isSalesInvoicesRoute
+                        : location.pathname.startsWith(to);
                     return (
                       <Link
                         key={to}

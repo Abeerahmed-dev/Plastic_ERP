@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ShoppingCart, Banknote, RefreshCw, HandCoins, Calendar, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { ShoppingCart, Banknote, RefreshCw, HandCoins, Calendar, CheckCircle2, ShieldAlert, FileText, ArrowLeftRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
 import { reportsService } from '../services/reports.service';
@@ -125,7 +125,7 @@ export default function CashierDashboard() {
       </div>
 
       {/* Quick Cashier Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <Link
           to="/pos"
           className="group p-6 rounded-2xl bg-white border border-slate-200/80 shadow-md hover:border-blue-500 hover:shadow-lg transition-all flex items-center justify-between"
@@ -140,6 +140,38 @@ export default function CashierDashboard() {
             </div>
           </div>
           <span className="text-sm font-bold text-blue-600 group-hover:translate-x-1 transition">→</span>
+        </Link>
+
+        <Link
+          to="/invoices"
+          className="group p-6 rounded-2xl bg-white border border-slate-200/80 shadow-md hover:border-amber-500 hover:shadow-lg transition-all flex items-center justify-between"
+        >
+          <div className="flex items-center gap-4">
+            <div className="p-4 rounded-xl bg-amber-50 text-amber-600 group-hover:bg-amber-600 group-hover:text-white transition">
+              <FileText className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900 text-lg">Sales Invoices</h3>
+              <p className="text-xs text-slate-500">Create & manage wholesale customer invoices</p>
+            </div>
+          </div>
+          <span className="text-sm font-bold text-amber-600 group-hover:translate-x-1 transition">→</span>
+        </Link>
+
+        <Link
+          to="/exchange"
+          className="group p-6 rounded-2xl bg-white border border-slate-200/80 shadow-md hover:border-purple-500 hover:shadow-lg transition-all flex items-center justify-between"
+        >
+          <div className="flex items-center gap-4">
+            <div className="p-4 rounded-xl bg-purple-50 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition">
+              <ArrowLeftRight className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900 text-lg">Product Exchange</h3>
+              <p className="text-xs text-slate-500">Swap stock between warehouse products</p>
+            </div>
+          </div>
+          <span className="text-sm font-bold text-purple-600 group-hover:translate-x-1 transition">→</span>
         </Link>
 
         <Link

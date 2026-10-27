@@ -5,7 +5,8 @@ import { restoreInventoryBucketsLifo } from '../invoices/invoices.repository';
 
 export { restoreInventoryBucketsLifo };
 
-import { ForbiddenError, NotFoundError, ValidationError, InsufficientStockError } from '../../shared/errors';
+import { ForbiddenError, NotFoundError, InsufficientStockError } from '../../shared/errors';
+import { logger } from '../../config/logger';
 
 export async function processPOSCheckout(
   userId: string,
@@ -220,14 +221,15 @@ export async function processPOSCheckout(
           : Number(product.rolling_avg_cost_per_kg || 0);
         const lineCogs = Math.round(totalLineCogs * 100) / 100;
 
-        // Price Floor Check against rolling average cost
+        // Advisory Price Floor Check against rolling average cost (non-blocking for POS)
         const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
         const floorPricePerKg = appliedCogsPerKg * (1 + (minMarkupPercent / 100));
         const sellingPricePerKg = sold_kg > 0 ? (lineTotal / sold_kg) : Number(item.unit_price);
 
         if (sellingPricePerKg < floorPricePerKg - 0.01) {
-          throw new ValidationError(
-            `Selling price for ${product.name} (Rs. ${sellingPricePerKg.toFixed(2)}/kg) is below minimum authorized margin (Floor: Rs. ${floorPricePerKg.toFixed(2)}/kg).`
+          logger.warn(
+            { productId: product.id, sellingPricePerKg, floorPricePerKg },
+            `POS: Selling price for ${product.name} (Rs. ${sellingPricePerKg.toFixed(2)}/kg) is below floor margin (Floor: Rs. ${floorPricePerKg.toFixed(2)}/kg) - allowed as advisory warning`
           );
         }
 

@@ -796,11 +796,16 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
   for (const t of (transferRows || [])) {
     const amt = Number(t.amount || 0);
     const isInflow = String(t.type || '').toUpperCase() === 'INFLOW' || String(t.type || '').toUpperCase() === 'DEPOSIT';
+    const isCapital = t.description && (
+      t.description.toLowerCase().includes('capital') ||
+      t.description.toLowerCase().includes('float') ||
+      t.description.toLowerCase().includes('opening')
+    );
     results.push({
       id: t.id,
       date: t.date,
       created_at: t.created_at,
-      entry_type: 'BANK TRANSFER',
+      entry_type: isCapital ? 'OWNER CAPITAL' : 'BANK TRANSFER',
       source: isInflow ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
       source_type: isInflow ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
       transaction_type: isInflow ? 'DEPOSIT' : 'WITHDRAWAL',

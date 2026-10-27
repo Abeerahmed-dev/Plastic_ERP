@@ -7,7 +7,6 @@ import {
   Loader2,
   Filter,
   DollarSign,
-  AlertTriangle,
   Package,
   Layers,
   ArrowUpDown,
@@ -26,13 +25,11 @@ interface ProductGroup {
   variants: InventoryValuationItem[];
   totalGroupStock: number;
   totalGroupAssetValue: number;
-  hasHeavyTieUp: boolean;
 }
 
 export default function InventoryValuationPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [highCapitalOnly, setHighCapitalOnly] = useState<boolean>(false);
   const [sortField, setSortField] = useState<'asset_value' | 'current_stock_kg' | 'product_name'>('asset_value');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -85,12 +82,8 @@ export default function InventoryValuationPage() {
         p.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.size && p.size.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = selectedCategory === 'ALL' || p.category === selectedCategory;
-      const assetVal = p.total_asset_value !== undefined ? p.total_asset_value : p.asset_value || 0;
-      const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
-      const isHighCapital = assetVal > 500000 || stockKg > 1000;
-      const matchesCapitalFilter = !highCapitalOnly || isHighCapital;
 
-      return matchesSearch && matchesCategory && matchesCapitalFilter;
+      return matchesSearch && matchesCategory;
     });
 
     // Reduce into groups by normalized product_name
@@ -108,7 +101,6 @@ export default function InventoryValuationPage() {
           variants: [],
           totalGroupStock: 0,
           totalGroupAssetValue: 0,
-          hasHeavyTieUp: false,
         });
       }
 
@@ -116,9 +108,6 @@ export default function InventoryValuationPage() {
       group.variants.push(p);
       group.totalGroupStock += stockKg;
       group.totalGroupAssetValue += assetVal;
-      if (assetVal > 500000 || stockKg > 1000) {
-        group.hasHeavyTieUp = true;
-      }
     });
 
     // Sort groups based on sortField & sortOrder
@@ -145,7 +134,7 @@ export default function InventoryValuationPage() {
     });
 
     return groupsArray;
-  }, [data?.products, searchQuery, selectedCategory, highCapitalOnly, sortField, sortOrder]);
+  }, [data?.products, searchQuery, selectedCategory, sortField, sortOrder]);
 
   const expandAll = () => {
     if (!groupedProducts) return;
@@ -167,26 +156,17 @@ export default function InventoryValuationPage() {
   };
 
   const stats = useMemo(() => {
-    if (!data?.products) return { totalProducts: 0, totalWeightKg: 0, heavyTieUpCount: 0, heavyTieUpValue: 0 };
+    if (!data?.products) return { totalProducts: 0, totalWeightKg: 0 };
     let totalWeight = 0;
-    let heavyCount = 0;
-    let heavyVal = 0;
 
     data.products.forEach((p) => {
       const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
-      const assetVal = p.total_asset_value !== undefined ? p.total_asset_value : p.asset_value || 0;
       totalWeight += stockKg;
-      if (assetVal > 500000 || stockKg > 1000) {
-        heavyCount++;
-        heavyVal += assetVal;
-      }
     });
 
     return {
       totalProducts: data.products.length,
       totalWeightKg: totalWeight,
-      heavyTieUpCount: heavyCount,
-      heavyTieUpValue: heavyVal,
     };
   }, [data?.products]);
 
@@ -210,10 +190,10 @@ export default function InventoryValuationPage() {
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-                Inventory Valuation & Asset Ledger
+                Stocks
               </h1>
               <p className="text-xs sm:text-sm text-slate-500">
-                Real-time capital allocation across physical warehouse stock with expandable FIFO purchase bucket depletion
+                Real-time physical warehouse stock, sizes, variants & asset valuation
               </p>
             </div>
           </div>
@@ -273,7 +253,7 @@ export default function InventoryValuationPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-800/80 backdrop-blur-md p-3.5 rounded-xl border border-slate-700">
                 <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5 text-blue-400" /> Active Products
@@ -289,15 +269,6 @@ export default function InventoryValuationPage() {
                 </div>
                 <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
                   {stats.totalWeightKg.toLocaleString(undefined, { maximumFractionDigits: 1 })} KG
-                </div>
-              </div>
-
-              <div className="bg-amber-950/40 backdrop-blur-md p-3.5 rounded-xl border border-amber-800/50 col-span-2 sm:col-span-1">
-                <div className="text-amber-400 text-xs font-medium flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Heavy Capital Tie-Up
-                </div>
-                <div className="text-lg font-bold font-mono text-amber-300 mt-1 tabular-nums">
-                  {stats.heavyTieUpCount} items
                 </div>
               </div>
             </div>
@@ -339,18 +310,6 @@ export default function InventoryValuationPage() {
               </select>
             </div>
           </div>
-
-          {/* Heavy Tie-Up Checkbox Filter */}
-          <label className="flex items-center gap-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl cursor-pointer select-none shrink-0 w-full sm:w-auto justify-center hover:bg-amber-100/80 transition-colors">
-            <input
-              type="checkbox"
-              checked={highCapitalOnly}
-              onChange={(e) => setHighCapitalOnly(e.target.checked)}
-              className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
-            />
-            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-            <span>⚠️ Heavy Tie-Up Only (&gt; Rs. 500k or &gt; 1,000 KG)</span>
-          </label>
         </div>
 
         {/* Table Content */}
@@ -413,7 +372,6 @@ export default function InventoryValuationPage() {
                 {groupedProducts.map((group) => {
                   const isGroupExpanded = !!expandedGroups[group.groupKey];
                   const variantCount = group.variants.length;
-                  const isHeavyCapital = group.hasHeavyTieUp;
 
                   const groupCategories = Array.from(new Set(group.variants.map((v) => v.category))).filter(Boolean);
                   const categoryDisplay =
@@ -431,8 +389,6 @@ export default function InventoryValuationPage() {
                         className={`cursor-pointer transition-colors border-t-2 border-slate-200/80 ${
                           isGroupExpanded
                             ? 'bg-slate-900 text-white hover:bg-slate-800'
-                            : isHeavyCapital
-                            ? 'bg-amber-50/80 hover:bg-amber-100/80 text-slate-900'
                             : 'bg-slate-100/90 hover:bg-slate-200/80 text-slate-900'
                         }`}
                       >
@@ -472,11 +428,6 @@ export default function InventoryValuationPage() {
                             >
                               {variantCount} {variantCount === 1 ? 'Variant' : 'Variants'}
                             </span>
-                            {isHeavyCapital && (
-                              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0">
-                                <AlertTriangle className="h-3 w-3 text-amber-600" /> Heavy Tie-Up
-                              </span>
-                            )}
                           </div>
                         </td>
 
@@ -520,26 +471,13 @@ export default function InventoryValuationPage() {
 
                         {/* Group Aggregated Total Asset Value */}
                         <td className="py-3.5 px-4 sm:px-6 text-right font-mono text-xs sm:text-sm tabular-nums">
-                          {isHeavyCapital && !isGroupExpanded ? (
-                            <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-1 rounded-lg font-black shadow-2xs">
-                              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                              <span>
-                                Rs.{' '}
-                                {group.totalGroupAssetValue.toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="font-extrabold">
-                              Rs.{' '}
-                              {group.totalGroupAssetValue.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </span>
-                          )}
+                          <span className="font-extrabold">
+                            Rs.{' '}
+                            {group.totalGroupAssetValue.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
                         </td>
                       </tr>
 
@@ -554,7 +492,6 @@ export default function InventoryValuationPage() {
                             product.total_asset_value !== undefined
                               ? product.total_asset_value
                               : product.asset_value;
-                          const isVariantHeavy = assetVal > 500000 || stockKg > 1000;
                           const isRowExpanded = !!expandedRows[product.id];
                           const buckets: FifoBucketItem[] = product.buckets || [];
 
@@ -576,8 +513,6 @@ export default function InventoryValuationPage() {
                                 className={`cursor-pointer transition-colors border-b border-slate-200/60 ${
                                   isRowExpanded
                                     ? 'bg-blue-50/90 font-medium'
-                                    : isVariantHeavy
-                                    ? 'bg-amber-50/50 hover:bg-amber-100/60'
                                     : 'bg-slate-50 hover:bg-slate-100/90'
                                 }`}
                               >
@@ -607,11 +542,6 @@ export default function InventoryValuationPage() {
                                     {product.code && (
                                       <span className="inline-block text-[11px] font-mono text-slate-700 bg-slate-200 px-2 py-0.5 rounded font-bold">
                                         {product.code}
-                                      </span>
-                                    )}
-                                    {isVariantHeavy && (
-                                      <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0">
-                                        <AlertTriangle className="h-3 w-3 text-amber-600" /> Heavy
                                       </span>
                                     )}
                                   </div>

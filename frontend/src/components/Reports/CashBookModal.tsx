@@ -397,9 +397,9 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                 <div>
                   <span className="text-xs font-bold block flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-blue-600" />
-                    Inflow: Customer Payments
+                    Inflow: Customer & Capital
                   </span>
-                  <span className="text-[10px] text-slate-500">Invoiced ledger payments</span>
+                  <span className="text-[10px] text-slate-500">Ledger payments & deposits</span>
                 </div>
               </div>
               <div className="text-right">
@@ -513,10 +513,17 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                               POS SALE
                             </span>
                           ) : isDeposit ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] bg-blue-100 text-blue-800 border border-blue-200 font-semibold inline-flex items-center gap-1">
-                              <Users className="w-2.5 h-2.5" />
-                              CUSTOMER INFLOW
-                            </span>
+                            item.entry_type === 'OWNER CAPITAL' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] bg-purple-100 text-purple-800 border border-purple-200 font-semibold inline-flex items-center gap-1">
+                                <Sparkles className="w-2.5 h-2.5 text-purple-600" />
+                                OWNER CAPITAL
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] bg-blue-100 text-blue-800 border border-blue-200 font-semibold inline-flex items-center gap-1">
+                                <Users className="w-2.5 h-2.5" />
+                                CUSTOMER INFLOW
+                              </span>
+                            )
                           ) : (
                             <span className="px-2 py-0.5 rounded text-[10px] bg-rose-100 text-rose-800 border border-rose-200 font-semibold inline-flex items-center gap-1">
                               <ArrowUpRight className="w-2.5 h-2.5" />

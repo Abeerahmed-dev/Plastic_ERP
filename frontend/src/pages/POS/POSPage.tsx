@@ -172,19 +172,9 @@ export default function POSPage() {
     ? (effectiveSplitCash + effectiveSplitBank)
     : (amountPaid === '' ? total : Number(amountPaid));
 
-  const hasPriceFloorViolation = !isCashier && cart.some((item) => {
-    const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
-      ? item.bag_weight_kg
-      : 1.0;
-    const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
-    const sellingPricePerKg = unitMultiplier > 0 ? (item.unit_price / unitMultiplier) : item.unit_price;
-    return sellingPricePerKg < floorPricePerKg - 0.01;
-  });
-
   const isCartValid =
     cart.length > 0 &&
-    cart.every((item) => item.quantity > 0) &&
-    !hasPriceFloorViolation;
+    cart.every((item) => item.quantity > 0);
 
   const checkoutMutation = useMutation({
     mutationFn: () =>
@@ -654,13 +644,13 @@ export default function POSPage() {
               const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
               const floorPricePerUnit = floorPricePerKg * unitMultiplier;
               const sellingPricePerKg = unitMultiplier > 0 ? (item.unit_price / unitMultiplier) : item.unit_price;
-              const isBelowFloor = !isCashier && sellingPricePerKg < floorPricePerKg - 0.01;
+              const isBelowFloor = sellingPricePerKg < floorPricePerKg - 0.01;
 
               return (
                 <div
                   key={item.product_id}
                   className={`py-2 px-0.5 transition-all ${
-                    isBelowFloor ? 'bg-red-50/70 -mx-1 px-1.5 rounded' : ''
+                    isBelowFloor ? 'bg-amber-50/50 -mx-1 px-1.5 rounded' : ''
                   }`}
                 >
                   {/* Top: Product Name & Delete Button */}
@@ -679,9 +669,9 @@ export default function POSPage() {
                   </div>
 
                   {isBelowFloor && (
-                    <div className="flex items-center gap-1 text-[10px] text-red-700 bg-red-100/80 p-1 rounded border border-red-300 font-medium my-1">
-                      <AlertCircle className="w-3 h-3 shrink-0 text-red-600" />
-                      Below floor (Rs. {floorPricePerUnit.toFixed(1)} / {item.selected_unit})
+                    <div className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50 p-1 rounded border border-amber-300 font-medium my-1">
+                      <AlertCircle className="w-3 h-3 shrink-0 text-amber-600" />
+                      Notice: Below floor margin (Rs. {floorPricePerUnit.toFixed(1)} / {item.selected_unit})
                     </div>
                   )}
 

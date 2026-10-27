@@ -6,15 +6,10 @@ import { ValidationError, ForbiddenError } from '../../shared/errors';
 
 export async function listInvoices(req: Request, res: Response, next: NextFunction) {
   try {
-    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
-
-    // RBAC: Cashiers can only view POS retail sale invoices (all store counter sales)
-    // Wholesale commercial ERP invoices are hidden from Cashiers.
     const queryFilter: { created_by?: string; is_pos_only?: boolean } = {};
-    if (userRole === 'CASHIER') {
+    if (req.query.type === 'pos' || req.query.is_pos_only === 'true') {
       queryFilter.is_pos_only = true;
     }
-    // If role is 'Owner' / 'Admin', the filter remains empty, fetching all company invoices.
 
     const invoices = await invoicesService.getInvoices(queryFilter);
     res.json(ok(invoices));
@@ -25,11 +20,10 @@ export async function listInvoices(req: Request, res: Response, next: NextFuncti
 
 export async function getUnpaidInvoices(req: Request, res: Response, next: NextFunction) {
   try {
-    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
     const customer_id = req.query.customer_id as string;
 
     const queryFilter: { created_by?: string; customer_id?: string; is_pos_only?: boolean } = {};
-    if (userRole === 'CASHIER') {
+    if (req.query.type === 'pos' || req.query.is_pos_only === 'true') {
       queryFilter.is_pos_only = true;
     }
 
@@ -48,14 +42,6 @@ export async function getUnpaidInvoices(req: Request, res: Response, next: NextF
 export async function getInvoice(req: Request, res: Response, next: NextFunction) {
   try {
     const invoice = await invoicesService.getInvoice(req.params.id);
-    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
-
-    // RBAC: Cashiers can view all POS counter invoices, but cannot view wholesale ERP invoices
-    const isPos = String(invoice.invoice_number || '').startsWith('POS-') || (invoice.notes && invoice.notes.includes('POS'));
-    if (userRole === 'CASHIER' && !isPos) {
-      throw new ForbiddenError('Cashiers are only authorized to view POS retail sale invoices.');
-    }
-
     res.json(ok(invoice));
   } catch (error) {
     next(error);
