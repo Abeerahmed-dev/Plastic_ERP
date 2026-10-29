@@ -16,8 +16,11 @@ export interface ProductBatch {
 }
 
 export const productsService = {
-  getProducts: async (): Promise<Product[]> => {
-    const response = await api.get<ApiSuccess<Product[]>>('/products');
+  getProducts: async (params?: any): Promise<Product[]> => {
+    const cleanParams = params && !params.queryKey ? params : undefined;
+    const response = await api.get<ApiSuccess<Product[]>>('/products', {
+      params: { limit: 500, ...cleanParams },
+    });
     return response.data.data;
   },
 

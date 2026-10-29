@@ -28,14 +28,18 @@ export async function createExpenseRecord(input: CreateExpenseInput, userId?: st
 
       const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
       if (hasCdl) {
-        await trx('cash_drawer_ledger').insert({
+        const hasSourceType = await trx.schema.hasColumn('cash_drawer_ledger', 'source_type');
+        const cdlPayload: Record<string, any> = {
           type: 'OUTFLOW',
           amount: payload.amount,
-          source_type: 'OPEX',
           reference_id: expense.id,
           description: payload.description || `OPEX Expense: ${payload.category || 'General'}`,
           created_by: userId || null,
-        });
+        };
+        if (hasSourceType) {
+          cdlPayload.source_type = 'OPEX';
+        }
+        await trx('cash_drawer_ledger').insert(cdlPayload);
       }
 
       return expense;

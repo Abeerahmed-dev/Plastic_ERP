@@ -312,15 +312,19 @@ export async function addEmployeeLedgerEntry(
       if (input.payment_method === 'CASH') {
         const hasCashDrawer = await trx.schema.hasTable('cash_drawer_ledger');
         if (hasCashDrawer) {
-          await trx('cash_drawer_ledger').insert({
+          const hasSourceType = await trx.schema.hasColumn('cash_drawer_ledger', 'source_type');
+          const cdlRow: Record<string, any> = {
             type: 'OUTFLOW',
             amount: amount,
-            source_type: 'OPEX',
             reference_id: expense.id,
             description: input.description || `Staff Salary: ${employee.name} (${employee.employee_id})`,
             transaction_date: txDate,
             created_by: userId || null,
-          });
+          };
+          if (hasSourceType) {
+            cdlRow.source_type = 'OPEX';
+          }
+          await trx('cash_drawer_ledger').insert(cdlRow);
         }
       } else if (input.payment_method === 'BANK_TRANSFER' && input.bank_account_id) {
         const hasBankTx = await trx.schema.hasTable('bank_transactions');

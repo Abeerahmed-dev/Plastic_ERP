@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Plus, Trash2, Loader2, Layers, Wallet } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw } from 'lucide-react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -45,7 +45,16 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
   const [advanceAppliedAmount, setAdvanceAppliedAmount] = useState('0');
 
   const { data: customersResponse } = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers({ limit: 100 }) });
-  const { data: productsResponse } = useQuery({ queryKey: ['products'], queryFn: () => productsService.getProducts() });
+  const {
+    data: productsResponse,
+    isLoading: isLoadingProducts,
+    isError: isProductsError,
+    refetch: refetchProducts,
+  } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => productsService.getProducts(),
+    staleTime: 5000,
+  });
 
   const products = productsResponse || [];
 
@@ -245,17 +254,20 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
   });
 
   useEffect(() => {
-    reset({
-      customer_id: '',
-      date: new Date().toISOString().split('T')[0],
-      due_date: '',
-      discount: 0,
-      delivery_charge: 0,
-      notes: '',
-      items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
-    });
-    setApplyAdvance(false);
-    setAdvanceAppliedAmount('0');
+    if (isOpen) {
+      refetchProducts();
+      reset({
+        customer_id: '',
+        date: new Date().toISOString().split('T')[0],
+        due_date: '',
+        discount: 0,
+        delivery_charge: 0,
+        notes: '',
+        items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
+      });
+      setApplyAdvance(false);
+      setAdvanceAppliedAmount('0');
+    }
   }, [isOpen]);
 
   const onSubmit = async (data: FormData) => {
@@ -316,7 +328,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-800">Create New Wholesale Sales Invoice</h2>
-              <p className="text-xs text-slate-500 font-medium">Strict KG Wholesale Billing Model</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-slate-500 font-medium">Strict KG Wholesale Billing Model</p>
+                {isLoadingProducts && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full font-medium">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Syncing live stock...
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <button
@@ -335,6 +354,22 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                 {(mutation.error as any)?.response?.data?.detail && (
                   <p className="text-xs text-red-600 mt-1 font-mono">Detail: {(mutation.error as any).response.data.detail}</p>
                 )}
+              </div>
+            )}
+
+            {isProductsError && (
+              <div className="rounded-xl bg-rose-50 p-3.5 text-sm text-rose-700 font-medium border border-rose-200 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>Unable to load live inventory stock. Please check network or click retry.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refetchProducts()}
+                  className="px-2.5 py-1 text-xs font-bold bg-white text-rose-700 border border-rose-200 rounded-lg hover:bg-rose-100 transition cursor-pointer flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" /> Retry
+                </button>
               </div>
             )}
 
@@ -387,12 +422,18 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                     ) || '';
 
                     const variantList = rowFamily ? (groupedProducts[rowFamily] || []) : [];
-                    const variantOptions: ComboboxOption[] = variantList.map((p) => ({
-                      value: p.id,
-                      label: p.size ? `${p.size} (${p.code})` : `${p.name} (${p.code})`,
-                      badge: p.code,
-                      subLabel: `Std: ${Number(p.bag_weight_kg || 25).toFixed(2)} KG/bag`,
-                    }));
+                    const variantOptions: ComboboxOption[] = variantList.map((p) => {
+                      const vStock = Number(p.total_stock_kg ?? p.current_stock ?? 0);
+                      const vBagWeight = Number(p.bag_weight_kg || 25);
+                      const vBags = vBagWeight > 0 ? (vStock / vBagWeight).toFixed(1) : '0';
+                      const isZero = vStock <= 0;
+                      return {
+                        value: p.id,
+                        label: p.size ? `${p.size} (${p.code})` : `${p.name} (${p.code})`,
+                        badge: isZero ? 'Out of Stock' : `${vStock.toLocaleString()} KG`,
+                        subLabel: `Stock: ${vStock.toLocaleString()} KG (${vBags} Bags) • Std: ${vBagWeight.toFixed(0)} KG/bag`,
+                      };
+                    });
 
                     const qty = Number(items[index]?.quantity || 0);
                     const price = Number(items[index]?.unit_price || 0);
@@ -401,6 +442,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                       : (qty && price ? Math.round(qty * price * 100) / 100 : '');
 
                     const available_stock = Number(selectedProd?.total_stock_kg ?? selectedProd?.current_stock ?? 0);
+                    const bagWeight = Number(selectedProd?.bag_weight_kg || 25);
+                    const availableBags = bagWeight > 0 ? (available_stock / bagWeight).toFixed(1) : '0';
+                    const isOutOfStock = available_stock <= 0;
+                    const isLowStock = !isOutOfStock && available_stock <= (Number(selectedProd?.low_stock_threshold) || 50);
                     const shortfall = selectedProdId ? Math.max(0, Math.round((qty - available_stock) * 100) / 100) : 0;
 
                     return (
@@ -418,7 +463,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                           )}
                         </td>
 
-                        <td className="px-4 py-3 align-top min-w-[180px]">
+                        <td className="px-4 py-3 align-top min-w-[200px]">
                           <SearchableCombobox
                             value={selectedProdId}
                             onChange={(val) => handleVariantChange(index, val)}
@@ -427,11 +472,48 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                             disabled={!rowFamily}
                             hasError={!!itemError?.product_id && !!rowFamily && !selectedProdId}
                           />
-                          {selectedProd && (
-                            <span className="text-[11px] text-slate-400 font-medium block mt-1">
-                              Std: {Number(selectedProd.bag_weight_kg || 25).toFixed(2)} KG / Bag
+
+                          {/* Loading Indicator */}
+                          {isLoadingProducts && (
+                            <span className="text-[11px] text-blue-500 font-medium flex items-center gap-1 mt-1.5">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Fetching live stock...
                             </span>
                           )}
+
+                          {/* Live Size-Wise Available Stock Display */}
+                          {selectedProd && !isLoadingProducts && (
+                            <div className="mt-1.5 space-y-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
+                                    isOutOfStock
+                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                      : isLowStock
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                      isOutOfStock ? 'bg-rose-500' : isLowStock ? 'bg-amber-500' : 'bg-emerald-500'
+                                    }`}
+                                  />
+                                  <span>
+                                    Available Stock: <strong>{available_stock.toLocaleString()} KG</strong>
+                                    {bagWeight > 0 && (
+                                      <span className="font-semibold text-slate-500 ml-1">
+                                        ({availableBags} Bags)
+                                      </span>
+                                    )}
+                                  </span>
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 block font-medium">
+                                Std Weight: {bagWeight.toFixed(2)} KG / Bag
+                              </span>
+                            </div>
+                          )}
+
                           {itemError?.product_id && !!rowFamily && !selectedProdId && (
                             <p className="text-xs text-red-600 mt-1">{itemError.product_id.message}</p>
                           )}
@@ -450,7 +532,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                           <span className="text-[10px] text-slate-400 block mt-1 text-center">Bags helper</span>
                         </td>
 
-                        <td className="px-4 py-3 align-top min-w-[120px]">
+                        <td className="px-4 py-3 align-top min-w-[130px]">
                           <div className="flex flex-col">
                             <input
                               type="number"
@@ -463,13 +545,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                                 itemError?.quantity
                                   ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
                                   : shortfall > 0
-                                  ? 'border-orange-400 text-orange-600 focus:border-orange-500 focus:ring-orange-500/20'
+                                  ? 'border-amber-400 text-amber-900 focus:border-amber-500 focus:ring-amber-500/20'
                                   : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
                               }`}
                             />
                             {shortfall > 0 && (
-                              <span className="text-xs text-orange-500 mt-1 font-medium">
-                                {shortfall} KG will be backordered
+                              <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md mt-1 font-semibold flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3 shrink-0 text-amber-600" />
+                                Exceeds stock ({available_stock.toLocaleString()} KG). {shortfall.toLocaleString()} KG backordered
                               </span>
                             )}
                             {itemError?.quantity && <p className="text-xs text-red-600 mt-1">{itemError.quantity.message}</p>}

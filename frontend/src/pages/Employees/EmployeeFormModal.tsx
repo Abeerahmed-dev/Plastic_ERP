@@ -11,16 +11,12 @@ interface EmployeeFormModalProps {
 }
 
 const COMMON_DESIGNATIONS = [
-  'Packer',
-  'Loader',
-  'Salesman',
-  'Floor Helper',
-  'Machine Operator',
+  'Cashier',
+  'Labour',
   'Store Keeper',
-  'Delivery Boy / Driver',
-  'Security Guard',
+  'Gaurd',
   'Supervisor',
-  'Other',
+  'Others',
 ];
 
 const COMMON_TIMINGS = [
@@ -64,7 +60,7 @@ export const EmployeeFormModal = ({
           setDesignation(initialData.designation);
           setCustomDesignation('');
         } else {
-          setDesignation('Other');
+          setDesignation('Others');
           setCustomDesignation(initialData.designation || '');
         }
 
@@ -85,7 +81,7 @@ export const EmployeeFormModal = ({
         setEmployeeId('');
         setName('');
         setPhone('');
-        setDesignation('Packer');
+        setDesignation('Cashier');
         setCustomDesignation('');
         setStoreTiming('09:00 AM - 08:00 PM (Full Day)');
         setCustomTiming('');
@@ -107,7 +103,8 @@ export const EmployeeFormModal = ({
 
     if (!name.trim()) newErrors.name = 'Worker name is required';
     
-    const finalDesignation = designation === 'Other' ? customDesignation.trim() : designation;
+    const isOther = designation === 'Others' || designation === 'Other';
+    const finalDesignation = isOther ? customDesignation.trim() : designation;
     if (!finalDesignation) newErrors.designation = 'Designation is required';
 
     const finalTiming = storeTiming === 'Custom' ? customTiming.trim() : storeTiming;
@@ -255,7 +252,7 @@ export const EmployeeFormModal = ({
               </select>
             </div>
 
-            {designation === 'Other' ? (
+            {designation === 'Others' || designation === 'Other' ? (
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Specify Designation <span className="text-red-500">*</span>
@@ -284,6 +281,22 @@ export const EmployeeFormModal = ({
               </div>
             )}
           </div>
+
+          {(designation === 'Others' || designation === 'Other') && (
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                <Hash className="w-3.5 h-3.5 text-purple-600" />
+                CNIC Number (Optional)
+              </label>
+              <input
+                type="text"
+                value={cnic}
+                onChange={(e) => setCnic(e.target.value)}
+                placeholder="e.g. 42101-1234567-1"
+                className="w-full rounded-xl border border-slate-300 py-2.5 px-3.5 text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+          )}
 
           {/* Store Timing & Custom Timing */}
           <div>
