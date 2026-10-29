@@ -34,3 +34,21 @@ export async function processPurchaseReturn(
 export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
   return await repo.getPurchaseInvoiceReturnSummary(parentInvoiceId);
 }
+
+export async function getRecentPurchasesForStockUpdate(limit: number = 20) {
+  return await repo.getRecentPurchasesForStockUpdate(limit);
+}
+
+export async function updateStockDcAndPrices(
+  purchaseId: string,
+  payload: {
+    delivery_charges?: number;
+    items: Array<{
+      product_id: string;
+      selling_price: number;
+    }>;
+  },
+  userId?: string
+) {
+  return await repo.updateStockDcAndPrices(purchaseId, payload, userId);
+}

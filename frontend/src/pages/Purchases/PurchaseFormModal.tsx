@@ -28,6 +28,7 @@ const schema = z.object({
   date: z.string(),
   due_date: z.string().optional().or(z.literal('')),
   discount: z.coerce.number().min(0).default(0),
+  delivery_charges: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
   items: z.array(itemSchema).min(1, 'At least one item is required'),
 });
@@ -65,6 +66,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
       date: new Date().toISOString().split('T')[0],
       due_date: '',
       discount: 0,
+      delivery_charges: 0,
       notes: '',
       items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
     },
@@ -77,6 +79,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
 
   const watchItems = watch('items');
   const watchDiscount = watch('discount');
+  const watchDeliveryCharges = watch('delivery_charges');
   const selectedSupplierId = watch('supplier_id');
 
   const selectedSupplier = suppliers.find((s: any) => s.id === selectedSupplierId);
@@ -122,7 +125,14 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   ) / 100;
 
   const discountNum = Math.round((Number(watchDiscount) || 0) * 100) / 100;
+  const deliveryChargesNum = Math.round((Number(watchDeliveryCharges) || 0) * 100) / 100;
   const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100);
+
+  const totalKg = Math.round(
+    (watchItems || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) * 100
+  ) / 100;
+  const dcPerKg = totalKg > 0 ? Math.round((deliveryChargesNum / totalKg) * 100) / 100 : 0;
+  const grandTotalWithDc = Math.round((total + deliveryChargesNum) * 100) / 100;
 
   // Step 1: Group products by product_name
   const groupedProducts = useMemo(() => {
@@ -293,6 +303,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
       ...data,
       due_date: data.due_date ? data.due_date : undefined,
       discount: Math.round(Number(data.discount || 0) * 100) / 100,
+      delivery_charges: deliveryChargesNum,
       advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
       items: cleanItems,
     } as any);
@@ -599,10 +610,53 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
                     />
                   </div>
                 </div>
-                <div className="flex justify-between items-center pt-3 border-t border-slate-200">
-                  <span className="text-base font-bold text-slate-900">Total Amount</span>
-                  <span className="text-xl font-black text-emerald-600">Rs. {total.toLocaleString('en-PK', { minimumFractionDigits: 2 })}</span>
+
+                <div className="flex justify-between items-center text-sm">
+                  <div>
+                    <span className="text-slate-700 font-medium block">Delivery Charges (DC)</span>
+                    <span className="text-[11px] text-amber-600 font-medium block">Expense only • Excluded from party ledger</span>
+                  </div>
+                  <div className="w-32">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      {...register('delivery_charges')}
+                      className={inputCls(!!errors.delivery_charges)}
+                    />
+                  </div>
                 </div>
+
+                {deliveryChargesNum > 0 && totalKg > 0 && (
+                  <div className="bg-amber-50/80 p-2.5 rounded-lg border border-amber-200 text-xs text-amber-900 space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-amber-700">Total Purchase Weight:</span>
+                      <span className="font-mono font-bold">{totalKg.toLocaleString()} KG</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-amber-800">
+                      <span>DC Added per KG:</span>
+                      <span className="font-mono text-emerald-700">+ Rs. {dcPerKg.toFixed(2)} / KG</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                  <div>
+                    <span className="text-sm font-bold text-slate-900 block">Party Payable (Ledger)</span>
+                    <span className="text-[11px] text-slate-400">Recorded to {selectedSupplier?.name || 'Party'}</span>
+                  </div>
+                  <span className="text-base font-bold font-mono text-slate-900">Rs. {total.toLocaleString('en-PK', { minimumFractionDigits: 2 })}</span>
+                </div>
+
+                {deliveryChargesNum > 0 && (
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-200">
+                    <div>
+                      <span className="text-sm font-bold text-emerald-900 block">Grand Total (Goods + DC)</span>
+                      <span className="text-[11px] text-emerald-600">Total cost of this shipment</span>
+                    </div>
+                    <span className="text-xl font-black font-mono text-emerald-600">Rs. {grandTotalWithDc.toLocaleString('en-PK', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
               </div>
             </div>
 

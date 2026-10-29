@@ -48,6 +48,7 @@ export interface InvoiceDetailData {
   subtotal: number;
   discount: number;
   delivery_charge?: number;
+  delivery_charges?: number;
   total_amount: number;
   paid_amount: number;
   amount_paid?: number;
@@ -115,7 +116,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
   const subtotal = Number(invoice.subtotal || invoice.total_amount + (invoice.discount || 0));
   const discount = Number(invoice.discount || 0);
-  const deliveryCharge = Number(invoice.delivery_charge || 0);
+  const deliveryCharge = type === 'purchase' ? 0 : Number(invoice.delivery_charge || 0);
   const totalAmount = Number(invoice.total_amount || 0);
   const paidAmount = Number(invoice.paid_amount || invoice.amount_paid || 0);
 
@@ -451,7 +452,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <span className="font-mono font-semibold">-{formatPKR(discount)}</span>
                 </div>
               )}
-              {deliveryCharge > 0 && (
+              {type !== 'purchase' && deliveryCharge > 0 && (
                 <div className="flex justify-between text-blue-600">
                   <span>Delivery / Freight:</span>
                   <span className="font-mono font-semibold">+{formatPKR(deliveryCharge)}</span>

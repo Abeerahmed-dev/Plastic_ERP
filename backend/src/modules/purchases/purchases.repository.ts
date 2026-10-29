@@ -399,11 +399,31 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     subtotal = Math.round(subtotal * 100) / 100;
 
     const discount = Math.round(Number(data.discount || 0) * 100) / 100;
+    const delivery_charges = Math.round(Number(data.delivery_charges || 0) * 100) / 100;
     const total_amount = Math.round((subtotal - discount) * 100) / 100;
 
     const advanceApplied = Math.round(Number((data as any).advance_applied_amount || 0) * 100) / 100;
     const initialPaidAmount = advanceApplied;
     const invoiceStatus = initialPaidAmount >= total_amount ? 'PAID' : (initialPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
+
+    // Total purchase weight in KG for DC allocation
+    const total_invoice_kg = sanitizedItems.reduce((acc: number, item: any) => acc + Number(item.quantity_kg || 0), 0);
+    const dc_per_kg = total_invoice_kg > 0 ? (delivery_charges / total_invoice_kg) : 0;
+
+    // Automatic Expense logging for delivery charges
+    let deliveryExpenseId: string | null = null;
+    if (delivery_charges > 0) {
+      const supplier = await trx('suppliers').where('id', data.supplier_id).select('name').first();
+      const [expense] = await trx('expenses').insert({
+        amount: delivery_charges,
+        category: 'Logistics',
+        description: `Delivery Charges for Purchase ${invoice_number} (Party: ${supplier?.name || 'Party'})`,
+        expense_date: data.date ? new Date(data.date) : new Date(),
+        payment_method: 'CASH',
+        created_by: createdBy || null,
+      }).returning('*');
+      deliveryExpenseId = expense?.id || null;
+    }
 
     const [invoice] = await trx('purchase_invoices')
       .insert({
@@ -414,11 +434,13 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         due_date: data.due_date || null,
         subtotal,
         discount,
+        delivery_charges,
         total_amount,
         paid_amount: initialPaidAmount,
         status: invoiceStatus,
         notes: data.notes || null,
         created_by: createdBy,
+        expense_id: deliveryExpenseId,
       })
       .returning('*');
 
@@ -427,8 +449,12 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     for (let i = 0; i < sanitizedItems.length; i++) {
       const item = sanitizedItems[i];
       const quantity_kg = item.quantity_kg;
-      const price_per_kg = item.unit_price;
+      const base_price_per_kg = item.unit_price;
       const itemTotal = item.total_price;
+
+      const item_dc_per_kg = Math.round(dc_per_kg * 10000) / 10000;
+      // Landed cost includes delivery charges allocated per kg
+      const price_per_kg = Math.round((base_price_per_kg + item_dc_per_kg) * 100) / 100;
 
       // Fetch Product with write lock for concurrency safety
       const productWithCat = await trx('products as p')
@@ -627,8 +653,10 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         net_kg_processed: incoming_kg,
         net_kg_added: remainder_kg,
         actual_weight_kg: incoming_kg,
-        unit_price: price_per_kg,
+        unit_price: base_price_per_kg,
         total_price: itemTotal,
+        delivery_charge_per_kg: item_dc_per_kg,
+        landed_cost_per_kg: price_per_kg,
       });
     }
 
@@ -956,4 +984,225 @@ export async function updatePurchaseInvoiceStatus(id: string, updateData: { stat
     .update({ ...updateData, updated_at: new Date() })
     .returning('*');
   return updated;
+}
+
+/**
+ * Fetch recent purchases for Stock Update modal in Stocks page.
+ * Includes items with base price, DC allocation, current landed cost, and product selling prices.
+ */
+export async function getRecentPurchasesForStockUpdate(limit: number = 20) {
+  const purchases = await db('purchase_invoices as pi')
+    .join('suppliers as s', 'pi.supplier_id', 's.id')
+    .whereNull('pi.parent_invoice_id')
+    .where(function() {
+      this.whereNull('pi.invoice_type').orWhere('pi.invoice_type', 'PURCHASE');
+    })
+    .whereNot('pi.status', 'CANCELLED')
+    .select(
+      'pi.id',
+      'pi.invoice_number',
+      'pi.date',
+      'pi.created_at',
+      'pi.subtotal',
+      'pi.discount',
+      'pi.total_amount',
+      'pi.delivery_charges',
+      'pi.expense_id',
+      's.id as supplier_id',
+      's.name as supplier_name'
+    )
+    .orderBy('pi.created_at', 'desc')
+    .limit(limit);
+
+  const purchaseIds = purchases.map((p) => p.id);
+  if (purchaseIds.length === 0) return [];
+
+  const items = await db('purchase_invoice_items as pii')
+    .join('products as p', 'pii.product_id', 'p.id')
+    .whereIn('pii.purchase_invoice_id', purchaseIds)
+    .select(
+      'pii.id',
+      'pii.purchase_invoice_id',
+      'pii.product_id',
+      'pii.size',
+      'pii.quantity',
+      'pii.unit_price',
+      'pii.total_price',
+      'pii.delivery_charge_per_kg',
+      'pii.landed_cost_per_kg',
+      'p.name as product_name',
+      'p.code as product_code',
+      'p.cost_price as current_cost_price',
+      'p.sale_price as current_sale_price',
+      'p.fixed_retail_price_per_kg',
+      'p.rolling_avg_cost_per_kg as current_wac',
+      'p.total_stock_kg'
+    );
+
+  const itemsByPurchase = new Map<string, any[]>();
+  for (const item of items) {
+    const list = itemsByPurchase.get(item.purchase_invoice_id) || [];
+    list.push({
+      ...item,
+      quantity_kg: Number(item.quantity || 0),
+      base_unit_price: Number(item.unit_price || 0),
+      delivery_charge_per_kg: Number(item.delivery_charge_per_kg || 0),
+      landed_cost_per_kg: Number(item.landed_cost_per_kg || item.unit_price || 0),
+      current_sale_price: Number(item.fixed_retail_price_per_kg || item.current_sale_price || 0),
+      current_cost_price: Number(item.current_cost_price || 0),
+      current_wac: Number(item.current_wac || 0),
+      total_stock_kg: Number(item.total_stock_kg || 0),
+    });
+    itemsByPurchase.set(item.purchase_invoice_id, list);
+  }
+
+  return purchases.map((p) => {
+    const pItems = itemsByPurchase.get(p.id) || [];
+    const total_kg = pItems.reduce((acc, i) => acc + i.quantity_kg, 0);
+    return {
+      ...p,
+      delivery_charges: Number(p.delivery_charges || 0),
+      subtotal: Number(p.subtotal || 0),
+      total_amount: Number(p.total_amount || 0),
+      total_kg,
+      items: pItems,
+    };
+  });
+}
+
+/**
+ * Task 2: Update Stocks - Distribute DC across purchase items and update selling prices
+ */
+export async function updateStockDcAndPrices(
+  purchaseId: string,
+  payload: {
+    delivery_charges?: number;
+    items: Array<{
+      product_id: string;
+      selling_price: number;
+    }>;
+  },
+  userId?: string
+) {
+  return await db.transaction(async (trx: Knex.Transaction) => {
+    const invoice = await trx('purchase_invoices').where('id', purchaseId).forUpdate().first();
+    if (!invoice) {
+      throw new Error('Purchase invoice not found');
+    }
+
+    const items = await trx('purchase_invoice_items')
+      .where('purchase_invoice_id', purchaseId)
+      .forUpdate();
+
+    const totalKg = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const newDeliveryCharges = payload.delivery_charges !== undefined
+      ? Math.round(Number(payload.delivery_charges) * 100) / 100
+      : Number(invoice.delivery_charges || 0);
+
+    const dcPerKg = totalKg > 0 ? (newDeliveryCharges / totalKg) : 0;
+
+    // 1. Sync Delivery Charges & Expense
+    if (newDeliveryCharges !== Number(invoice.delivery_charges || 0) || (newDeliveryCharges > 0 && !invoice.expense_id)) {
+      let expenseId = invoice.expense_id;
+
+      if (expenseId) {
+        if (newDeliveryCharges > 0) {
+          await trx('expenses').where('id', expenseId).update({
+            amount: newDeliveryCharges,
+            updated_at: new Date(),
+          });
+        } else {
+          await trx('expenses').where('id', expenseId).del();
+          expenseId = null;
+        }
+      } else if (newDeliveryCharges > 0) {
+        const supplier = await trx('suppliers').where('id', invoice.supplier_id).first();
+        const [exp] = await trx('expenses').insert({
+          amount: newDeliveryCharges,
+          category: 'Logistics',
+          description: `Delivery Charges for Purchase ${invoice.invoice_number} (Party: ${supplier?.name || 'Party'})`,
+          expense_date: invoice.date ? new Date(invoice.date) : new Date(),
+          payment_method: 'CASH',
+          created_by: userId || null,
+        }).returning('*');
+        expenseId = exp?.id || null;
+      }
+
+      await trx('purchase_invoices').where('id', purchaseId).update({
+        delivery_charges: newDeliveryCharges,
+        expense_id: expenseId,
+        updated_at: new Date(),
+      });
+    }
+
+    // 2. Update line items, inventory batches, and product rolling cost per kg
+    for (const item of items) {
+      const itemDcPerKg = Math.round(dcPerKg * 10000) / 10000;
+      const basePrice = Number(item.unit_price || 0);
+      const landedCost = Math.round((basePrice + itemDcPerKg) * 100) / 100;
+
+      await trx('purchase_invoice_items')
+        .where('id', item.id)
+        .update({
+          delivery_charge_per_kg: itemDcPerKg,
+          landed_cost_per_kg: landedCost,
+          updated_at: new Date(),
+        });
+
+      // Update dedicated batch
+      await trx('inventory_batches')
+        .where({
+          purchase_invoice_id: purchaseId,
+          product_id: item.product_id,
+        })
+        .update({
+          batch_buy_price_per_kg: landedCost,
+          updated_at: new Date(),
+        });
+
+      // Update product cost_price & rolling average cost
+      const activeBatches = await trx('inventory_batches')
+        .where('product_id', item.product_id)
+        .where('status', 'ACTIVE')
+        .select('remaining_qty', 'batch_buy_price_per_kg');
+
+      let totalRem = 0;
+      let totalVal = 0;
+      for (const b of activeBatches) {
+        const rem = Number(b.remaining_qty || 0);
+        const cost = Number(b.batch_buy_price_per_kg || 0);
+        totalRem += rem;
+        totalVal += rem * cost;
+      }
+      const newRollingWac = totalRem > 0 ? Math.round((totalVal / totalRem) * 10000) / 10000 : landedCost;
+
+      await trx('products')
+        .where('id', item.product_id)
+        .update({
+          cost_price: landedCost,
+          rolling_avg_cost_per_kg: newRollingWac,
+          updated_at: new Date(),
+        });
+    }
+
+    // 3. Update selling prices for all submitted products
+    // "phir ham us ko usi hisab se selling price set kardenge or jo bhi hamari last changes hogin selling price wo hi consider ki jayengi"
+    if (payload.items && Array.isArray(payload.items)) {
+      for (const spItem of payload.items) {
+        const sPrice = Math.round(Number(spItem.selling_price || 0) * 100) / 100;
+        await trx('products')
+          .where('id', spItem.product_id)
+          .update({
+            sale_price: sPrice,
+            fixed_retail_price_per_kg: sPrice,
+            updated_at: new Date(),
+          });
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Stock delivery charges and selling prices updated successfully',
+    };
+  });
 }

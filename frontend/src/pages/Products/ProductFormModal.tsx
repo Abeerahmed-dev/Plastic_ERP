@@ -132,13 +132,14 @@ export const ProductFormModal = ({
 
   const handleFormSubmit = (data: ProductFormData) => {
     const openingStock = Number(data.opening_stock || 0);
-    const histWac = openingStock > 0 ? Number(data.historical_wac || data.cost_price || 0) : 0;
+    const histWac = openingStock > 0 ? Number(data.historical_wac || 0) : 0;
     onSubmit({
       ...data,
+      cost_price: initialData?.cost_price ? Number(initialData.cost_price) : (histWac > 0 ? histWac : 0),
+      sale_price: initialData?.sale_price ? Number(initialData.sale_price) : 0,
       opening_stock: openingStock,
       opening_stock_kg: openingStock,
       historical_wac: histWac,
-      cost_price: histWac > 0 ? histWac : Number(data.cost_price || 0),
     });
   };
 
@@ -247,28 +248,6 @@ export const ProductFormModal = ({
                   className="block w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600 cursor-not-allowed"
                 />
                 <p className="mt-1 text-xs text-slate-400">Standard system-wide unit for all inventory & WAC calculations.</p>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Cost Price (Per KG)</label>
-                <input
-                  {...register('cost_price')}
-                  type="number"
-                  step="0.01"
-                  className={inputCls(!!errors.cost_price)}
-                />
-                {errors.cost_price && <p className="mt-1 text-xs text-red-600">{errors.cost_price.message}</p>}
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Sale Price (Per KG)</label>
-                <input
-                  {...register('sale_price')}
-                  type="number"
-                  step="0.01"
-                  className={inputCls(!!errors.sale_price)}
-                />
-                {errors.sale_price && <p className="mt-1 text-xs text-red-600">{errors.sale_price.message}</p>}
               </div>
             </div>
 

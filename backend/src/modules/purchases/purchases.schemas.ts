@@ -22,6 +22,7 @@ export const createPurchaseInvoiceSchema = z.object({
   date: z.string(), // ISO date string
   due_date: z.string().optional(),
   discount: z.number().min(0).default(0),
+  delivery_charges: z.number().min(0).optional().default(0),
   advance_applied_amount: z.number().min(0).optional().default(0),
   notes: z.string().optional(),
   items: z.array(purchaseItemSchema).min(1, 'At least one item is required'),
@@ -30,6 +31,14 @@ export const createPurchaseInvoiceSchema = z.object({
 export const updatePurchaseInvoiceSchema = z.object({
   status: z.enum(['UNPAID', 'PARTIAL', 'PAID']).optional(),
   paid_amount: z.number().min(0).optional(),
+});
+
+export const updateStockDcAndPricesSchema = z.object({
+  delivery_charges: z.number().min(0).optional(),
+  items: z.array(z.object({
+    product_id: z.string().uuid('Invalid Product ID'),
+    selling_price: z.number().min(0, 'Selling price must be at least 0'),
+  })),
 });
 
 export const returnItemSchema = z.object({

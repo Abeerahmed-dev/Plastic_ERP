@@ -4,6 +4,7 @@ import {
   createPurchaseInvoiceSchema,
   updatePurchaseInvoiceSchema,
   createPurchaseReturnSchema,
+  updateStockDcAndPricesSchema,
 } from './purchases.schemas';
 
 export async function getPurchaseInvoices(req: Request, res: Response) {
@@ -207,6 +208,46 @@ export async function getPurchaseInvoiceReturnSummary(req: Request, res: Respons
     });
   } catch (error: any) {
     res.status(404).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+export async function getRecentPurchasesForStockUpdate(req: Request, res: Response) {
+  try {
+    const limit = parseInt(req.query.limit as string) || 20;
+    const purchases = await purchasesService.getRecentPurchasesForStockUpdate(limit);
+    res.json({
+      success: true,
+      data: purchases,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+export async function updateStockDcAndPrices(req: Request, res: Response) {
+  try {
+    const parsed = updateStockDcAndPricesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        error: parsed.error.errors.map((e) => e.message).join(', '),
+      });
+      return;
+    }
+
+    const purchaseId = req.params.id;
+    const userId = req.user?.id;
+
+    const result = await purchasesService.updateStockDcAndPrices(purchaseId, parsed.data, userId);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({
       success: false,
       error: error.message,
     });
