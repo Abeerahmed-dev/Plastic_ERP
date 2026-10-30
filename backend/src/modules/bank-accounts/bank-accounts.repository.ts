@@ -185,12 +185,25 @@ export async function getCashDrawerBalance(trx: Knex.Transaction | Knex = db): P
     .sum('amount as total')
     .first();
 
-  // 5. Outflow from cash expenses
-  const expRes = await trx('expenses')
-    .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
-    .andWhere('amount', '>', 0)
-    .sum('amount as total')
-    .first();
+  // 5. Outflow from actual cash expense payments
+  let expTotal = 0;
+  const hasExpPay = await trx.schema.hasTable('expense_payments');
+  if (hasExpPay) {
+    const expRes = await trx('expense_payments')
+      .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
+      .andWhere('amount', '>', 0)
+      .sum('amount as total')
+      .first();
+    expTotal = Number(expRes?.total || 0);
+  } else {
+    const expRes = await trx('expenses')
+      .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
+      .whereIn('status', ['PAID', 'PARTIAL'])
+      .andWhere('paid_amount', '>', 0)
+      .sum('paid_amount as total')
+      .first();
+    expTotal = Number(expRes?.total || 0);
+  }
 
   // 6. Net internal bank transfers to/from cash drawer (only internal transfers without reference_id)
   let transferIn = 0;
@@ -228,7 +241,7 @@ export async function getCashDrawerBalance(trx: Knex.Transaction | Knex = db): P
   }
 
   const totalIn = Number(custRes?.total || 0) + Math.abs(Number(suppRefundRes?.total || 0)) + transferIn;
-  const totalOut = Number(suppRes?.total || 0) + Number(expRes?.total || 0) + Math.abs(Number(custRefundRes?.total || 0)) + transferOut + empCashOut;
+  const totalOut = Number(suppRes?.total || 0) + expTotal + Math.abs(Number(custRefundRes?.total || 0)) + transferOut + empCashOut;
 
   return Math.round((totalIn - totalOut) * 100) / 100;
 }

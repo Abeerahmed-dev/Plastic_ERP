@@ -620,17 +620,32 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     )
     .orderBy('sp.created_at', 'desc');
 
-  let expQuery = db('expenses as e')
-    .whereIn('e.payment_method', ['CASH', 'Cash', 'Cash in Drawer'])
-    .select(
-      'e.id',
-      'e.expense_date as date',
-      'e.created_at',
-      'e.category',
-      'e.description',
-      'e.amount'
-    )
-    .orderBy('e.created_at', 'desc');
+  const hasExpPay = await db.schema.hasTable('expense_payments');
+  let expQuery = hasExpPay
+    ? db('expense_payments as ep')
+        .join('expenses as e', 'ep.expense_id', 'e.id')
+        .whereIn('ep.payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
+        .select(
+          'e.id',
+          'ep.payment_date as date',
+          'ep.created_at',
+          'e.category',
+          'e.description',
+          'ep.amount'
+        )
+        .orderBy('ep.created_at', 'desc')
+    : db('expenses as e')
+        .whereIn('e.payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
+        .whereIn('e.status', ['PAID', 'PARTIAL'])
+        .select(
+          'e.id',
+          'e.expense_date as date',
+          'e.created_at',
+          'e.category',
+          'e.description',
+          'e.paid_amount as amount'
+        )
+        .orderBy('e.created_at', 'desc');
 
   let transferQuery = db('cash_drawer_ledger as cdl')
     .where(function() {

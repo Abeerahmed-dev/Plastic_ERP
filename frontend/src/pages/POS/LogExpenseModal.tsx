@@ -52,6 +52,15 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
     enabled: isOpen,
   });
 
+  // Fetch cash drawer balance
+  const { data: cashDrawerData } = useQuery({
+    queryKey: ['cash-drawer-balance'],
+    queryFn: bankAccountsService.getCashDrawerBalance,
+    enabled: isOpen,
+  });
+
+  const cashDrawerBalance = Number(cashDrawerData?.balance ?? 0);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,9 +79,23 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
       return;
     }
 
-    const selectedAcc = bankAccounts.find((a: any) => a.id === selectedBankId);
-    if (selectedAcc && Number(selectedAcc.current_balance) < Number(amount)) {
-      const err = 'INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.';
+    const isCash = selectedBankId === 'CASH_DRAWER';
+    const selectedAcc = isCash
+      ? { name: 'Cash in Drawer (Galla)', balance: cashDrawerBalance }
+      : (() => {
+          const acc = bankAccounts.find((a: any) => a.id === selectedBankId);
+          return acc ? { name: acc.account_title || acc.bank_name || 'Bank Account', balance: Number(acc.current_balance || 0) } : null;
+        })();
+
+    if (!selectedAcc) {
+      const err = 'Selected Outflow Account was not found.';
+      setError(err);
+      toast.error(err);
+      return;
+    }
+
+    if (selectedAcc.balance < Number(amount)) {
+      const err = `INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than ${selectedAcc.name} balance (Available: Rs. ${selectedAcc.balance.toLocaleString()}).`;
       setError(err);
       toast.error(err);
       return;
@@ -87,8 +110,9 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
         category,
         description: description.trim() || undefined,
         expense_date: expenseDate,
-        payment_method: selectedAcc?.account_title || selectedAcc?.bank_name || 'BANK',
-        bank_account_id: selectedBankId,
+        payment_method: isCash ? 'CASH' : (selectedAcc.name || 'BANK'),
+        bank_account_id: isCash ? null : selectedBankId,
+        status: 'PAID',
       });
 
       // Invalidate all related financial and ledger queries
@@ -201,6 +225,9 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
                 required
               >
                 <option value="">-- Choose Account --</option>
+                <option value="CASH_DRAWER">
+                  💵 Cash in Drawer (Balance: Rs. {cashDrawerBalance.toLocaleString('en-PK', { minimumFractionDigits: 2 })})
+                </option>
                 {bankAccounts.map((acc: any) => (
                   <option key={acc.id} value={acc.id} disabled={acc.current_balance <= 0}>
                     {acc.name || acc.account_title || acc.bank_name} (Balance: Rs. {acc.current_balance})

@@ -600,17 +600,32 @@ export async function getTodayCashTally(_userId?: string) {
   const totalRefundsCash = Math.abs(Number(refundsResult?.total_refunds || 0));
 
   // 3. Total Petty Cash Expenses paid from register today
-  const expensesResult = await db('expenses')
-    .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
-    .where(function() {
-      this.whereRaw('expense_date::text = ?', [todayStr])
-        .orWhereBetween('expense_date', [startOfDay, endOfDay])
-        .orWhereBetween('created_at', [startOfDay, endOfDay]);
-    })
-    .sum('amount as total_expenses')
-    .first();
-
-  const totalExpensesCash = Number(expensesResult?.total_expenses || 0);
+  const hasExpPay = await db.schema.hasTable('expense_payments');
+  let totalExpensesCash = 0;
+  if (hasExpPay) {
+    const expensesResult = await db('expense_payments')
+      .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+      .where(function() {
+        this.whereRaw('payment_date::text = ?', [todayStr])
+          .orWhereBetween('payment_date', [startOfDay, endOfDay])
+          .orWhereBetween('created_at', [startOfDay, endOfDay]);
+      })
+      .sum('amount as total_expenses')
+      .first();
+    totalExpensesCash = Number(expensesResult?.total_expenses || 0);
+  } else {
+    const expensesResult = await db('expenses')
+      .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
+      .whereIn('status', ['PAID', 'PARTIAL'])
+      .where(function() {
+        this.whereRaw('expense_date::text = ?', [todayStr])
+          .orWhereBetween('expense_date', [startOfDay, endOfDay])
+          .orWhereBetween('created_at', [startOfDay, endOfDay]);
+      })
+      .sum('paid_amount as total_expenses')
+      .first();
+    totalExpensesCash = Number(expensesResult?.total_expenses || 0);
+  }
 
   return Math.max(0, Math.round((totalSalesCash + totalExtraCash - totalRefundsCash - totalExpensesCash) * 100) / 100);
 }

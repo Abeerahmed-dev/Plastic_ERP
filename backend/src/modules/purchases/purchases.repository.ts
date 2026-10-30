@@ -410,7 +410,7 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     const total_invoice_kg = sanitizedItems.reduce((acc: number, item: any) => acc + Number(item.quantity_kg || 0), 0);
     const dc_per_kg = total_invoice_kg > 0 ? (delivery_charges / total_invoice_kg) : 0;
 
-    // Automatic Expense logging for delivery charges
+    // Automatic Expense logging for delivery charges (Tracked as PENDING payable expense)
     let deliveryExpenseId: string | null = null;
     if (delivery_charges > 0) {
       const supplier = await trx('suppliers').where('id', data.supplier_id).select('name').first();
@@ -419,7 +419,10 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         category: 'Logistics',
         description: `Delivery Charges for Purchase ${invoice_number} (Party: ${supplier?.name || 'Party'})`,
         expense_date: data.date ? new Date(data.date) : new Date(),
-        payment_method: 'CASH',
+        payment_method: 'UNPAID',
+        status: 'PENDING',
+        paid_amount: 0,
+        bank_account_id: null,
         created_by: createdBy || null,
       }).returning('*');
       deliveryExpenseId = expense?.id || null;
@@ -443,6 +446,12 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         expense_id: deliveryExpenseId,
       })
       .returning('*');
+
+    if (deliveryExpenseId && invoice?.id) {
+      await trx('expenses').where('id', deliveryExpenseId).update({
+        purchase_id: invoice.id,
+      });
+    }
 
     const itemsToInsert = [];
 
@@ -1122,7 +1131,11 @@ export async function updateStockDcAndPrices(
           category: 'Logistics',
           description: `Delivery Charges for Purchase ${invoice.invoice_number} (Party: ${supplier?.name || 'Party'})`,
           expense_date: invoice.date ? new Date(invoice.date) : new Date(),
-          payment_method: 'CASH',
+          payment_method: 'UNPAID',
+          status: 'PENDING',
+          paid_amount: 0,
+          bank_account_id: null,
+          purchase_id: purchaseId,
           created_by: userId || null,
         }).returning('*');
         expenseId = exp?.id || null;
