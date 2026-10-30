@@ -158,49 +158,49 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
     switch (type) {
       case 'INVOICE':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 text-xs font-semibold text-blue-700">
-            <FileText className="w-3 h-3 text-blue-600" />
+          <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 border border-blue-200 dark:bg-blue-950/50 dark:border-blue-800/60 dark:text-blue-300 px-2 py-0.5 text-xs font-semibold text-blue-700">
+            <FileText className="w-3 h-3 text-blue-600 dark:text-blue-400" />
             {entityType === 'supplier' ? 'Purchase Bill' : 'Sales Invoice'}
           </span>
         );
       case 'PAYMENT':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/50 dark:border-emerald-800/60 dark:text-emerald-300 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
             Payment
           </span>
         );
       case 'ADVANCE_DEPOSIT':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-800">
-            <ArrowUpRight className="w-3 h-3 text-amber-600" />
+          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-950/50 dark:border-amber-800/60 dark:text-amber-300 px-2 py-0.5 text-xs font-semibold text-amber-800">
+            <ArrowUpRight className="w-3 h-3 text-amber-600 dark:text-amber-400" />
             Advance Deposit
           </span>
         );
       case 'CREDIT_NOTE':
       case 'RETURN':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md bg-red-50 border border-red-200 px-2 py-0.5 text-xs font-bold text-red-700">
-            <ArrowDownLeft className="w-3 h-3 text-red-600" />
+          <span className="inline-flex items-center gap-1 rounded-md bg-red-50 border border-red-200 dark:bg-rose-950/50 dark:border-rose-800/60 dark:text-rose-300 px-2 py-0.5 text-xs font-bold text-red-700">
+            <ArrowDownLeft className="w-3 h-3 text-red-600 dark:text-rose-400" />
             Return / Credit Note
           </span>
         );
       case 'CASH_REFUND':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 border border-purple-200 px-2 py-0.5 text-xs font-semibold text-purple-700">
-            <CreditCard className="w-3 h-3 text-purple-600" />
+          <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 border border-purple-200 dark:bg-purple-950/50 dark:border-purple-800/60 dark:text-purple-300 px-2 py-0.5 text-xs font-semibold text-purple-700">
+            <CreditCard className="w-3 h-3 text-purple-600 dark:text-purple-400" />
             Cash Refund
           </span>
         );
       case 'OPENING_BALANCE':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700">
+          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 border border-slate-200 dark:bg-slate-800/80 dark:border-slate-700/60 dark:text-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700">
             Opening Balance
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center rounded-md bg-gray-50 border border-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700">
+          <span className="inline-flex items-center rounded-md bg-gray-50 border border-gray-200 dark:bg-slate-800/80 dark:border-slate-700/60 dark:text-slate-300 px-2 py-0.5 text-xs font-medium text-gray-700">
             {type.replace(/_/g, ' ')}
           </span>
         );
@@ -208,18 +208,18 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden print:shadow-none print:border-none">
+    <div className="bg-white dark:bg-[#161925] rounded-2xl shadow-sm border border-slate-200 dark:border-[#23283B] overflow-hidden print:shadow-none print:border-none">
       {/* Header & Metric Bar */}
-      <div className="p-6 border-b border-slate-200 bg-white">
+      <div className="p-6 border-b border-slate-200 dark:border-[#23283B] bg-white dark:bg-[#161925]">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Statement of Account</h2>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 uppercase tracking-wider">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Statement of Account</h2>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border dark:border-slate-700/60 uppercase tracking-wider">
                 General Ledger
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Unified chronological record of all invoices, returns, payments, advances, and running balance.
             </p>
           </div>
@@ -240,7 +240,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
               <button
                 type="button"
                 onClick={onRefresh}
-                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 transition"
+                className="rounded-lg border border-slate-200 dark:border-slate-700/60 p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-50 hover:dark:bg-slate-800 transition cursor-pointer"
                 title="Refresh Statement"
               >
                 <RefreshCw className="w-4 h-4" />
@@ -249,9 +249,9 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700/60 bg-white dark:bg-[#121520] px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 hover:dark:bg-slate-800 transition shadow-2xs cursor-pointer"
             >
-              <Printer className="w-4 h-4 text-slate-600" />
+              <Printer className="w-4 h-4 text-slate-600 dark:text-slate-400" />
               Print / PDF
             </button>
           </div>
@@ -259,35 +259,35 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
 
         {/* Financial KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Debits (Charged)</span>
-            <p className="text-lg font-extrabold text-slate-900 mt-0.5 font-mono">
+          <div className="rounded-xl border border-slate-200 dark:border-[#23283B] bg-slate-50/60 dark:bg-[#121520] p-3.5">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Debits (Charged)</span>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-white mt-0.5 font-mono">
               {formatRs(totalDebit)}
             </p>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Credits (Paid/Credited)</span>
-            <p className="text-lg font-extrabold text-slate-900 mt-0.5 font-mono">
+          <div className="rounded-xl border border-slate-200 dark:border-[#23283B] bg-slate-50/60 dark:bg-[#121520] p-3.5">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Credits (Paid/Credited)</span>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-white mt-0.5 font-mono">
               {formatRs(totalCredit)}
             </p>
           </div>
 
           <div className={`rounded-xl border p-3.5 ${
             closingBalance > 0
-              ? 'bg-red-50/60 border-red-200'
+              ? 'bg-red-50/60 border-red-200 dark:bg-rose-950/20 dark:border-rose-900/40'
               : closingBalance < 0
-              ? 'bg-emerald-50/60 border-emerald-200'
-              : 'bg-slate-50/60 border-slate-200'
+              ? 'bg-emerald-50/60 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900/40'
+              : 'bg-slate-50/60 border-slate-200 dark:bg-[#121520] dark:border-[#23283B]'
           }`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-600 uppercase tracking-wider">Closing Balance</span>
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wider">Closing Balance</span>
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                 closingBalance > 0
-                  ? 'bg-red-100 text-red-800'
+                  ? 'bg-red-100 text-red-800 dark:bg-rose-950/60 dark:text-rose-300 dark:border dark:border-rose-800/60'
                   : closingBalance < 0
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-slate-200 text-slate-700'
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border dark:border-emerald-800/60'
+                  : 'bg-slate-200 text-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border dark:border-slate-700/60'
               }`}>
                 {closingBalance > 0
                   ? 'Outstanding (Udhaar)'
@@ -297,7 +297,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
               </span>
             </div>
             <p className={`text-xl font-extrabold mt-0.5 font-mono ${
-              closingBalance > 0 ? 'text-red-700' : closingBalance < 0 ? 'text-emerald-700' : 'text-slate-900'
+              closingBalance > 0 ? 'text-red-700 dark:text-rose-400' : closingBalance < 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-900 dark:text-white'
             }`}>
               {formatRs(Math.abs(closingBalance))} {closingBalance > 0 ? 'Dr' : closingBalance < 0 ? 'Cr' : ''}
             </p>
@@ -305,17 +305,17 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
         </div>
 
         {/* Filter Toolbar (print:hidden) */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-slate-100 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-slate-100 dark:border-slate-800/60 print:hidden">
           <div className="flex items-center space-x-1 overflow-x-auto text-xs">
             {['ALL', 'INVOICE', 'PAYMENT', 'ADVANCE', 'RETURN', 'REFUND'].map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => setTypeFilter(tab)}
-                className={`px-3 py-1.5 rounded-lg font-semibold transition ${
+                className={`px-3 py-1.5 rounded-lg font-semibold transition cursor-pointer ${
                   typeFilter === tab
                     ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100'
+                    : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 hover:dark:bg-slate-800/70 hover:dark:text-slate-200'
                 }`}
               >
                 {tab === 'ALL'
@@ -334,13 +334,13 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
           </div>
 
           <div className="relative w-64">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search reference or notes…"
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 dark:bg-[#121520] dark:text-white dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 focus:border-blue-500"
             />
           </div>
         </div>
@@ -358,8 +358,8 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
 
       {/* Table */}
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50/90 text-xs font-bold uppercase tracking-wider text-slate-600">
+        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800/80 text-sm">
+          <thead className="bg-slate-50/90 dark:bg-[#0F111A] text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
             <tr>
               <th className="px-5 py-3.5 text-left">Date</th>
               <th className="px-5 py-3.5 text-left">Transaction Type</th>
@@ -369,7 +369,7 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
               <th className="px-5 py-3.5 text-right font-mono">Running Balance (Rs)</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 bg-white dark:bg-[#161925]">
             {isLoading && (
               <tr>
                 <td colSpan={6} className="py-12 text-center text-slate-400">
@@ -401,12 +401,14 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
                 return (
                   <tr
                     key={row.id || idx}
-                    className={`transition hover:bg-blue-50/40 ${
-                      idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'
-                    }`}
+                    className={`transition ${
+                      idx % 2 === 0
+                        ? 'bg-white dark:bg-[#161925]'
+                        : 'bg-slate-50/30 dark:bg-[#121520]'
+                    } hover:bg-blue-50/40 hover:dark:bg-[#1d2338]`}
                   >
                     {/* Date */}
-                    <td className="px-5 py-3 whitespace-nowrap text-xs font-mono font-medium text-slate-700">
+                    <td className="px-5 py-3 whitespace-nowrap text-xs font-mono font-medium text-slate-700 dark:text-slate-300">
                       {row.date
                         ? new Date(row.date).toLocaleDateString('en-GB', {
                             day: '2-digit',
@@ -427,49 +429,49 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
                         <button
                           type="button"
                           onClick={() => handleReferenceClick(row)}
-                          className="group inline-flex items-center gap-1 font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition"
+                          className="group inline-flex items-center gap-1 font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer transition dark:text-blue-400 hover:dark:text-blue-300"
                           title={`Click to view drill-down details for ${row.reference_no || row.reference}`}
                         >
                           <span>{row.reference_no || row.reference}</span>
-                          <ExternalLink className="w-3 h-3 opacity-60 group-hover:opacity-100 transition" />
+                          <ExternalLink className="w-3 h-3 opacity-60 group-hover:opacity-100 transition dark:text-blue-400" />
                         </button>
                       ) : (
-                        <span className="font-mono text-slate-700 font-medium">
+                        <span className="font-mono text-slate-700 dark:text-slate-300 font-medium">
                           {row.reference_no || row.reference}
                         </span>
                       )}
                     </td>
 
                     {/* Debit */}
-                    <td className="px-5 py-3 whitespace-nowrap text-right font-mono text-xs text-slate-800">
+                    <td className="px-5 py-3 whitespace-nowrap text-right font-mono text-xs text-slate-800 dark:text-slate-200">
                       {Number(row.debit) > 0 ? (
-                        <span className="font-semibold text-slate-900">{formatRs(row.debit)}</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{formatRs(row.debit)}</span>
                       ) : (
-                        <span className="text-slate-300">—</span>
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
                       )}
                     </td>
 
                     {/* Credit */}
-                    <td className="px-5 py-3 whitespace-nowrap text-right font-mono text-xs text-slate-800">
+                    <td className="px-5 py-3 whitespace-nowrap text-right font-mono text-xs text-slate-800 dark:text-slate-200">
                       {Number(row.credit) > 0 ? (
-                        <span className="font-semibold text-slate-900">{formatRs(row.credit)}</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{formatRs(row.credit)}</span>
                       ) : (
-                        <span className="text-slate-300">—</span>
+                        <span className="text-slate-300 dark:text-slate-600">—</span>
                       )}
                     </td>
 
                     {/* Running Balance */}
                     <td className="px-5 py-3 whitespace-nowrap text-right font-mono text-xs">
                       {bal > 0 ? (
-                        <span className="font-bold text-red-600 inline-flex items-center gap-1">
-                          {formatRs(bal)} <span className="text-[10px] font-normal text-red-500">(Dr)</span>
+                        <span className="font-bold text-red-600 dark:text-rose-400 inline-flex items-center gap-1">
+                          {formatRs(bal)} <span className="text-[10px] font-normal text-red-500 dark:text-rose-400/80">(Dr)</span>
                         </span>
                       ) : bal < 0 ? (
-                        <span className="font-bold text-emerald-600 inline-flex items-center gap-1">
-                          {formatRs(Math.abs(bal))} <span className="text-[10px] font-normal text-emerald-500">(Cr)</span>
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                          {formatRs(Math.abs(bal))} <span className="text-[10px] font-normal text-emerald-500 dark:text-emerald-400/80">(Cr)</span>
                         </span>
                       ) : (
-                        <span className="text-slate-400 font-medium">Rs. 0</span>
+                        <span className="text-slate-400 dark:text-slate-500 font-medium">Rs. 0</span>
                       )}
                     </td>
                   </tr>
@@ -481,9 +483,9 @@ export const StatementOfAccount: React.FC<StatementOfAccountProps> = ({
 
       {/* Loading overlay indicator during invoice detail fetch */}
       {isFetchingInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs">
-          <div className="rounded-xl bg-white p-4 shadow-xl flex items-center gap-3 text-sm font-semibold text-slate-800">
-            <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 dark:bg-black/60 backdrop-blur-xs">
+          <div className="rounded-xl bg-white dark:bg-[#161925] dark:border dark:border-[#23283B] p-4 shadow-xl flex items-center gap-3 text-sm font-semibold text-slate-800 dark:text-white">
+            <Loader2 className="w-5 h-5 animate-spin text-blue-600 dark:text-blue-400" />
             Loading transaction details…
           </div>
         </div>

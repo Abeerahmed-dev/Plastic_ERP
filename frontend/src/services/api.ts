@@ -8,7 +8,7 @@ import { useAuthStore } from '../store/auth.store';
  *   which Vite dev-server proxies to the backend).
  * - Attaches the JWT access token from localStorage on every request.
  * - On 401 responses, automatically attempts to refresh the token using
- *   the refresh_token flow. If it fails, redirects to login.
+ *   the refresh_token flow. Queues concurrent 401s to share a single refresh promise.
  */
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api/v1',
@@ -25,34 +25,46 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Single-flight refresh token mutex
+let refreshPromise: Promise<string> | null = null;
+
 // ── Response interceptor — handle 401 ────────────────────────────
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    
+
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      
+
       try {
         const refreshToken = localStorage.getItem('refresh_token');
         if (!refreshToken) throw new Error('No refresh token');
 
-        // Refresh request using base axios to avoid loops
-        const baseURL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
-        const res = await axios.post(`${baseURL}/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-        
-        const { access_token } = res.data.data;
-        
-        // Save new token
-        useAuthStore.getState().setAccessToken(access_token);
-        
+        // Reuse existing in-flight refresh promise if multiple requests hit 401 simultaneously
+        if (!refreshPromise) {
+          const baseURL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+          refreshPromise = axios
+            .post(`${baseURL}/auth/refresh`, {
+              refresh_token: refreshToken,
+            })
+            .then((res) => {
+              const { access_token } = res.data.data;
+              useAuthStore.getState().setAccessToken(access_token);
+              return access_token;
+            })
+            .finally(() => {
+              refreshPromise = null;
+            });
+        }
+
+        const newAccessToken = await refreshPromise;
+
         // Retry original request with new token
-        originalRequest.headers.Authorization = `Bearer ${access_token}`;
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
       } catch (err) {
+        refreshPromise = null;
         useAuthStore.getState().clearAuth();
         window.location.href = '/login';
         return Promise.reject(err);

@@ -22,16 +22,16 @@ export const LowStockWidget: React.FC = () => {
   };
 
   return (
-    <div className="rounded-2xl border border-red-200/80 bg-linear-to-b from-red-50/90 via-red-50/40 to-white p-5 shadow-sm transition-all hover:shadow-md">
+    <div className="rounded-2xl border border-red-200/80 bg-linear-to-b from-red-50/90 via-red-50/40 to-white p-5 shadow-sm transition-all hover:shadow-md dark:bg-none dark:bg-[#121520] dark:border-rose-900/60 dark:shadow-[0_0_20px_rgba(244,63,94,0.12)]">
       {/* Header */}
-      <div className="flex items-center justify-between pb-3.5 border-b border-red-100">
+      <div className="flex items-center justify-between pb-3.5 border-b border-red-100 dark:border-[#23283B]">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-red-100 text-red-600 shadow-2xs">
+          <div className="p-2 rounded-xl bg-red-100 text-red-600 shadow-2xs dark:bg-rose-950/50 dark:border dark:border-rose-500/80 dark:text-rose-400 dark:shadow-[0_0_12px_rgba(244,63,94,0.35)]">
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-slate-900 tracking-tight">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
                 Low Stock Early Warnings
               </h3>
               {lowStockItems.length > 0 ? (
@@ -39,12 +39,12 @@ export const LowStockWidget: React.FC = () => {
                   {lowStockItems.length} {lowStockItems.length === 1 ? 'Variant' : 'Variants'} Below Threshold
                 </span>
               ) : (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-500/60 dark:text-emerald-400">
                   Healthy Stock
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Live inventory monitoring flagged at customizable variant-level thresholds
             </p>
           </div>
@@ -53,7 +53,7 @@ export const LowStockWidget: React.FC = () => {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-red-700 hover:bg-red-100/70 transition-all disabled:opacity-50 cursor-pointer"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-red-700 hover:bg-red-100/70 transition-all disabled:opacity-50 cursor-pointer dark:hover:bg-slate-800 dark:hover:text-rose-400"
           title="Refresh alerts"
         >
           <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin text-red-600' : ''}`} />
@@ -98,7 +98,7 @@ export const LowStockWidget: React.FC = () => {
               return (
                 <div
                   key={item.id}
-                  className="group flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-red-200/70 bg-white/90 hover:bg-red-50/60 hover:border-red-300 transition-all shadow-2xs"
+                  className="group flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl border border-red-200/70 bg-white/90 hover:bg-red-50/60 hover:border-red-300 transition-all shadow-2xs dark:bg-[#161925] dark:border-[#23283B] hover:dark:bg-[#1F2437]"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div

@@ -146,21 +146,21 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:bg-[#121520] dark:border-[#23283B]">
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-5 bg-gradient-to-r from-amber-500 to-orange-600 text-white">
+        <div className="flex items-center justify-between p-5 bg-gradient-to-r from-amber-500 to-orange-600 text-white dark:from-[#251808] dark:to-[#381e05] dark:border-b dark:border-amber-500/30">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/10 rounded-xl">
-              <Receipt className="w-5 h-5 text-white" />
+            <div className="p-2 bg-white/10 rounded-xl dark:bg-amber-950/60 dark:border dark:border-amber-500/40">
+              <Receipt className="w-5 h-5 text-white dark:text-amber-400" />
             </div>
             <div>
               <h2 className="text-lg font-bold">Record Expense / Cash Out</h2>
-              <p className="text-xs text-amber-100">Petty Cash & Operational Costs</p>
+              <p className="text-xs text-amber-100 dark:text-amber-300/80">Petty Cash & Operational Costs</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
+            className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -169,20 +169,20 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-center gap-2 dark:bg-red-950/40 dark:border-red-800 dark:text-red-300">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
               {error}
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
               Expense Category <span className="text-red-500">*</span>
             </label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+              className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
             >
               {EXPENSE_CATEGORIES.map((cat) => (
                 <option key={cat} value={cat}>
@@ -193,7 +193,7 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
               Amount (Rs.) <span className="text-red-500">*</span>
             </label>
             <div className="relative">
@@ -208,20 +208,20 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
-                className="w-full pl-12 pr-4 py-2.5 rounded-xl border border-slate-300 text-base font-black text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
+                className="w-full pl-12 pr-4 py-2.5 rounded-xl border border-slate-300 text-base font-black text-slate-900 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
                 Outflow Account <span className="text-red-500">*</span>
               </label>
               <select
                 value={selectedBankId}
                 onChange={(e) => setSelectedBankId(e.target.value)}
-                className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
                 required
               >
                 <option value="">-- Choose Account --</option>
@@ -237,20 +237,20 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
                 Expense Date
               </label>
               <input
                 type="date"
                 value={expenseDate}
                 onChange={(e) => setExpenseDate(e.target.value)}
-                className="w-full py-2 px-3 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                className="w-full py-2 px-3 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
               Description / Notes
             </label>
             <input
@@ -258,22 +258,22 @@ export const LogExpenseModal: React.FC<LogExpenseModalProps> = ({
               placeholder="e.g. Tea for Ali Grocery client, Loader payment"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              className="w-full py-2.5 px-3.5 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
             />
           </div>
 
-          <div className="flex justify-end items-center gap-3 pt-3 mt-2 border-t border-slate-100">
+          <div className="flex justify-end items-center gap-3 pt-3 mt-2 border-t border-slate-100 dark:border-[#23283B]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer dark:text-slate-300 dark:hover:bg-[#1e2337]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl shadow-sm transition-all"
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer dark:bg-amber-500 dark:hover:bg-amber-600 dark:text-slate-950"
             >
               {isSubmitting ? 'Recording...' : 'Record Expense'}
             </button>

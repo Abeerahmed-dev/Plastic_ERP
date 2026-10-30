@@ -234,10 +234,10 @@ export default function ExchangePage() {
               <ArrowLeftRight className="h-5 w-5 stroke-[2.5]" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
                 Product-to-Product Exchange
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 font-medium">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium">
                 Exchange physical stock between products with automatic inventory balance reconciliation.
               </p>
             </div>
@@ -246,35 +246,35 @@ export default function ExchangePage() {
 
         {/* Live Metrics Header Badges */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          <div className="bg-white rounded-xl px-3.5 py-2 border border-slate-200/80 shadow-xs flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
+          <div className="bg-white dark:bg-[#161925] rounded-xl px-3.5 py-2 border border-slate-200/80 dark:border-[#23283B] shadow-xs flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
               <Boxes className="h-4 w-4" />
             </div>
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Exchanges</p>
-              <p className="text-sm font-extrabold text-slate-800 leading-none mt-0.5">{totalExchangesCount}</p>
+              <p className="text-sm font-extrabold text-slate-800 dark:text-white leading-none mt-0.5">{totalExchangesCount}</p>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl px-3.5 py-2 border border-slate-200/80 shadow-xs flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-rose-50 text-rose-600">
+          <div className="bg-white dark:bg-[#161925] rounded-xl px-3.5 py-2 border border-slate-200/80 dark:border-[#23283B] shadow-xs flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
               <TrendingDown className="h-4 w-4" />
             </div>
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Given Out</p>
-              <p className="text-sm font-extrabold text-rose-700 leading-none mt-0.5">
+              <p className="text-sm font-extrabold text-rose-700 dark:text-rose-400 leading-none mt-0.5">
                 {formatNumber(totalGivenKg)} <span className="text-[11px] font-medium text-slate-400">KG</span>
               </p>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl px-3.5 py-2 border border-slate-200/80 shadow-xs flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
+          <div className="bg-white dark:bg-[#161925] rounded-xl px-3.5 py-2 border border-slate-200/80 dark:border-[#23283B] shadow-xs flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
               <TrendingUp className="h-4 w-4" />
             </div>
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Received In</p>
-              <p className="text-sm font-extrabold text-emerald-700 leading-none mt-0.5">
+              <p className="text-sm font-extrabold text-emerald-700 dark:text-emerald-400 leading-none mt-0.5">
                 {formatNumber(totalReceivedKg)} <span className="text-[11px] font-medium text-slate-400">KG</span>
               </p>
             </div>
@@ -283,8 +283,8 @@ export default function ExchangePage() {
       </div>
 
       {/* ─── Exchange Form Section ─── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200/80 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex items-center justify-between">
+      <div className="bg-white dark:bg-[#161925] rounded-2xl shadow-sm border border-slate-200 dark:border-[#23283B] overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200/80 dark:border-[#23283B] bg-gradient-to-r from-slate-900 to-slate-800 dark:from-[#0e111a] dark:to-[#141824] text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ArrowLeftRight className="h-4 w-4 text-amber-400" />
             <h2 className="text-sm font-bold tracking-wide uppercase">New Exchange Transaction</h2>
@@ -296,17 +296,17 @@ export default function ExchangePage() {
           {/* Main 2-Panel Exchange Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 relative">
             {/* ─── Outgoing Panel (Product Given) ─── */}
-            <div className="bg-rose-50/40 rounded-2xl p-5 border border-rose-200/70 space-y-4">
+            <div className="bg-rose-50/40 dark:bg-rose-950/20 rounded-2xl p-5 border border-rose-200/70 dark:border-rose-900/40 space-y-4">
               <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-200">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800/60">
                   <TrendingDown className="h-3.5 w-3.5" />
                   Product Given (Outgoing)
                 </span>
-                <span className="text-[11px] font-semibold text-rose-600">Deducts Stock (-)</span>
+                <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">Deducts Stock (-)</span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Select Outgoing Product <span className="text-rose-500">*</span>
                 </label>
                 <SearchableCombobox
@@ -325,12 +325,12 @@ export default function ExchangePage() {
 
               {/* Live Stock Display for Outgoing Product */}
               {givenProduct ? (
-                <div className="bg-white rounded-xl p-3.5 border border-rose-200/80 shadow-xs flex items-center justify-between">
+                <div className="bg-white dark:bg-[#161925] rounded-xl p-3.5 border border-rose-200/80 dark:border-rose-900/40 shadow-xs flex items-center justify-between">
                   <div>
                     <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                       Current Available Stock
                     </span>
-                    <p className="text-lg font-black text-slate-900 leading-tight">
+                    <p className="text-lg font-black text-slate-900 dark:text-white leading-tight">
                       {formatNumber(givenStock)} <span className="text-xs font-medium text-slate-500">KG</span>
                     </p>
                   </div>
@@ -351,14 +351,14 @@ export default function ExchangePage() {
                   )}
                 </div>
               ) : (
-                <div className="rounded-xl border border-dashed border-rose-200 p-3 text-center text-xs text-rose-400">
+                <div className="rounded-xl border border-dashed border-rose-200 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10 p-3 text-center text-xs text-rose-500 dark:text-rose-400">
                   Select a product to view real-time available stock
                 </div>
               )}
 
               {/* Quantity Given Input */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Quantity Given (KG) <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative rounded-xl shadow-xs">
@@ -369,14 +369,14 @@ export default function ExchangePage() {
                     placeholder="0.00"
                     value={givenQuantity}
                     onChange={(e) => setGivenQuantity(e.target.value)}
-                    className={`block w-full rounded-xl border-0 py-2.5 pl-3.5 pr-14 text-slate-900 font-bold ring-1 ring-inset ${
+                    className={`block w-full rounded-xl border-0 py-2.5 pl-3.5 pr-14 text-slate-900 dark:text-white font-bold bg-white dark:bg-[#121520] ring-1 ring-inset ${
                       isInsufficientStock
                         ? 'ring-rose-500 focus:ring-2 focus:ring-rose-600'
-                        : 'ring-slate-300 focus:ring-2 focus:ring-amber-500'
-                    } placeholder:text-slate-400 sm:text-base transition-all`}
+                        : 'ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-amber-500'
+                    } placeholder:text-slate-400 dark:placeholder:text-slate-500 sm:text-base transition-all`}
                   />
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3.5">
-                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                       KG
                     </span>
                   </div>
@@ -393,17 +393,17 @@ export default function ExchangePage() {
             </div>
 
             {/* ─── Incoming Panel (Product Received) ─── */}
-            <div className="bg-emerald-50/40 rounded-2xl p-5 border border-emerald-200/70 space-y-4">
+            <div className="bg-emerald-50/40 dark:bg-emerald-950/20 rounded-2xl p-5 border border-emerald-200/70 dark:border-emerald-900/40 space-y-4">
               <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60">
                   <TrendingUp className="h-3.5 w-3.5" />
                   Product Received (Incoming)
                 </span>
-                <span className="text-[11px] font-semibold text-emerald-600">Adds Stock (+)</span>
+                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">Adds Stock (+)</span>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Select Incoming Product <span className="text-emerald-500">*</span>
                 </label>
                 <SearchableCombobox
@@ -422,12 +422,12 @@ export default function ExchangePage() {
 
               {/* Live Stock Display for Incoming Product */}
               {receivedProduct ? (
-                <div className="bg-white rounded-xl p-3.5 border border-emerald-200/80 shadow-xs flex items-center justify-between">
+                <div className="bg-white dark:bg-[#161925] rounded-xl p-3.5 border border-emerald-200/80 dark:border-emerald-900/40 shadow-xs flex items-center justify-between">
                   <div>
                     <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                       Current Available Stock
                     </span>
-                    <p className="text-lg font-black text-slate-900 leading-tight">
+                    <p className="text-lg font-black text-slate-900 dark:text-white leading-tight">
                       {formatNumber(receivedStock)} <span className="text-xs font-medium text-slate-500">KG</span>
                     </p>
                   </div>
@@ -436,7 +436,7 @@ export default function ExchangePage() {
                       <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                         Projected After
                       </span>
-                      <p className="text-lg font-black text-emerald-700 leading-tight">
+                      <p className="text-lg font-black text-emerald-700 dark:text-emerald-400 leading-tight">
                         {formatNumber(projectedReceivedStock)}{' '}
                         <span className="text-xs font-medium text-slate-500">KG</span>
                       </p>
@@ -444,14 +444,14 @@ export default function ExchangePage() {
                   )}
                 </div>
               ) : (
-                <div className="rounded-xl border border-dashed border-emerald-200 p-3 text-center text-xs text-emerald-500">
+                <div className="rounded-xl border border-dashed border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/20 dark:bg-emerald-950/10 p-3 text-center text-xs text-emerald-600 dark:text-emerald-400">
                   Select a product to view real-time current stock
                 </div>
               )}
 
               {/* Quantity Received Input */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                   Quantity Received (KG) <span className="text-emerald-500">*</span>
                 </label>
                 <div className="relative rounded-xl shadow-xs">
@@ -462,10 +462,10 @@ export default function ExchangePage() {
                     placeholder="0.00"
                     value={receivedQuantity}
                     onChange={(e) => setReceivedQuantity(e.target.value)}
-                    className="block w-full rounded-xl border-0 py-2.5 pl-3.5 pr-14 text-slate-900 font-bold ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 sm:text-base transition-all"
+                    className="block w-full rounded-xl border-0 py-2.5 pl-3.5 pr-14 text-slate-900 dark:text-white font-bold bg-white dark:bg-[#121520] ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-emerald-500 sm:text-base transition-all"
                   />
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3.5">
-                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                       KG
                     </span>
                   </div>
@@ -477,7 +477,7 @@ export default function ExchangePage() {
           {/* Additional Details: Date & Notes */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                 Exchange Date
               </label>
               <div className="relative">
@@ -485,13 +485,13 @@ export default function ExchangePage() {
                   type="date"
                   value={exchangeDate}
                   onChange={(e) => setExchangeDate(e.target.value)}
-                  className="block w-full rounded-xl border-0 py-2.5 px-3 text-slate-900 font-medium ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-amber-500 text-sm"
+                  className="block w-full rounded-xl border-0 py-2.5 px-3 text-slate-900 dark:text-white bg-white dark:bg-[#121520] font-medium ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-amber-500 text-sm"
                 />
               </div>
             </div>
 
             <div className="md:col-span-2">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
                 Notes / Reference Reason (Optional)
               </label>
               <input
@@ -500,17 +500,17 @@ export default function ExchangePage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 maxLength={500}
-                className="block w-full rounded-xl border-0 py-2.5 px-3.5 text-slate-900 font-medium ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-amber-500 text-sm"
+                className="block w-full rounded-xl border-0 py-2.5 px-3.5 text-slate-900 dark:text-white bg-white dark:bg-[#121520] font-medium ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-amber-500 text-sm"
               />
             </div>
           </div>
 
           {/* Form Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-[#23283B]">
             <button
               type="button"
               onClick={handleResetForm}
-              className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-600 hover:text-slate-800 hover:bg-slate-100 transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:text-slate-800 hover:dark:text-white hover:bg-slate-100 hover:dark:bg-slate-800 transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               Reset Form
@@ -521,7 +521,7 @@ export default function ExchangePage() {
               disabled={!isFormValid || exchangeMutation.isPending}
               className={`px-6 py-2.5 rounded-xl font-bold text-sm shadow-md flex items-center gap-2 transition-all ${
                 !isFormValid || exchangeMutation.isPending
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed shadow-none'
                   : 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 hover:from-amber-500 hover:to-amber-700 active:scale-98 shadow-amber-500/20'
               }`}
             >
@@ -667,14 +667,14 @@ export default function ExchangePage() {
       {/* ─── Exchange History Section ─── */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden space-y-4">
         {/* Header + Filter Bar */}
-        <div className="p-4 sm:p-6 border-b border-slate-200/80 space-y-4">
+        <div className="p-4 sm:p-6 border-b border-slate-200/80 dark:border-[#23283B] space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                 <FileSpreadsheet className="h-5 w-5 text-amber-500" />
                 Exchange Transaction History
               </h2>
-              <p className="text-xs text-slate-500 font-medium">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                 Shared historical audit trail of all completed inventory product swaps.
               </p>
             </div>
@@ -691,7 +691,7 @@ export default function ExchangePage() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search reference #, product name, code or notes..."
-                className="block w-full rounded-xl border-0 py-2 pl-9 pr-3 text-slate-900 font-medium ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500 text-xs sm:text-sm"
+                className="block w-full rounded-xl border-0 py-2 pl-9 pr-3 text-slate-900 dark:text-white bg-white dark:bg-[#121520] font-medium ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-amber-500 text-xs sm:text-sm"
               />
             </div>
 
@@ -702,7 +702,7 @@ export default function ExchangePage() {
                 value={filterStartDate}
                 onChange={(e) => setFilterStartDate(e.target.value)}
                 title="Filter by Start Date"
-                className="block w-full rounded-xl border-0 py-2 px-3 text-slate-900 font-medium ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-amber-500 text-xs sm:text-sm"
+                className="block w-full rounded-xl border-0 py-2 px-3 text-slate-900 dark:text-white bg-white dark:bg-[#121520] font-medium ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-amber-500 text-xs sm:text-sm"
               />
             </div>
 
@@ -713,7 +713,7 @@ export default function ExchangePage() {
                 value={filterEndDate}
                 onChange={(e) => setFilterEndDate(e.target.value)}
                 title="Filter by End Date"
-                className="block w-full rounded-xl border-0 py-2 px-3 text-slate-900 font-medium ring-1 ring-inset ring-slate-300 focus:ring-2 focus:ring-amber-500 text-xs sm:text-sm"
+                className="block w-full rounded-xl border-0 py-2 px-3 text-slate-900 dark:text-white bg-white dark:bg-[#121520] font-medium ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-amber-500 text-xs sm:text-sm"
               />
             </div>
           </div>
@@ -728,11 +728,11 @@ export default function ExchangePage() {
             </div>
           ) : exchanges.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-center px-4">
-              <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+              <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
                 <ArrowLeftRight className="h-6 w-6 text-slate-400" />
               </div>
-              <h3 className="text-sm font-bold text-slate-900">No exchange records found</h3>
-              <p className="mt-1 text-xs text-slate-500">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">No exchange records found</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 {searchTerm || filterStartDate || filterEndDate
                   ? 'No records match the applied search filters.'
                   : 'Completed product-to-product exchanges will appear here.'}
@@ -740,7 +740,7 @@ export default function ExchangePage() {
             </div>
           ) : (
             <table className="min-w-full divide-y divide-slate-200 text-left text-xs sm:text-sm">
-              <thead className="bg-slate-50/80 text-slate-700 font-bold uppercase text-[11px] tracking-wider">
+              <thead className="bg-slate-50/80 dark:bg-[#0F111A] text-slate-700 dark:text-slate-400 font-bold uppercase text-[11px] tracking-wider border-b border-slate-200 dark:border-[#23283B]">
                 <tr>
                   <th className="px-5 py-3.5">Reference #</th>
                   <th className="px-5 py-3.5">Date & Time</th>
@@ -751,12 +751,12 @@ export default function ExchangePage() {
                   <th className="px-5 py-3.5">Notes</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 bg-white dark:bg-[#161925]">
                 {exchanges.map((ex) => (
-                  <tr key={ex.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={ex.id} className="hover:bg-slate-50/80 hover:dark:bg-[#1a1f33] transition-colors">
                     {/* Reference */}
                     <td className="px-5 py-3.5 whitespace-nowrap">
-                      <span className="font-extrabold text-slate-900 font-mono tracking-tight bg-slate-100 px-2 py-0.5 rounded text-xs">
+                      <span className="font-extrabold text-slate-900 dark:text-white font-mono tracking-tight bg-slate-100 dark:bg-slate-800 dark:border dark:border-slate-700/60 px-2 py-0.5 rounded text-xs">
                         {ex.exchange_number}
                       </span>
                     </td>

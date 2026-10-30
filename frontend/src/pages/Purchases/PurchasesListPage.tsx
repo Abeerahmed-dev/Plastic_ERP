@@ -240,14 +240,14 @@ export default function PurchasesListPage() {
                       <div className="flex items-center">
                         <button
                           onClick={() => handleOpenInvoice(inv.id)}
-                          className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                          className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 hover:dark:bg-purple-950/40 hover:dark:ring-1 hover:dark:ring-purple-500/30 transition-colors cursor-pointer"
                           title="Click to view purchase invoice details"
                         >
-                          <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 group-hover:scale-105 transition-all shadow-xs">
+                          <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 dark:bg-purple-950/60 dark:text-purple-400 group-hover:dark:bg-purple-900/60 group-hover:scale-105 transition-all shadow-xs">
                             <FileText className="h-4 w-4" />
                           </div>
                           <div className="ml-3">
-                            <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 group-hover:underline font-mono">
+                            <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 dark:text-white group-hover:dark:text-purple-300 group-hover:underline font-mono">
                               {inv.invoice_number}
                             </div>
                           </div>

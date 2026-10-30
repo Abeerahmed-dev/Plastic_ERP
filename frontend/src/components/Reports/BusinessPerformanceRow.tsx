@@ -77,7 +77,6 @@ export const BusinessPerformanceRow: React.FC = () => {
         const response = await api.get<{ data: PnLData }>('/reports/pnl', {
           params: { startDate, endDate },
         });
-        console.log("RAW P&L PAYLOAD:", response.data);
         return response.data.data;
       } catch (err: any) {
         console.error("DASHBOARD FETCH FAILED:", err?.response?.data || err.message);
@@ -97,27 +96,27 @@ export const BusinessPerformanceRow: React.FC = () => {
     : (totalSales > 0 ? (netProfit / totalSales) * 100 : 0);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5 dark:bg-[#0f111a] dark:border-[#1e2235]">
       {/* Section Header & Global Date Filter */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4 dark:border-[#1e2235]">
         <div>
-          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-blue-600" />
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2 dark:text-white">
+            <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             Time-Bound Business Performance (P&L Overview)
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-slate-500 mt-0.5 dark:text-slate-400">
             Operational Revenue, Locked COGS, Operating Expenses, and Net Profit
           </p>
         </div>
 
         {/* Global Filter Bar */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-            <Calendar className="w-4 h-4 text-slate-500 shrink-0 ml-1" />
+          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 dark:bg-[#161925] dark:border-[#23283B]">
+            <Calendar className="w-4 h-4 text-slate-500 shrink-0 ml-1 dark:text-slate-400" />
             <select
               value={filterOption}
               onChange={(e) => setFilterOption(e.target.value as FilterOption)}
-              className="text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-[#0f111a] dark:border-[#23283B] dark:text-slate-200"
             >
               <option value="this_month">This Month (Default)</option>
               <option value="today">Today</option>
@@ -128,47 +127,47 @@ export const BusinessPerformanceRow: React.FC = () => {
           </div>
 
           {filterOption === 'custom' && (
-            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200 dark:bg-[#161925] dark:border-[#23283B]">
               <input
                 type="date"
                 value={customStartDate}
                 onChange={(e) => setCustomStartDate(e.target.value)}
-                className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700"
+                className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700 dark:bg-[#0f111a] dark:border-[#23283B] dark:text-slate-200"
               />
               <span className="text-xs text-slate-400 font-bold">to</span>
               <input
                 type="date"
                 value={customEndDate}
                 onChange={(e) => setCustomEndDate(e.target.value)}
-                className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700"
+                className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700 dark:bg-[#0f111a] dark:border-[#23283B] dark:text-slate-200"
               />
             </div>
           )}
 
           <button
             onClick={() => setIsLogExpenseOpen(true)}
-            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl border border-amber-200 transition-all flex items-center gap-1.5 shadow-2xs"
+            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl border border-amber-200 transition-all flex items-center gap-1.5 shadow-2xs dark:bg-amber-950/30 dark:hover:bg-amber-900/40 dark:text-amber-400 dark:border-amber-800/50"
           >
-            <Plus className="w-4 h-4 text-amber-600" />
+            <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             + Log Expense
           </button>
 
-          {isLoading && <span className="text-xs text-blue-600 animate-pulse font-medium">Updating...</span>}
+          {isLoading && <span className="text-xs text-blue-600 dark:text-blue-400 animate-pulse font-medium">Updating...</span>}
         </div>
       </div>
 
       {/* 3 Metric Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {/* Card 1: Total Sales (BLUE) */}
-        <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5 space-y-2 shadow-2xs">
-          <div className="flex items-center justify-between text-blue-700">
+        <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-5 space-y-2 shadow-2xs dark:bg-[#0c1b2b] dark:border-sky-500/40 dark:shadow-[0_0_14px_rgba(56,189,248,0.25)]">
+          <div className="flex items-center justify-between text-blue-700 dark:text-sky-400">
             <span className="text-xs font-bold uppercase tracking-wider">Total Sales (Revenue)</span>
             <DollarSign className="h-5 w-5" />
           </div>
-          <p className="text-2xl font-black text-blue-700 font-mono">
+          <p className="text-2xl font-black text-blue-700 font-mono dark:text-sky-300">
             Rs. {totalSales.toLocaleString()}
           </p>
-          <p className="text-[11px] text-blue-600 font-medium flex justify-between">
+          <p className="text-[11px] text-blue-600 font-medium flex justify-between dark:text-sky-400/80">
             <span>Gross Revenue for period</span>
             <span className="font-mono font-bold">COGS: Rs. {totalCogs.toLocaleString()}</span>
           </p>
@@ -177,20 +176,20 @@ export const BusinessPerformanceRow: React.FC = () => {
         {/* Card 2: Total Expenses (ORANGE/WARNING - CLICKABLE) */}
         <div
           onClick={() => setIsExpensesModalOpen(true)}
-          className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 space-y-2 shadow-2xs hover:ring-2 hover:ring-amber-400 cursor-pointer transition-all active:scale-[0.99]"
+          className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 space-y-2 shadow-2xs hover:ring-2 hover:ring-amber-400 cursor-pointer transition-all active:scale-[0.99] dark:bg-[#201c08] dark:border-yellow-400/70 dark:shadow-[0_0_14px_rgba(250,204,21,0.25)] hover:dark:shadow-[0_0_20px_rgba(250,204,21,0.45)]"
           title="Click to view itemized expenses ledger"
         >
-          <div className="flex items-center justify-between text-amber-800">
+          <div className="flex items-center justify-between text-amber-800 dark:text-yellow-400">
             <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1">
               Total Expenses
-              <ExternalLink className="w-3.5 h-3.5 text-amber-600" />
+              <ExternalLink className="w-3.5 h-3.5 text-amber-600 dark:text-yellow-400" />
             </span>
-            <Receipt className="h-5 w-5 text-amber-700" />
+            <Receipt className="h-5 w-5 text-amber-700 dark:text-yellow-400" />
           </div>
-          <p className="text-2xl font-black text-amber-800 font-mono">
+          <p className="text-2xl font-black text-amber-800 font-mono dark:text-yellow-300">
             Rs. {totalExpenses.toLocaleString()}
           </p>
-          <p className="text-[11px] text-amber-700 font-semibold underline">
+          <p className="text-[11px] text-amber-700 font-semibold underline dark:text-yellow-400/90">
             Click to view itemized expense records →
           </p>
         </div>
@@ -198,33 +197,35 @@ export const BusinessPerformanceRow: React.FC = () => {
         {/* Card 3: Net Profit (GREEN IF POSITIVE, RED IF NEGATIVE) */}
         <div
           className={`rounded-2xl border p-5 space-y-2 shadow-2xs transition-all ${
-            isNetProfitPositive ? 'border-emerald-200 bg-emerald-50/60' : 'border-rose-200 bg-rose-50/60'
+            isNetProfitPositive
+              ? 'border-emerald-200 bg-emerald-50/60 dark:bg-[#092218] dark:border-emerald-400 dark:shadow-[0_0_14px_rgba(52,211,153,0.3)]'
+              : 'border-rose-200 bg-rose-50/60 dark:bg-[#220c0f] dark:border-rose-500 dark:shadow-[0_0_14px_rgba(244,63,94,0.35)]'
           }`}
         >
           <div className="flex items-center justify-between">
             <span
               className={`text-xs font-bold uppercase tracking-wider ${
-                isNetProfitPositive ? 'text-emerald-800' : 'text-rose-800'
+                isNetProfitPositive ? 'text-emerald-800 dark:text-emerald-400' : 'text-rose-800 dark:text-rose-400'
               }`}
             >
               {isNetProfitPositive ? 'NET PROFIT' : 'NET LOSS'}
             </span>
             {isNetProfitPositive ? (
-              <TrendingUp className="h-5 w-5 text-emerald-600" />
+              <TrendingUp className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
             ) : (
-              <TrendingDown className="h-5 w-5 text-rose-600" />
+              <TrendingDown className="h-5 w-5 text-rose-600 dark:text-rose-400" />
             )}
           </div>
           <p
             className={`text-2xl font-black font-mono ${
-              isNetProfitPositive ? 'text-emerald-700' : 'text-rose-700'
+              isNetProfitPositive ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-400'
             }`}
           >
             Rs. {netProfit.toLocaleString()}
           </p>
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 pt-1 border-t border-slate-200/60">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 pt-1 border-t border-slate-200/60 dark:border-slate-800 dark:text-slate-400">
             <span>Profit Margin: {profitMarginPct.toFixed(1)}%</span>
-            <span className={isNetProfitPositive ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
+            <span className={isNetProfitPositive ? 'text-emerald-700 dark:text-emerald-400 font-bold' : 'text-rose-700 dark:text-rose-400 font-bold'}>
               Net = (Sales - COGS) - Expenses
             </span>
           </div>

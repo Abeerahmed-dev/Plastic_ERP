@@ -119,21 +119,21 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col my-auto max-h-[88vh] overflow-hidden">
+      <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col my-auto max-h-[88vh] overflow-hidden dark:bg-[#121520] dark:border dark:border-[#23283B]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-emerald-50/40">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-emerald-50/40 dark:bg-[#0c181f] dark:border-[#23283B]">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-emerald-600 text-white">
               <Building2 className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Multi-Bank Accounts Ledger & Management</h2>
-              <p className="text-xs text-slate-500">Real-time account balances, deposits & transaction routing</p>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Multi-Bank Accounts Ledger & Management</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Real-time account balances, deposits & transaction routing</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-full transition"
+            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 dark:hover:bg-slate-800 dark:hover:text-white rounded-full transition"
           >
             <X className="w-5 h-5" />
           </button>
@@ -150,7 +150,7 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
           ) : (
             <>
           {/* Summary Banner */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md dark:from-[#092218] dark:to-[#0c2e22] dark:border dark:border-emerald-500/40">
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-100 block">
                 Total Combined Bank Liquidity
@@ -186,9 +186,9 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
 
           {/* Add / Edit Form Card */}
           {isFormOpen && (
-            <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/40 space-y-4 shadow-sm animate-in slide-in-from-top duration-200">
-              <div className="flex items-center justify-between border-b border-blue-100 pb-3">
-                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/40 space-y-4 shadow-sm animate-in slide-in-from-top duration-200 dark:bg-[#0c1b2b] dark:border-sky-500/40">
+              <div className="flex items-center justify-between border-b border-blue-100 dark:border-[#23283B] pb-3">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-blue-600" />
                   {editingAccount ? 'Edit Bank Account' : 'Register New Bank Account'}
                 </h3>
@@ -315,14 +315,14 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
                 <div
                   key={acc.id}
                   onClick={() => setSelectedAccountId(acc.id)}
-                  className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3 shadow-xs hover:border-emerald-500 hover:ring-2 hover:ring-emerald-500 transition-all group cursor-pointer"
+                  className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3 shadow-xs hover:border-emerald-500 hover:ring-2 hover:ring-emerald-500 transition-all group cursor-pointer dark:bg-[#161925] dark:border-[#23283B] hover:dark:border-emerald-400 hover:dark:ring-emerald-400/30"
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100 inline-block mb-1">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-100 inline-block mb-1 dark:bg-emerald-950/60 dark:border-emerald-500/50 dark:text-emerald-400">
                         {acc.bank_name}
                       </span>
-                      <h4 className="text-base font-bold text-slate-900 leading-snug group-hover:text-emerald-700 transition-colors">
+                      <h4 className="text-base font-bold text-slate-900 leading-snug group-hover:text-emerald-700 transition-colors dark:text-white group-hover:dark:text-emerald-400">
                         {acc.account_title}
                       </h4>
                     </div>
@@ -340,7 +340,7 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
                     </button>
                   </div>
 
-                  <div className="space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-100 font-mono text-xs text-slate-600">
+                  <div className="space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-100 font-mono text-xs text-slate-600 dark:bg-[#0F111A] dark:border-[#23283B] dark:text-slate-300">
                     <div className="flex justify-between">
                       <span className="text-slate-400 font-sans">Account No:</span>
                       <span className="font-bold text-slate-800">{acc.account_number}</span>
@@ -353,7 +353,7 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
                     )}
                   </div>
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between dark:border-[#23283B]">
                     <div>
                       <span className="text-[10px] text-slate-400 font-bold uppercase block">Opening Balance</span>
                       <span className="text-xs font-mono font-semibold text-slate-600">
@@ -379,7 +379,7 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
     </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center dark:bg-[#0F111A] dark:border-[#23283B]">
           <span className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             Bank transactions & cheques automatically route balances to these accounts
@@ -387,7 +387,7 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 transition shadow-2xs"
+            className="px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 transition shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-slate-200 hover:dark:bg-[#1E2438]"
           >
             Close Window
           </button>

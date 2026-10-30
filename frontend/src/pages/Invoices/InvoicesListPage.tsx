@@ -381,7 +381,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
                 selectedRoleFilter === 'ALL'
                   ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60 dark:text-slate-400 hover:dark:text-white hover:dark:bg-slate-800/60'
               }`}
             >
               <span>All</span>
@@ -397,7 +397,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
                 selectedRoleFilter === 'ADMIN'
                   ? 'bg-purple-700 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-purple-700 hover:bg-purple-50/60'
+                  : 'text-slate-600 hover:text-purple-700 hover:bg-purple-50/60 dark:text-slate-400 hover:dark:text-purple-300 hover:dark:bg-purple-950/40'
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5 text-purple-300" />
@@ -414,7 +414,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
                 selectedRoleFilter === 'CASHIER'
                   ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50/60'
+                  : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50/60 dark:text-slate-400 hover:dark:text-blue-300 hover:dark:bg-blue-950/40'
               }`}
             >
               <User className="w-3.5 h-3.5 text-blue-300" />
@@ -527,23 +527,23 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                         isCreditNote
                           ? 'bg-red-50/70 border-l-4 border-l-red-500'
                           : isPos
-                          ? 'hover:bg-amber-50/30'
-                          : 'hover:bg-slate-50/50'
+                          ? 'hover:bg-amber-50/30 hover:dark:bg-[#1a1710]'
+                          : 'hover:bg-slate-50/50 hover:dark:bg-[#151928]'
                       }`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <button
                             onClick={() => handleOpenInvoice(invoice.id)}
-                            className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                            className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 hover:dark:bg-purple-950/40 hover:dark:ring-1 hover:dark:ring-purple-500/30 transition-colors cursor-pointer"
                             title="Click to view detailed line items"
                           >
                             <div className={`h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl group-hover:scale-105 transition-all shadow-xs ${
                               isCreditNote
                                 ? 'bg-red-100 text-red-700'
                                 : isPos
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-purple-100 text-purple-700'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400'
+                                : 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400'
                             }`}>
                               {isCreditNote ? (
                                 <RotateCcw className="h-5 w-5" />
@@ -556,10 +556,10 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                             <div className="ml-3">
                               <div className={`text-sm font-bold font-mono group-hover:underline flex items-center gap-1.5 ${
                                 isCreditNote
-                                  ? 'text-red-900 group-hover:text-red-700'
+                                  ? 'text-red-900 group-hover:text-red-700 dark:text-rose-300 group-hover:dark:text-rose-200'
                                   : isPos
-                                  ? 'text-amber-950 group-hover:text-amber-700'
-                                  : 'text-slate-900 group-hover:text-purple-700'
+                                  ? 'text-amber-950 group-hover:text-amber-700 dark:text-amber-300 group-hover:dark:text-amber-200'
+                                  : 'text-slate-900 group-hover:text-purple-700 dark:text-white group-hover:dark:text-purple-300'
                               }`}>
                                 <span>{invoice.invoice_number}</span>
                                 {isPos && (
@@ -568,7 +568,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10px] text-purple-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
                                 View details →
                               </div>
                             </div>

@@ -234,11 +234,11 @@ export default function ExpensesListPage() {
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-600 text-white shadow-xs">
                 <Receipt className="h-5 w-5" />
               </div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
                 Operating Expenses (OPEX)
               </h1>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Log, track, and pay operational expenses separate from inventory purchases
             </p>
           </div>
@@ -254,12 +254,12 @@ export default function ExpensesListPage() {
 
         {/* Top Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div className="bg-white dark:bg-[#161925] p-5 rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Total OPEX
               </p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">
+              <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
                 Rs.{' '}
                 {totalAmount.toLocaleString(undefined, {
                   minimumFractionDigits: 2,
@@ -267,17 +267,17 @@ export default function ExpensesListPage() {
                 })}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+            <div className="h-11 w-11 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center">
               <DollarSign className="h-5 w-5" />
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div className="bg-white dark:bg-[#161925] p-5 rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Cash in Drawer OPEX
               </p>
-              <p className="text-2xl font-bold text-amber-700 mt-1">
+              <p className="text-2xl font-bold text-amber-700 dark:text-amber-400 mt-1">
                 Rs.{' '}
                 {cashOutflow.toLocaleString(undefined, {
                   minimumFractionDigits: 2,
@@ -285,17 +285,17 @@ export default function ExpensesListPage() {
                 })}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <div className="h-11 w-11 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
               <Wallet className="h-5 w-5" />
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div className="bg-white dark:bg-[#161925] p-5 rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Bank Account OPEX
               </p>
-              <p className="text-2xl font-bold text-blue-700 mt-1">
+              <p className="text-2xl font-bold text-blue-700 dark:text-blue-400 mt-1">
                 Rs.{' '}
                 {bankOutflow.toLocaleString(undefined, {
                   minimumFractionDigits: 2,
@@ -303,17 +303,17 @@ export default function ExpensesListPage() {
                 })}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="h-11 w-11 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center">
               <Building2 className="h-5 w-5" />
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-red-200 shadow-2xs flex items-center justify-between bg-red-50/20">
+          <div className="bg-white dark:bg-[#161925] p-5 rounded-2xl border border-red-200 dark:border-rose-900/40 shadow-2xs flex items-center justify-between bg-red-50/20 dark:bg-rose-950/20">
             <div>
               <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">
                 Pending / Outstanding
               </p>
-              <p className="text-2xl font-bold text-red-700 mt-1">
+              <p className="text-2xl font-bold text-red-700 dark:text-rose-400 mt-1">
                 Rs.{' '}
                 {pendingAmount.toLocaleString(undefined, {
                   minimumFractionDigits: 2,
@@ -321,14 +321,14 @@ export default function ExpensesListPage() {
                 })}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
+            <div className="h-11 w-11 rounded-xl bg-red-100 dark:bg-rose-950/60 text-red-600 dark:text-rose-400 flex items-center justify-center">
               <Clock className="h-5 w-5" />
             </div>
           </div>
         </div>
 
         {/* Filters Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs mb-6 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:gap-3 sm:flex-wrap">
+        <div className="bg-white dark:bg-[#161925] p-4 rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs mb-6 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:gap-3 sm:flex-wrap">
           {/* Search Box */}
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -337,7 +337,7 @@ export default function ExpensesListPage() {
               placeholder="Search description, invoice ref, supplier, category..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-sm rounded-xl border border-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition"
+              className="w-full pl-10 pr-4 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121520] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:focus:ring-red-950/40 outline-none transition"
             />
           </div>
 
@@ -347,7 +347,7 @@ export default function ExpensesListPage() {
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer"
+              className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121520] text-slate-700 dark:text-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:focus:ring-red-950/40 outline-none transition cursor-pointer"
             >
               {CATEGORIES.map((cat) => (
                 <option key={cat} value={cat}>
@@ -361,7 +361,7 @@ export default function ExpensesListPage() {
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer"
+            className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121520] text-slate-700 dark:text-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:focus:ring-red-950/40 outline-none transition cursor-pointer"
           >
             {STATUSES.map((st) => (
               <option key={st.value} value={st.value}>
@@ -374,7 +374,7 @@ export default function ExpensesListPage() {
           <select
             value={selectedBankAccountId}
             onChange={(e) => setSelectedBankAccountId(e.target.value)}
-            className="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer"
+            className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121520] text-slate-700 dark:text-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:focus:ring-red-950/40 outline-none transition cursor-pointer"
           >
             <option value="All">Account: All Accounts</option>
             {bankAccounts.map((acc: any) => (
@@ -391,24 +391,24 @@ export default function ExpensesListPage() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer"
+              className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121520] text-slate-700 dark:text-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:focus:ring-red-950/40 outline-none transition cursor-pointer"
             />
             <span className="text-slate-400 text-xs">to</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 text-sm rounded-xl border border-slate-200 bg-white text-slate-700 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none transition cursor-pointer"
+              className="px-3 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#121520] text-slate-700 dark:text-slate-200 focus:border-red-500 focus:ring-2 focus:ring-red-100 dark:focus:ring-red-950/40 outline-none transition cursor-pointer"
             />
           </div>
         </div>
 
         {/* Expenses Data Table */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div className="bg-white dark:bg-[#161925] rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <tr className="bg-slate-50/80 dark:bg-[#0F111A] border-b border-slate-200 dark:border-[#23283B] text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   <th className="py-3.5 px-4">Date</th>
                   <th className="py-3.5 px-4">Category</th>
                   <th className="py-3.5 px-4">Description / Reference</th>
@@ -419,7 +419,7 @@ export default function ExpensesListPage() {
                   <th className="py-3.5 px-4 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-sm">
                 {isLoading && (
                   <tr>
                     <td colSpan={8} className="py-12 text-center text-slate-400">
@@ -469,8 +469,8 @@ export default function ExpensesListPage() {
                       !isPending && expense.payment_method?.toUpperCase().includes('CASH');
 
                     return (
-                      <tr key={expense.id} className="hover:bg-slate-50/60 transition">
-                        <td className="py-3.5 px-4 font-medium text-slate-900 whitespace-nowrap">
+                      <tr key={expense.id} className="hover:bg-slate-50/60 hover:dark:bg-[#1a1f33] transition">
+                        <td className="py-3.5 px-4 font-medium text-slate-900 dark:text-white whitespace-nowrap">
                           {expense.expense_date
                             ? new Date(expense.expense_date).toLocaleDateString(undefined, {
                                 year: 'numeric',
@@ -492,7 +492,7 @@ export default function ExpensesListPage() {
 
                         <td className="py-3.5 px-4 max-w-sm">
                           <div className="flex flex-col gap-0.5">
-                            <span className="font-semibold text-slate-900 truncate">
+                            <span className="font-semibold text-slate-900 dark:text-white truncate">
                               {expense.description || <span className="text-slate-400 italic">No description</span>}
                             </span>
                             {(expense.purchase_invoice_number || expense.supplier_name) && (
@@ -512,7 +512,7 @@ export default function ExpensesListPage() {
                         </td>
 
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                          <span className="block font-bold text-slate-900">
+                          <span className="block font-bold text-slate-900 dark:text-white">
                             Rs. {Number(expense.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </span>
                           {isPartial && (

@@ -636,7 +636,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 ${
       hasError
         ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
+        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20 dark:border-[#2D3349] dark:bg-[#121520] dark:text-white'
     }`;
 
   const formatCurrency = (val: string | number) => {
@@ -645,18 +645,18 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto pt-10 pb-10 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl flex flex-col my-auto max-h-[90vh] animate-in zoom-in-95 duration-200">
+      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl flex flex-col my-auto max-h-[90vh] animate-in zoom-in-95 duration-200 dark:bg-[#121520] dark:border dark:border-[#23283B]">
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 dark:border-[#23283B]">
           <div className="flex items-center gap-2.5">
-            <div className={`p-2 rounded-xl ${isSupplier ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+            <div className={`p-2 rounded-xl ${isSupplier ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 dark:border dark:border-purple-500/40' : 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-sky-300 dark:border dark:border-blue-500/40'}`}>
               <CreditCard className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800">
+              <h2 className="text-lg font-bold text-slate-800 dark:text-white">
                 {isSupplier ? 'Record Supplier Payment' : 'Record Customer Payment'}
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 {isSupplier
                   ? 'Settle supplier purchase bills with cash, bank transfer, or PDC.'
                   : 'Settle customer sales invoices with cash, bank, PDC, or supplier credit.'}
@@ -666,7 +666,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+            className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-white transition"
           >
             <X className="h-5 w-5" />
           </button>
@@ -687,7 +687,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Entity Selector (Customer or Supplier) */}
               <div>
-                <label htmlFor="entity_id" className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="entity_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                   {isSupplier ? 'Supplier' : 'Customer'} <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -727,7 +727,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
               {/* Link to Invoice Dropdown */}
               <div>
-                <label htmlFor="invoice_id" className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="invoice_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                   {isSupplier ? 'Link to Purchase Bill (Optional)' : 'Link to Invoice (Optional)'}
                 </label>
                 <select
@@ -786,7 +786,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
               {/* Payment Date */}
               <div>
-                <label htmlFor="payment_date" className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="payment_date" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                   Payment Date <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -800,7 +800,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
               {/* Payment Method */}
               <div>
-                <label htmlFor="payment_method" className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label htmlFor="payment_method" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                   Payment Method <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -843,7 +843,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
               {/* Direct to Supplier (Tripartite) selection */}
               {!isSupplier && selectedPaymentMethod === 'DIRECT_TO_SUPPLIER' && (
                 <div className="md:col-span-2">
-                  <label htmlFor="supplier_id" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  <label htmlFor="supplier_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                     Select Target Supplier <span className="text-red-500">*</span>
                   </label>
                   <select id="supplier_id" {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
@@ -864,7 +864,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 selectedPaymentMethod === 'CHEQUE' ||
                 selectedPaymentMethod === 'PDC') && (
                 <div className="md:col-span-2">
-                  <label htmlFor="bank_account_id" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  <label htmlFor="bank_account_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                     Select {isSupplier ? 'Source' : 'Target'} Bank Account <span className="text-red-500">*</span>
                   </label>
                   <select
@@ -903,13 +903,13 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
               {/* Post-Dated Cheque (PDC) fields */}
               {(selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') && (
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3 md:col-span-2">
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3 md:col-span-2 dark:bg-[#121520] dark:border-[#23283B]">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider dark:text-slate-200">
                     Post-Dated Cheque (PDC) Details
                   </h4>
                   <div className={`grid grid-cols-1 ${!isSupplier ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-3`}>
                     <div>
-                      <label htmlFor="cheque_number" className="mb-1 block text-xs font-medium text-slate-700">Cheque Number *</label>
+                      <label htmlFor="cheque_number" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Cheque Number *</label>
                       <input
                         id="cheque_number"
                         type="text"
@@ -920,7 +920,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                     </div>
                     {!isSupplier && (
                       <div>
-                        <label htmlFor="cheque_bank_name" className="mb-1 block text-xs font-medium text-slate-700">Customer Origin Bank *</label>
+                        <label htmlFor="cheque_bank_name" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Customer Origin Bank *</label>
                         <input
                           id="cheque_bank_name"
                           type="text"
@@ -931,7 +931,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                       </div>
                     )}
                     <div>
-                      <label htmlFor="cheque_due_date" className="mb-1 block text-xs font-medium text-slate-700">Cheque Due Date *</label>
+                      <label htmlFor="cheque_due_date" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Cheque Due Date *</label>
                       <input
                         id="cheque_due_date"
                         type="date"
@@ -945,38 +945,38 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
               {/* Split Payment UI (Cash + Bank) */}
               {selectedPaymentMethod === 'SPLIT' ? (
-                <div className="md:col-span-2 p-5 bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/70 rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-indigo-100">
+                <div className="md:col-span-2 p-5 bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/70 rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4 dark:from-[#161925] dark:via-[#121520] dark:to-[#161925] dark:border-indigo-500/40 dark:shadow-[0_0_20px_rgba(99,102,241,0.15)]">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-indigo-100 dark:border-[#23283B]">
                     <div className="flex items-center gap-2">
-                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
+                      <div className="p-1.5 bg-indigo-600 text-white rounded-lg dark:bg-indigo-600/30 dark:border dark:border-indigo-500/50 dark:text-indigo-400 dark:shadow-[0_0_10px_rgba(99,102,241,0.3)]">
                         <Split className="w-4 h-4" />
                       </div>
                       <div>
-                        <h4 className="text-sm font-bold text-slate-800">Split Payment Breakdown</h4>
-                        <p className="text-xs text-slate-500">Divide payment between Cash in Drawer and Bank Transfer</p>
+                        <h4 className="text-sm font-bold text-slate-800 dark:text-white">Split Payment Breakdown</h4>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Divide payment between Cash in Drawer and Bank Transfer</p>
                       </div>
                     </div>
                     {((selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0)) && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-500 font-medium mr-1">Quick Split:</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium mr-1">Quick Split:</span>
                         <button
                           type="button"
                           onClick={() => handleQuickSplit('50-50')}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition cursor-pointer dark:bg-indigo-950/60 dark:text-indigo-300 dark:border dark:border-indigo-500/50 hover:dark:bg-indigo-900/60"
                         >
                           50 / 50
                         </button>
                         <button
                           type="button"
                           onClick={() => handleQuickSplit('all-cash')}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition cursor-pointer dark:bg-emerald-950/60 dark:text-emerald-300 dark:border dark:border-emerald-500/50 hover:dark:bg-emerald-900/60"
                         >
                           All Cash
                         </button>
                         <button
                           type="button"
                           onClick={() => handleQuickSplit('all-bank')}
-                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition cursor-pointer dark:bg-blue-950/60 dark:text-blue-300 dark:border dark:border-blue-500/50 hover:dark:bg-blue-900/60"
                         >
                           All Bank
                         </button>
@@ -986,7 +986,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
                   {/* Target / Source Bank Account selection inside split */}
                   <div>
-                    <label htmlFor="split_bank_account_id" className="mb-1 block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    <label htmlFor="split_bank_account_id" className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                       Select {isSupplier ? 'Source' : 'Target'} Bank Account (For Bank Transfer Portion) <span className="text-red-500">*</span>
                     </label>
                     <select
@@ -1017,16 +1017,16 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
                   {/* Split amounts inputs */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-3.5 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-1.5">
+                    <div className="p-3.5 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-1.5 dark:bg-[#092218] dark:border-emerald-500/50 dark:shadow-[0_0_12px_rgba(52,211,153,0.2)]">
                       <div className="flex items-center justify-between">
-                        <label htmlFor="split_cash_input" className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
-                          <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                        <label htmlFor="split_cash_input" className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                           Cash Portion (Rs.)
                         </label>
-                        <span className="text-[11px] text-emerald-600 font-semibold">{isSupplier ? `Drawer: Rs. ${cashDrawerBalance.toLocaleString()}` : 'Cash Drawer'}</span>
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">{isSupplier ? `Drawer: Rs. ${cashDrawerBalance.toLocaleString()}` : 'Cash Drawer'}</span>
                       </div>
                       <div className="relative">
-                        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 text-sm">Rs.</span>
+                        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 dark:text-slate-400 text-sm">Rs.</span>
                         <input
                           id="split_cash_input"
                           type="number"
@@ -1035,18 +1035,18 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           value={splitCashAmount}
                           onChange={(e) => handleSplitChange('cash', e.target.value)}
                           placeholder="0.00"
-                          className="block w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="block w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:bg-[#121520] dark:border-emerald-500/60 dark:text-emerald-300 focus:dark:ring-emerald-400 focus:dark:border-emerald-400"
                         />
                       </div>
                     </div>
 
-                    <div className="p-3.5 bg-blue-50/60 rounded-xl border border-blue-200 space-y-1.5">
+                    <div className="p-3.5 bg-blue-50/60 rounded-xl border border-blue-200 space-y-1.5 dark:bg-[#0c1b2b] dark:border-sky-500/50 dark:shadow-[0_0_12px_rgba(56,189,248,0.2)]">
                       <div className="flex items-center justify-between">
-                        <label htmlFor="split_bank_input" className="text-xs font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
-                          <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                        <label htmlFor="split_bank_input" className="text-xs font-bold text-blue-800 dark:text-sky-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400" />
                           Bank Transfer Portion (Rs.)
                         </label>
-                        <span className="text-[11px] text-blue-600 font-semibold">{isSupplier ? (selectedBankAccount ? `Avail: Rs. ${Number(selectedBankAccount.current_balance).toLocaleString()}` : 'Select Account') : 'Direct Deposit'}</span>
+                        <span className="text-[11px] text-blue-600 dark:text-sky-400 font-semibold">{isSupplier ? (selectedBankAccount ? `Avail: Rs. ${Number(selectedBankAccount.current_balance).toLocaleString()}` : 'Select Account') : 'Direct Deposit'}</span>
                       </div>
                       <div className="relative">
                         <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 text-sm">Rs.</span>
@@ -1058,30 +1058,30 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           value={splitBankAmount}
                           onChange={(e) => handleSplitChange('bank', e.target.value)}
                           placeholder="0.00"
-                          className="block w-full rounded-lg border border-blue-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="block w-full rounded-lg border border-blue-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-[#121520] dark:border-sky-500/60 dark:text-sky-300 focus:dark:ring-sky-400 focus:dark:border-sky-400"
                         />
                       </div>
                     </div>
                   </div>
 
                   {/* Summary Bar */}
-                  <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-indigo-100 flex-wrap gap-2 text-xs">
+                  <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-indigo-100 flex-wrap gap-2 text-xs dark:bg-[#0F111A] dark:border-[#23283B]">
                     <div className="flex items-center gap-3">
-                      <span className="text-slate-500">
-                        Cash: <strong className="text-emerald-700 font-mono">Rs. {Number(splitCashAmount || 0).toLocaleString()}</strong>
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Cash: <strong className="text-emerald-700 dark:text-emerald-400 font-mono">Rs. {Number(splitCashAmount || 0).toLocaleString()}</strong>
                       </span>
-                      <span className="text-slate-300">|</span>
-                      <span className="text-slate-500">
-                        Bank: <strong className="text-blue-700 font-mono">Rs. {Number(splitBankAmount || 0).toLocaleString()}</strong>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Bank: <strong className="text-blue-700 dark:text-sky-400 font-mono">Rs. {Number(splitBankAmount || 0).toLocaleString()}</strong>
                       </span>
                     </div>
                     <div className="flex items-center gap-3 font-semibold">
-                      <span className="text-slate-700">
-                        Total Recorded: <strong className="text-indigo-700 text-sm font-bold font-mono">Rs. {((Number(splitCashAmount || 0)) + (Number(splitBankAmount || 0))).toLocaleString()}</strong>
+                      <span className="text-slate-700 dark:text-slate-300">
+                        Total Recorded: <strong className="text-indigo-700 dark:text-indigo-400 text-sm font-bold font-mono">Rs. {((Number(splitCashAmount || 0)) + (Number(splitBankAmount || 0))).toLocaleString()}</strong>
                       </span>
                       {selectedInvoice && selectedInvoice.balance_due > 0 && (
-                        <span className="text-slate-500">
-                          (Remaining Due: <strong className="font-mono text-amber-700">Rs. {Math.max(0, selectedInvoice.balance_due - ((Number(splitCashAmount || 0)) + (Number(splitBankAmount || 0)))).toLocaleString()}</strong>)
+                        <span className="text-slate-500 dark:text-slate-400">
+                          (Remaining Due: <strong className="font-mono text-amber-700 dark:text-amber-400">Rs. {Math.max(0, selectedInvoice.balance_due - ((Number(splitCashAmount || 0)) + (Number(splitBankAmount || 0)))).toLocaleString()}</strong>)
                         </span>
                       )}
                     </div>
@@ -1151,14 +1151,14 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
                         errors.amount
                           ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
-                          : 'border-emerald-200 focus:border-emerald-500 focus:ring-emerald-500/20 text-emerald-900 bg-emerald-50/50'
+                          : 'border-emerald-200 focus:border-emerald-500 focus:ring-emerald-500/20 text-emerald-900 bg-emerald-50/50 dark:bg-[#092218] dark:border-emerald-500/60 dark:text-emerald-300 focus:dark:border-emerald-400 focus:dark:ring-emerald-400/20'
                       }`}
                     />
                     {((selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0)) && (
                       <button
                         type="button"
                         onClick={handleClearFullBalance}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-300 transition-all cursor-pointer shadow-2xs"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-300 transition-all cursor-pointer shadow-2xs dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-500/60 hover:dark:bg-emerald-900/60"
                       >
                         Clear Full Balance
                       </button>
@@ -1171,7 +1171,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
             {/* Notes / Reference */}
             <div>
-              <label htmlFor="notes" className="mb-1.5 block text-sm font-medium text-slate-700">Notes / Reference</label>
+              <label htmlFor="notes" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Notes / Reference</label>
               <textarea
                 id="notes"
                 {...register('notes')}
@@ -1184,11 +1184,11 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+        <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 flex justify-end gap-3 rounded-b-2xl dark:bg-[#0F111A] dark:border-[#23283B]">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200 transition"
+            className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-200 transition dark:text-slate-300 dark:hover:bg-[#1E2438]"
           >
             Cancel
           </button>

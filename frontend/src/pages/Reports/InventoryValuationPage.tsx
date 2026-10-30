@@ -182,19 +182,19 @@ export default function InventoryValuationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0A0B10] p-4 sm:p-6 lg:p-8 space-y-6">
       {/* ─── PAGE HEADER ────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white dark:bg-[#161925] p-6 rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs">
         <div>
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white shadow-md">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 dark:bg-[#0e111a] dark:border dark:border-slate-800 text-white shadow-md">
               <Boxes className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
                 Stocks
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
                 Real-time physical warehouse stock, sizes, variants & asset valuation
               </p>
             </div>
@@ -213,7 +213,7 @@ export default function InventoryValuationPage() {
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold rounded-xl transition-all shadow-sm disabled:opacity-50 shrink-0 cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 hover:dark:bg-slate-700 dark:border dark:border-slate-700 text-xs sm:text-sm font-semibold rounded-xl transition-all shadow-sm disabled:opacity-50 shrink-0 cursor-pointer"
           >
             <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -232,13 +232,13 @@ export default function InventoryValuationPage() {
       )}
 
       {/* ─── MACRO KPI CARD (TOTAL WAREHOUSE CAPITAL) ───────────── */}
-      <div className="relative overflow-hidden bg-slate-900 text-white rounded-2xl shadow-xl p-6 sm:p-8 border border-slate-800">
+      <div className="relative overflow-hidden bg-slate-900 dark:bg-[#121520] text-white rounded-2xl shadow-xl p-6 sm:p-8 border border-slate-800 dark:border-[#23283B]">
         <div className="absolute -right-10 -bottom-10 opacity-10 pointer-events-none">
           <Boxes className="w-80 h-80 text-white" />
         </div>
 
         <div className="relative z-10 space-y-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 dark:border-[#23283B] pb-6">
             <div>
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 uppercase tracking-wider">
                 <DollarSign className="w-3.5 h-3.5" /> Total Warehouse Capital (WAC)
@@ -252,7 +252,7 @@ export default function InventoryValuationPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-800/80 backdrop-blur-md p-3.5 rounded-xl border border-slate-700">
+              <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
                 <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
                   <Package className="w-3.5 h-3.5 text-blue-400" /> Active Products
                 </div>
@@ -261,7 +261,7 @@ export default function InventoryValuationPage() {
                 </div>
               </div>
 
-              <div className="bg-slate-800/80 backdrop-blur-md p-3.5 rounded-xl border border-slate-700">
+              <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
                 <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5 text-emerald-400" /> Total Stock Weight
                 </div>
@@ -275,9 +275,9 @@ export default function InventoryValuationPage() {
       </div>
 
       {/* ─── DATA TABLE BLOCK ───────────────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+      <div className="bg-white dark:bg-[#161925] rounded-2xl border border-slate-200 dark:border-[#23283B] shadow-2xs overflow-hidden">
         {/* Filter Controls Bar */}
-        <div className="p-4 sm:p-6 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row gap-4 items-center justify-between">
+        <div className="p-4 sm:p-6 border-b border-slate-100 dark:border-[#23283B] bg-slate-50/50 dark:bg-[#121520] flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="flex flex-1 flex-col sm:flex-row gap-3 w-full">
             {/* Search Input */}
             <div className="relative flex-1">
@@ -287,7 +287,7 @@ export default function InventoryValuationPage() {
                 placeholder="Filter by product name or code..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                className="w-full pl-10 pr-4 py-2 bg-white dark:bg-[#161925] border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900 dark:focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>
 
@@ -297,7 +297,7 @@ export default function InventoryValuationPage() {
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all appearance-none cursor-pointer"
+                className="w-full pl-9 pr-8 py-2 bg-white dark:bg-[#161925] border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-slate-900 dark:focus:ring-blue-500 focus:border-transparent transition-all appearance-none cursor-pointer"
               >
                 <option value="ALL">All Categories</option>
                 {categoriesList.map((cat) => (
@@ -326,12 +326,12 @@ export default function InventoryValuationPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-50 text-slate-600 font-semibold text-xs border-b border-slate-200">
+                <tr className="bg-slate-50 dark:bg-[#0F111A] text-slate-600 dark:text-slate-400 font-semibold text-xs border-b border-slate-200 dark:border-[#23283B]">
                   <th className="py-3.5 pl-4 pr-2 w-10 text-center">#</th>
                   <th className="py-3.5 px-4 sm:px-6">
                     <button
                       onClick={() => toggleSort('product_name')}
-                      className="flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase tracking-wider text-[11px]"
+                      className="flex items-center gap-1.5 hover:text-slate-900 hover:dark:text-white cursor-pointer font-bold uppercase tracking-wider text-[11px]"
                     >
                       <span>Product Group / Variant</span>
                       <ArrowUpDown className="h-3 w-3" />
@@ -343,7 +343,7 @@ export default function InventoryValuationPage() {
                   <th className="py-3.5 px-4 text-right">
                     <button
                       onClick={() => toggleSort('current_stock_kg')}
-                      className="flex items-center gap-1.5 ml-auto hover:text-slate-900 cursor-pointer font-bold uppercase tracking-wider text-[11px]"
+                      className="flex items-center gap-1.5 ml-auto hover:text-slate-900 hover:dark:text-white cursor-pointer font-bold uppercase tracking-wider text-[11px]"
                     >
                       <span>Stock on Hand (KG)</span>
                       <ArrowUpDown className="h-3 w-3" />
@@ -357,7 +357,7 @@ export default function InventoryValuationPage() {
                   <th className="py-3.5 px-4 sm:px-6 text-right">
                     <button
                       onClick={() => toggleSort('asset_value')}
-                      className="flex items-center gap-1.5 ml-auto hover:text-slate-900 cursor-pointer font-bold uppercase tracking-wider text-[11px]"
+                      className="flex items-center gap-1.5 ml-auto hover:text-slate-900 hover:dark:text-white cursor-pointer font-bold uppercase tracking-wider text-[11px]"
                     >
                       <span>Total Asset Value</span>
                       <ArrowUpDown className="h-3 w-3" />
@@ -366,7 +366,7 @@ export default function InventoryValuationPage() {
                 </tr>
               </thead>
 
-              <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs sm:text-sm">
                 {groupedProducts.map((group) => {
                   const isGroupExpanded = !!expandedGroups[group.groupKey];
                   const variantCount = group.variants.length;
@@ -384,10 +384,10 @@ export default function InventoryValuationPage() {
                       {/* ─── LEVEL 1: MASTER GROUP ROW ─── */}
                       <tr
                         onClick={() => toggleGroup(group.groupKey)}
-                        className={`cursor-pointer transition-colors border-t-2 border-slate-200/80 ${
+                        className={`cursor-pointer transition-colors border-t-2 border-slate-200/80 dark:border-[#23283B] ${
                           isGroupExpanded
-                            ? 'bg-slate-900 text-white hover:bg-slate-800'
-                            : 'bg-slate-100/90 hover:bg-slate-200/80 text-slate-900'
+                            ? 'bg-slate-900 dark:bg-[#0e111a] text-white hover:bg-slate-800 hover:dark:bg-[#141824]'
+                            : 'bg-slate-100/90 dark:bg-[#161925] hover:bg-slate-200/80 hover:dark:bg-[#1e2335] text-slate-900 dark:text-white'
                         }`}
                       >
                         {/* Accordion Chevron */}
@@ -400,7 +400,7 @@ export default function InventoryValuationPage() {
                             className={`p-1 rounded-lg transition-colors cursor-pointer ${
                               isGroupExpanded
                                 ? 'hover:bg-slate-700 text-slate-200'
-                                : 'hover:bg-slate-300 text-slate-600'
+                                : 'hover:bg-slate-300 hover:dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                             }`}
                           >
                             {isGroupExpanded ? (
@@ -420,8 +420,8 @@ export default function InventoryValuationPage() {
                             <span
                               className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
                                 isGroupExpanded
-                                  ? 'bg-slate-800 text-slate-200 border border-slate-700'
-                                  : 'bg-slate-200 text-slate-700 border border-slate-300'
+                                  ? 'bg-slate-800 text-slate-200 border border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700'
+                                  : 'bg-slate-200 text-slate-700 border border-slate-300 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700'
                               }`}
                             >
                               {variantCount} {variantCount === 1 ? 'Variant' : 'Variants'}
@@ -434,8 +434,8 @@ export default function InventoryValuationPage() {
                           <span
                             className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
                               isGroupExpanded
-                                ? 'bg-slate-800 text-slate-200 border border-slate-700'
-                                : 'bg-slate-200/80 text-slate-700'
+                                ? 'bg-slate-800 text-slate-200 border border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700'
+                                : 'bg-slate-200/80 text-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border dark:border-slate-700/60'
                             }`}
                           >
                             {categoryDisplay}
@@ -454,7 +454,7 @@ export default function InventoryValuationPage() {
                         {/* Master WAC Column: Display "Multiple" or single WAC */}
                         <td
                           className={`py-3.5 px-4 text-right font-mono text-xs sm:text-sm tabular-nums ${
-                            isGroupExpanded ? 'text-slate-300' : 'text-slate-500'
+                            isGroupExpanded ? 'text-slate-300 dark:text-slate-400' : 'text-slate-500 dark:text-slate-400'
                           }`}
                         >
                           {variantCount > 1 ? (
@@ -508,10 +508,10 @@ export default function InventoryValuationPage() {
                               {/* LEVEL 2: VARIANT SUB-ROW */}
                               <tr
                                 onClick={() => toggleRow(product.id)}
-                                className={`cursor-pointer transition-colors border-b border-slate-200/60 ${
+                                className={`cursor-pointer transition-colors border-b border-slate-200/60 dark:border-[#23283B] ${
                                   isRowExpanded
-                                    ? 'bg-blue-50/90 font-medium'
-                                    : 'bg-slate-50 hover:bg-slate-100/90'
+                                    ? 'bg-blue-50/90 dark:bg-blue-950/40 hover:dark:bg-blue-950/60 font-medium'
+                                    : 'bg-slate-50 dark:bg-[#121520] hover:bg-slate-100/90 hover:dark:bg-[#181d2e]'
                                 }`}
                               >
                                 {/* Accordion Chevron for Level 3 */}
@@ -521,24 +521,24 @@ export default function InventoryValuationPage() {
                                       e.stopPropagation();
                                       toggleRow(product.id);
                                     }}
-                                    className="p-1 hover:text-slate-900 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                                    className="p-1 hover:text-slate-900 hover:dark:text-white rounded-lg hover:bg-slate-200 hover:dark:bg-slate-800 transition-colors cursor-pointer"
                                   >
                                     {isRowExpanded ? (
-                                      <ChevronDown className="h-4 w-4 text-blue-700" />
+                                      <ChevronDown className="h-4 w-4 text-blue-700 dark:text-blue-400" />
                                     ) : (
-                                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                                      <ChevronRight className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                                     )}
                                   </button>
                                 </td>
 
                                 {/* Size / Variant Label & Product Code */}
                                 <td className="py-3 px-4 sm:px-6">
-                                  <div className="flex items-center gap-2 pl-4 border-l-2 border-slate-300">
-                                    <span className="font-semibold text-slate-800 text-xs sm:text-sm">
+                                  <div className="flex items-center gap-2 pl-4 border-l-2 border-slate-300 dark:border-slate-700">
+                                    <span className="font-semibold text-slate-800 dark:text-white text-xs sm:text-sm">
                                       {product.size ? `Size: ${product.size}` : product.product_name}
                                     </span>
                                     {product.code && (
-                                      <span className="inline-block text-[11px] font-mono text-slate-700 bg-slate-200 px-2 py-0.5 rounded font-bold">
+                                      <span className="inline-block text-[11px] font-mono text-slate-700 dark:text-slate-300 bg-slate-200 dark:bg-slate-800 dark:border dark:border-slate-700/60 px-2 py-0.5 rounded font-bold">
                                         {product.code}
                                       </span>
                                     )}
@@ -547,13 +547,13 @@ export default function InventoryValuationPage() {
 
                                 {/* Variant Category */}
                                 <td className="py-3 px-4">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-200/70 text-slate-700">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-200/70 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 dark:border dark:border-slate-700/60">
                                     {product.category}
                                   </span>
                                 </td>
 
                                 {/* Variant Stock on Hand */}
-                                <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums font-semibold text-slate-800">
+                                <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums font-semibold text-slate-800 dark:text-white">
                                   {stockKg.toLocaleString(undefined, {
                                     minimumFractionDigits: 2,
                                     maximumFractionDigits: 2,
@@ -562,7 +562,7 @@ export default function InventoryValuationPage() {
                                 </td>
 
                                 {/* Variant Rolling Cost WAC */}
-                                <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums text-slate-700">
+                                <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums text-slate-700 dark:text-slate-300">
                                   Rs.{' '}
                                   {product.current_wac.toLocaleString(undefined, {
                                     minimumFractionDigits: 2,
@@ -572,7 +572,7 @@ export default function InventoryValuationPage() {
 
                                 {/* Variant Asset Value */}
                                 <td className="py-3 px-4 sm:px-6 text-right font-mono text-xs sm:text-sm tabular-nums">
-                                  <span className="font-bold text-slate-900">
+                                  <span className="font-bold text-slate-900 dark:text-white">
                                     Rs.{' '}
                                     {assetVal.toLocaleString(undefined, {
                                       minimumFractionDigits: 2,
@@ -584,34 +584,34 @@ export default function InventoryValuationPage() {
 
                               {/* LEVEL 3: FIFO BUCKETS & TURNOVER */}
                               {isRowExpanded && (
-                                <tr className="bg-slate-100/90 border-b border-slate-200 shadow-inner">
+                                <tr className="bg-slate-100/90 dark:bg-[#0c0e17] border-b border-slate-200 dark:border-[#23283B] shadow-inner">
                                   <td colSpan={6} className="p-4 sm:p-6 pl-12 sm:pl-16 space-y-6">
                                     {/* Sub-Row Header */}
-                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-[#23283B] pb-3">
                                       <div className="flex items-center gap-2">
-                                        <History className="h-4 w-4 text-slate-600" />
-                                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wider">
+                                        <History className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+                                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                                           Active & Historical Price Buckets (FIFO Depletion)
                                         </h3>
-                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700">
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:border dark:border-slate-700/60">
                                           {buckets.length} Lots
                                         </span>
                                       </div>
-                                      <span className="text-xs text-slate-500">
+                                      <span className="text-xs text-slate-500 dark:text-slate-400">
                                         Real-time FIFO bucket depletion progress tracked per purchase lot
                                       </span>
                                     </div>
 
                                     {/* BUCKETS TABLE */}
                                     {buckets.length === 0 ? (
-                                      <div className="p-4 text-center text-xs text-slate-400 bg-white rounded-xl border border-slate-200">
+                                      <div className="p-4 text-center text-xs text-slate-400 dark:text-slate-500 bg-white dark:bg-[#161925] rounded-xl border border-slate-200 dark:border-[#23283B]">
                                         No historical purchase buckets recorded for this product.
                                       </div>
                                     ) : (
-                                      <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+                                      <div className="bg-white dark:bg-[#161925] rounded-xl border border-slate-200 dark:border-[#23283B] shadow-2xs overflow-hidden">
                                         <table className="w-full text-left border-collapse text-xs">
                                           <thead>
-                                            <tr className="bg-slate-100/80 text-slate-600 font-semibold border-b border-slate-200 text-[11px] uppercase tracking-wider">
+                                            <tr className="bg-slate-100/80 dark:bg-[#0F111A] text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-[#23283B] text-[11px] uppercase tracking-wider">
                                               <th className="py-2.5 px-4">Bucket #</th>
                                               <th className="py-2.5 px-4">Created Date</th>
                                               <th className="py-2.5 px-4 text-right">Buy Price / KG</th>
@@ -624,7 +624,7 @@ export default function InventoryValuationPage() {
                                               <th className="py-2.5 px-4 text-center">Status</th>
                                             </tr>
                                           </thead>
-                                          <tbody className="divide-y divide-slate-100 font-sans">
+                                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
                                             {buckets.map((bucket, idx) => {
                                               const orig =
                                                 bucket.original_stock > 0 ? bucket.original_stock : 1;
@@ -636,19 +636,19 @@ export default function InventoryValuationPage() {
                                               const isActive = rem > 0;
 
                                               return (
-                                                <tr key={bucket.bucket_id || idx} className="hover:bg-slate-50/80">
+                                                <tr key={bucket.bucket_id || idx} className="hover:bg-slate-50/80 hover:dark:bg-[#1a1f33]">
                                                   {/* Bucket # */}
-                                                  <td className="py-2.5 px-4 font-mono font-semibold text-slate-800">
+                                                  <td className="py-2.5 px-4 font-mono font-semibold text-slate-800 dark:text-slate-200">
                                                     {bucket.batch_number || `LOT-${idx + 1}`}
                                                   </td>
 
                                                   {/* Created Date */}
-                                                  <td className="py-2.5 px-4 text-slate-600 font-mono">
+                                                  <td className="py-2.5 px-4 text-slate-600 dark:text-slate-400 font-mono">
                                                     {bucket.created_date}
                                                   </td>
 
                                                   {/* Buy Price / KG */}
-                                                  <td className="py-2.5 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
+                                                  <td className="py-2.5 px-4 text-right font-mono tabular-nums font-bold text-slate-900 dark:text-white">
                                                     Rs.{' '}
                                                     {bucket.buy_price_per_kg.toLocaleString(undefined, {
                                                       minimumFractionDigits: 2,
@@ -658,10 +658,10 @@ export default function InventoryValuationPage() {
 
                                                   {/* Stock Remaining / Original */}
                                                   <td className="py-2.5 px-4 text-right font-mono tabular-nums text-slate-700">
-                                                    <span className="font-bold text-slate-900">
+                                                    <span className="font-bold text-slate-900 dark:text-white">
                                                       {rem.toLocaleString()}
                                                     </span>
-                                                    <span className="text-slate-400">
+                                                    <span className="text-slate-400 dark:text-slate-500">
                                                       {' '}
                                                       / {bucket.original_stock.toLocaleString()} KG
                                                     </span>
@@ -670,7 +670,7 @@ export default function InventoryValuationPage() {
                                                   {/* Depletion Progress Bar */}
                                                   <td className="py-2.5 px-4">
                                                     <div className="flex items-center gap-2">
-                                                      <div className="flex-1 bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                                                      <div className="flex-1 bg-slate-200 dark:bg-slate-700/60 rounded-full h-2.5 overflow-hidden">
                                                         <div
                                                           className={`h-2.5 rounded-full transition-all ${
                                                             isActive ? 'bg-emerald-500' : 'bg-slate-400'
@@ -678,7 +678,7 @@ export default function InventoryValuationPage() {
                                                           style={{ width: `${depPct}%` }}
                                                         />
                                                       </div>
-                                                      <span className="text-[11px] font-mono font-bold text-slate-700 w-10 text-right">
+                                                      <span className="text-[11px] font-mono font-bold text-slate-700 dark:text-slate-300 w-10 text-right">
                                                         {depPct}%
                                                       </span>
                                                     </div>
@@ -687,11 +687,11 @@ export default function InventoryValuationPage() {
                                                   {/* Status Badge */}
                                                   <td className="py-2.5 px-4 text-center">
                                                     {isActive ? (
-                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60">
                                                         <CircleDot className="w-2.5 h-2.5 text-emerald-600" /> ACTIVE
                                                       </span>
                                                     ) : (
-                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-600 border border-slate-300">
+                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-600 border border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700/60">
                                                         <CheckCircle2 className="w-2.5 h-2.5 text-slate-500" /> DEPLETED
                                                       </span>
                                                     )}
@@ -705,38 +705,38 @@ export default function InventoryValuationPage() {
                                     )}
 
                                     {/* LIFETIME TURNOVER METRIC BLOCK */}
-                                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
-                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                                    <div className="bg-white dark:bg-[#121520] p-4 rounded-xl border border-slate-200 dark:border-[#23283B] shadow-2xs space-y-3">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-[#23283B] pb-2">
                                         <div className="flex items-center gap-2">
-                                          <TrendingUp className="h-4 w-4 text-blue-600" />
-                                          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                                          <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                          <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                                             Lifetime Inventory Turnover & Margin
                                           </h4>
                                         </div>
 
-                                        <div className="text-xs font-semibold font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-md">
+                                        <div className="text-xs font-semibold font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60 px-2.5 py-0.5 rounded-md">
                                           All-Time Gross Margin: {(product.all_time_gross_margin || 0).toFixed(1)}%
                                         </div>
                                       </div>
 
                                       <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between text-xs text-slate-600">
+                                        <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
                                           <span>
                                             Depletion Velocity:{' '}
-                                            <strong className="text-slate-900 font-mono">
+                                            <strong className="text-slate-900 dark:text-white font-mono">
                                               {kgSold.toLocaleString()} KG Sold
                                             </strong>{' '}
                                             out of{' '}
-                                            <strong className="text-slate-900 font-mono">
+                                            <strong className="text-slate-900 dark:text-white font-mono">
                                               {kgAcquired.toLocaleString()} KG Acquired
                                             </strong>
                                           </span>
-                                          <span className="font-mono font-bold text-blue-700">
+                                          <span className="font-mono font-bold text-blue-700 dark:text-blue-400">
                                             {turnoverPct}% Cleared
                                           </span>
                                         </div>
 
-                                        <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200 p-0.5">
+                                        <div className="w-full bg-slate-100 dark:bg-slate-800/80 rounded-full h-3 overflow-hidden border border-slate-200 dark:border-slate-700/60 p-0.5">
                                           <div
                                             className="bg-blue-600 h-2 rounded-full transition-all shadow-xs"
                                             style={{ width: `${turnoverPct}%` }}

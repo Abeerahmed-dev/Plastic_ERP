@@ -4,8 +4,10 @@ import {
   LogOut, Users, Box, FileText, Truck, Tag,
   ShoppingCart, LayoutDashboard, PieChart, Receipt, Boxes,
   ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings, ArrowLeftRight,
+  Moon, Sun,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
+import { useThemeStore } from '../../store/theme.store';
 import { authService } from '../../services/auth.service';
 import type { AuthUser } from '../../types/auth.types';
 import sabirLogo from '../../assets/sabirlogo.png';
@@ -315,6 +317,7 @@ const getPageTitle = (pathname: string, search?: string): { title: string; subti
 /* ─── Main Layout ─── */
 export const MainLayout = () => {
   const { user, clearAuth, hasPermission } = useAuthStore();
+  const { theme, toggleTheme } = useThemeStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -408,6 +411,20 @@ export const MainLayout = () => {
 
                 {/* User Profile & Logout */}
                 <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
+                  {/* Theme Quick Toggle */}
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+                    title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  >
+                    {theme === 'dark' ? (
+                      <Sun className="h-4 w-4 text-amber-400" />
+                    ) : (
+                      <Moon className="h-4 w-4 text-purple-400" />
+                    )}
+                  </button>
+
                   <div className="hidden md:flex flex-col items-end">
                     <span className="text-xs font-semibold text-slate-200 leading-none">{user?.name}</span>
                     <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-none mt-1">
@@ -571,6 +588,20 @@ export const MainLayout = () => {
                 <span>Go to SPS ERP</span>
               </Link>
             )}
+
+            {/* Theme Quick Toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-all cursor-pointer mr-1"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="h-4 w-4 text-amber-400" />
+              ) : (
+                <Moon className="h-4 w-4 text-purple-400" />
+              )}
+            </button>
 
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-sm font-semibold text-slate-200">{user?.name}</span>

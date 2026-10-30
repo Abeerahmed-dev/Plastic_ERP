@@ -150,25 +150,25 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden my-auto animate-in zoom-in-95 duration-200">
+      <div className="w-full max-w-4xl bg-white dark:bg-[#161925] rounded-2xl shadow-2xl border border-slate-200 dark:border-[#23283B] flex flex-col max-h-[90vh] overflow-hidden my-auto animate-in zoom-in-95 duration-200">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50/80 shrink-0">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-[#23283B] px-6 py-4 bg-slate-50/80 dark:bg-[#0F111A] shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
               <TrendingUp className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                 Update Stock & Final Selling Price
               </h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Allocate Delivery Charges (DC) per KG & set active selling price for sales/POS
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700 transition cursor-pointer"
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700 transition cursor-pointer dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
@@ -182,22 +182,22 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
               <p className="text-sm font-medium">Loading recent purchases & inventory items...</p>
             </div>
           ) : isError || purchases.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-6">
+            <div className="py-12 text-center text-slate-500 space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-6 dark:bg-[#121520] dark:border-[#23283B] dark:text-slate-400">
               <AlertCircle className="h-10 w-10 text-amber-500 mx-auto" />
-              <p className="text-sm font-semibold text-slate-700">No recent purchases found</p>
-              <p className="text-xs text-slate-400">
+              <p className="text-sm font-semibold text-slate-700 dark:text-white">No recent purchases found</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
                 Record a purchase invoice first to update its stock delivery charges and selling prices.
               </p>
             </div>
           ) : (
             <>
               {/* Step 1: Select Purchase Invoice */}
-              <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className="bg-slate-50/70 dark:bg-[#121520] p-4 rounded-xl border border-slate-200 dark:border-[#23283B] space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                     1. Select Purchase (Last Purchase Selected by Default)
                   </label>
-                  <span className="text-[11px] text-slate-500">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     {purchases.length} Recent purchases available
                   </span>
                 </div>
@@ -205,7 +205,7 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                 <select
                   value={selectedPurchaseId}
                   onChange={(e) => setSelectedPurchaseId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-900 shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                  className="w-full rounded-xl border border-slate-300 dark:border-[#2D3349] bg-white dark:bg-[#161925] px-3.5 py-2.5 text-sm font-semibold text-slate-900 dark:text-white shadow-2xs focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
                 >
                   {purchases.map((p, idx) => (
                     <option key={p.id} value={p.id}>
@@ -216,28 +216,28 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                 </select>
 
                 {selectedPurchase && (
-                  <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-600">
-                    <span className="bg-white px-2.5 py-1 rounded-md border border-slate-200 font-medium">
-                      Party: <strong className="text-slate-900">{selectedPurchase.supplier_name}</strong>
+                  <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-600 dark:text-slate-400">
+                    <span className="bg-white dark:bg-[#161925] px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#2D3349] font-medium">
+                      Party: <strong className="text-slate-900 dark:text-white">{selectedPurchase.supplier_name}</strong>
                     </span>
-                    <span className="bg-white px-2.5 py-1 rounded-md border border-slate-200 font-medium">
-                      Party Bill: <strong className="font-mono text-slate-900">Rs. {Number(selectedPurchase.total_amount).toLocaleString()}</strong>
+                    <span className="bg-white dark:bg-[#161925] px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#2D3349] font-medium">
+                      Party Bill: <strong className="font-mono text-slate-900 dark:text-white">Rs. {Number(selectedPurchase.total_amount).toLocaleString()}</strong>
                     </span>
-                    <span className="bg-white px-2.5 py-1 rounded-md border border-slate-200 font-medium">
-                      Total Weight: <strong className="font-mono text-slate-900">{totalPurchaseKg.toLocaleString()} KG</strong>
+                    <span className="bg-white dark:bg-[#161925] px-2.5 py-1 rounded-md border border-slate-200 dark:border-[#2D3349] font-medium">
+                      Total Weight: <strong className="font-mono text-slate-900 dark:text-white">{totalPurchaseKg.toLocaleString()} KG</strong>
                     </span>
                   </div>
                 )}
               </div>
 
               {/* Step 2: Delivery Charges (DC) Input */}
-              <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 space-y-3">
+              <div className="bg-amber-50/50 dark:bg-amber-950/20 p-4 rounded-xl border border-amber-200 dark:border-amber-900/40 space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
-                    <Truck className="h-4 w-4 text-amber-600" />
+                  <div className="flex items-center gap-2 text-amber-900 dark:text-amber-300 font-bold text-sm">
+                    <Truck className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                     <span>2. Delivery Charges / DC (Rs)</span>
                   </div>
-                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-100/70 px-2 py-0.5 rounded-full">
+                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-100/70 px-2 py-0.5 rounded-full dark:bg-amber-950/60 dark:border dark:border-amber-500/40 dark:text-amber-300">
                     Auto-divided per KG into stock cost
                   </span>
                 </div>
@@ -251,22 +251,22 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                       value={deliveryCharges}
                       onChange={(e) => setDeliveryCharges(e.target.value)}
                       placeholder="e.g. 15000"
-                      className="w-full rounded-xl border border-amber-300 bg-white px-3.5 py-2.5 text-base font-bold font-mono text-amber-950 placeholder:text-slate-300 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      className="w-full rounded-xl border border-amber-300 bg-white px-3.5 py-2.5 text-base font-bold font-mono text-amber-950 placeholder:text-slate-300 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 dark:bg-[#121520] dark:border-amber-500/50 dark:text-amber-200 dark:placeholder:text-slate-600 dark:focus:border-amber-400"
                     />
-                    <p className="mt-1 text-[11px] text-amber-700">
+                    <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300/70">
                       Logged as OPEX Expense (Logistics) • Not added to party ledger
                     </p>
                   </div>
 
-                  <div className="bg-white p-3 rounded-xl border border-amber-200/80 shadow-2xs space-y-1">
-                    <div className="flex justify-between text-xs text-slate-500">
+                  <div className="bg-white dark:bg-[#161925] p-3 rounded-xl border border-amber-200/80 dark:border-amber-900/40 shadow-2xs space-y-1">
+                    <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
                       <span>Shipment Total Weight:</span>
-                      <span className="font-bold font-mono text-slate-800">{totalPurchaseKg.toLocaleString()} KG</span>
+                      <span className="font-bold font-mono text-slate-800 dark:text-slate-100">{totalPurchaseKg.toLocaleString()} KG</span>
                     </div>
-                    <div className="flex justify-between text-sm font-bold text-amber-900 pt-1 border-t border-slate-100">
+                    <div className="flex justify-between text-sm font-bold text-amber-900 dark:text-amber-300 pt-1 border-t border-slate-100 dark:border-[#23283B]">
                       <span>Calculated DC / KG:</span>
-                      <span className="font-mono text-emerald-700 text-base">
-                        + Rs. {dcPerKg.toFixed(2)} <span className="text-xs font-normal text-slate-500">/ KG</span>
+                      <span className="font-mono text-emerald-700 dark:text-emerald-400 text-base">
+                        + Rs. {dcPerKg.toFixed(2)} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">/ KG</span>
                       </span>
                     </div>
                   </div>
@@ -277,17 +277,17 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
               <div className="space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-white">
                       3. Purchased Items & Final Selling Price
                     </h3>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:border dark:border-blue-500/40 dark:text-blue-300">
                       {itemRows.length} Items
                     </span>
                   </div>
 
                   {/* Preset Margin Buttons */}
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                       <Percent className="h-3 w-3" /> Quick Margin:
                     </span>
                     {[10, 15, 20, 25].map((pct) => (
@@ -295,7 +295,7 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                         key={pct}
                         type="button"
                         onClick={() => applyPresetMargin(pct)}
-                        className="px-2 py-0.5 text-xs font-bold rounded-lg border border-slate-200 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition cursor-pointer"
+                        className="px-2 py-0.5 text-xs font-bold rounded-lg border border-slate-200 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 transition cursor-pointer dark:bg-[#161925] dark:border-[#2D3349] dark:text-slate-300 dark:hover:bg-blue-950/60 dark:hover:border-blue-500/50 dark:hover:text-blue-300"
                       >
                         +{pct}%
                       </button>
@@ -303,20 +303,20 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                   </div>
                 </div>
 
-                <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
+                <div className="overflow-x-auto border border-slate-200 dark:border-[#23283B] rounded-xl shadow-2xs">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200">
+                      <tr className="bg-slate-100 dark:bg-[#0F111A] text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider text-[11px] border-b border-slate-200 dark:border-[#23283B]">
                         <th className="py-2.5 px-3">Product / Variant</th>
                         <th className="py-2.5 px-3 text-right">Qty (KG)</th>
                         <th className="py-2.5 px-3 text-right">Buy / KG</th>
-                        <th className="py-2.5 px-3 text-right text-amber-700">+ DC / KG</th>
-                        <th className="py-2.5 px-3 text-right text-blue-900 bg-blue-50/60">Landed Cost</th>
+                        <th className="py-2.5 px-3 text-right text-amber-700 dark:text-amber-400">+ DC / KG</th>
+                        <th className="py-2.5 px-3 text-right text-blue-900 dark:text-blue-300 bg-blue-50/60 dark:bg-blue-950/40">Landed Cost</th>
                         <th className="py-2.5 px-3 w-40 text-center">New Sale Price / KG</th>
                         <th className="py-2.5 px-3 text-right">Margin %</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white font-sans">
+                    <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] bg-white dark:bg-[#161925] font-sans">
                       {itemRows.map((item) => {
                         const landedCost = Math.round((item.base_unit_price + dcPerKg) * 100) / 100;
                         const sPrice = Number(item.selling_price) || 0;
@@ -325,39 +325,39 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                         const isBelowCost = sPrice > 0 && sPrice < landedCost;
 
                         return (
-                          <tr key={item.product_id} className="hover:bg-slate-50/80 transition-colors">
+                          <tr key={item.product_id} className="hover:bg-slate-50/80 hover:dark:bg-[#1a1f33] transition-colors">
                             {/* Product & Variant */}
                             <td className="py-2.5 px-3">
-                              <div className="font-bold text-slate-900 text-xs sm:text-sm">
+                              <div className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm">
                                 {item.product_name}
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
-                                <span className="inline-block text-[10px] font-mono font-bold bg-slate-200/80 text-slate-700 px-1.5 py-0.2 rounded">
+                                <span className="inline-block text-[10px] font-mono font-bold bg-slate-200/80 text-slate-700 px-1.5 py-0.2 rounded dark:bg-[#121520] dark:border dark:border-[#2D3349] dark:text-slate-300">
                                   {item.product_code}
                                 </span>
-                                <span className="text-[11px] text-slate-500">
-                                  Size: <strong className="text-slate-700">{item.size}</strong>
+                                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  Size: <strong className="text-slate-700 dark:text-slate-200">{item.size}</strong>
                                 </span>
                               </div>
                             </td>
 
                             {/* Qty (KG) */}
-                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-800">
+                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-800 dark:text-slate-200">
                               {item.quantity_kg.toLocaleString()} KG
                             </td>
 
                             {/* Buy Price / KG */}
-                            <td className="py-2.5 px-3 text-right font-mono text-slate-600">
+                            <td className="py-2.5 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
                               Rs. {item.base_unit_price.toFixed(2)}
                             </td>
 
                             {/* DC / KG */}
-                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-amber-700">
+                            <td className="py-2.5 px-3 text-right font-mono font-semibold text-amber-700 dark:text-amber-400">
                               + Rs. {dcPerKg.toFixed(2)}
                             </td>
 
                             {/* Landed Cost / KG */}
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-blue-900 bg-blue-50/50">
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-blue-900 dark:text-blue-300 bg-blue-50/50 dark:bg-blue-950/30">
                               Rs. {landedCost.toFixed(2)}
                             </td>
 
@@ -372,8 +372,8 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                                   onChange={(e) => handleSellingPriceChange(item.product_id, e.target.value)}
                                   className={`w-full text-center py-1.5 px-2.5 rounded-lg border text-sm font-bold font-mono outline-none transition ${
                                     isBelowCost
-                                      ? 'border-red-400 bg-red-50 text-red-700 focus:ring-2 focus:ring-red-400/20'
-                                      : 'border-emerald-400 bg-emerald-50/40 text-emerald-950 focus:bg-white focus:ring-2 focus:ring-emerald-500/20'
+                                      ? 'border-red-400 bg-red-50 text-red-700 focus:ring-2 focus:ring-red-400/20 dark:bg-red-950/40 dark:border-red-500/50 dark:text-red-300 dark:focus:bg-[#161925]'
+                                      : 'border-emerald-400 bg-emerald-50/40 text-emerald-950 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 dark:bg-[#121520] dark:border-emerald-500/50 dark:text-emerald-300 dark:focus:bg-[#161925] dark:focus:ring-emerald-500/30'
                                   }`}
                                 />
                               </div>
@@ -382,15 +382,15 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
                             {/* Margin % */}
                             <td className="py-2.5 px-3 text-right font-mono">
                               {isBelowCost ? (
-                                <span className="text-[11px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
+                                <span className="text-[11px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full dark:bg-red-950/60 dark:border dark:border-red-500/40 dark:text-red-300">
                                   Loss ({marginPct}%)
                                 </span>
                               ) : marginPct > 0 ? (
-                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full dark:bg-emerald-950/60 dark:border dark:border-emerald-500/40 dark:text-emerald-300">
                                   +{marginPct}%
                                 </span>
                               ) : (
-                                <span className="text-[11px] text-slate-400">0%</span>
+                                <span className="text-[11px] text-slate-400 dark:text-slate-500">0%</span>
                               )}
                             </td>
                           </tr>
@@ -405,11 +405,11 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-          <div className="text-xs text-slate-500">
+        <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 dark:bg-[#0c101c] dark:border-[#1e2235]">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
             {itemRows.length > 0 && (
               <span>
-                Saving will set final selling price for <strong className="text-slate-800">{itemRows.length}</strong> items across POS & Invoices.
+                Saving will set final selling price for <strong className="text-slate-800 dark:text-white">{itemRows.length}</strong> items across POS & Invoices.
               </span>
             )}
           </div>
@@ -419,7 +419,7 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
               type="button"
               onClick={onClose}
               disabled={mutation.isPending}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
             >
               Cancel
             </button>
