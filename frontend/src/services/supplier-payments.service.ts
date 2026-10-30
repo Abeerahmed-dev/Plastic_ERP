@@ -49,8 +49,10 @@ export interface CreateSupplierPaymentData {
   purchase_invoice_id?: string | null;
   payment_date: string;
   amount: number;
-  payment_method: 'CASH' | 'BANK_TRANSFER' | 'CHEQUE' | 'PDC';
+  payment_method: 'CASH' | 'BANK_TRANSFER' | 'CHEQUE' | 'PDC' | 'SPLIT';
   bank_account_id?: string | null;
+  split_cash_amount?: number;
+  split_bank_amount?: number;
   notes?: string;
   cheque_number?: string;
   cheque_bank_name?: string;

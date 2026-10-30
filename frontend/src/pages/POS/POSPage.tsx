@@ -905,56 +905,61 @@ export default function POSPage() {
                 </div>
               </div>
 
-              {/* Cash Portion */}
-              <div>
-                <div className="flex justify-between items-center mb-0.5">
-                  <label className="text-[10px] font-bold text-slate-700">
-                    💵 Cash Portion (Rs.)
-                  </label>
-                  {splitBankAmount !== '' && Number(splitBankAmount) < total && (
-                    <button
-                      type="button"
-                      onClick={() => setSplitCashAmount(Math.max(0, total - Number(splitBankAmount)))}
-                      className="text-[9px] text-blue-600 hover:underline font-semibold"
-                    >
-                      Fill Remaining (Rs. {Math.max(0, total - Number(splitBankAmount)).toLocaleString()})
-                    </button>
-                  )}
+              {/* Cash & Bank Portions in a Single Row */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* Cash Portion */}
+                <div>
+                  <div className="flex justify-between items-center mb-0.5">
+                    <label className="text-[10px] font-bold text-slate-700 truncate" title="Cash Portion (Rs.)">
+                      💵 Cash Portion (Rs.)
+                    </label>
+                    {splitBankAmount !== '' && Number(splitBankAmount) < total && (
+                      <button
+                        type="button"
+                        onClick={() => setSplitCashAmount(Math.max(0, total - Number(splitBankAmount)))}
+                        className="text-[9px] text-blue-600 hover:underline font-semibold"
+                        title={`Fill Remaining (Rs. ${Math.max(0, total - Number(splitBankAmount)).toLocaleString()})`}
+                      >
+                        Fill Rem.
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={splitCashAmount === '' ? '' : splitCashAmount}
+                    onChange={(e) => setSplitCashAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
                 </div>
-                <input
-                  type="number"
-                  min={0}
-                  value={splitCashAmount === '' ? '' : splitCashAmount}
-                  onChange={(e) => setSplitCashAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-                  placeholder="0"
-                  className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
-                />
-              </div>
 
-              {/* Bank Portion */}
-              <div>
-                <div className="flex justify-between items-center mb-0.5">
-                  <label className="text-[10px] font-bold text-slate-700">
-                    🏦 Bank Transfer Portion (Rs.)
-                  </label>
-                  {splitCashAmount !== '' && Number(splitCashAmount) < total && (
-                    <button
-                      type="button"
-                      onClick={() => setSplitBankAmount(Math.max(0, total - Number(splitCashAmount)))}
-                      className="text-[9px] text-blue-600 hover:underline font-semibold"
-                    >
-                      Fill Remaining (Rs. {Math.max(0, total - Number(splitCashAmount)).toLocaleString()})
-                    </button>
-                  )}
+                {/* Bank Portion */}
+                <div>
+                  <div className="flex justify-between items-center mb-0.5">
+                    <label className="text-[10px] font-bold text-slate-700 truncate" title="Bank Transfer Portion (Rs.)">
+                      🏦 Bank Portion (Rs.)
+                    </label>
+                    {splitCashAmount !== '' && Number(splitCashAmount) < total && (
+                      <button
+                        type="button"
+                        onClick={() => setSplitBankAmount(Math.max(0, total - Number(splitCashAmount)))}
+                        className="text-[9px] text-blue-600 hover:underline font-semibold"
+                        title={`Fill Remaining (Rs. ${Math.max(0, total - Number(splitCashAmount)).toLocaleString()})`}
+                      >
+                        Fill Rem.
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={splitBankAmount === '' ? '' : splitBankAmount}
+                    onChange={(e) => setSplitBankAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
+                  />
                 </div>
-                <input
-                  type="number"
-                  min={0}
-                  value={splitBankAmount === '' ? '' : splitBankAmount}
-                  onChange={(e) => setSplitBankAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-                  placeholder="0"
-                  className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
-                />
               </div>
 
               {/* Bank Selector for the transfer portion */}

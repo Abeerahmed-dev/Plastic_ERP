@@ -188,6 +188,10 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     ) {
       return selectedBankAccount ? Number(selectedBankAccount.current_balance || 0) : 0;
     }
+    if (selectedPaymentMethod === 'SPLIT') {
+      const bankBal = selectedBankAccount ? Number(selectedBankAccount.current_balance || 0) : 0;
+      return (cashDrawerBalance > 0 ? cashDrawerBalance : 0) + (bankBal > 0 ? bankBal : 0);
+    }
     return Infinity;
   }, [isSupplier, selectedPaymentMethod, cashDrawerBalance, selectedBankAccount]);
 
@@ -390,7 +394,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
 
   // Auto-initialize split amounts when switching to SPLIT
   useEffect(() => {
-    if (isOpen && selectedPaymentMethod === 'SPLIT' && !isSupplier) {
+    if (isOpen && selectedPaymentMethod === 'SPLIT') {
       const currentAmt = Number(watch('amount') || 0);
       const target = currentAmt > 0
         ? currentAmt
@@ -496,6 +500,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
         amount: cleanAmount,
         payment_method: data.payment_method,
         bank_account_id: targetBankAccountId,
+        split_cash_amount: data.payment_method === 'SPLIT' ? Number(splitCashAmount || 0) : undefined,
+        split_bank_amount: data.payment_method === 'SPLIT' ? Number(splitBankAmount || 0) : undefined,
         notes: data.notes || null,
         cheque_number: data.cheque_number || null,
         cheque_due_date: data.cheque_due_date || null,
@@ -587,7 +593,23 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     }
 
     // Strict liquidity limit check on client: hard-cap outgoing payments to available balance
-    if (isSupplier && availableOutflowBalance !== Infinity && cleanAmount > availableOutflowBalance) {
+    if (isSupplier && isSplit) {
+      const c = Number(splitCashAmount || 0);
+      const b = Number(splitBankAmount || 0);
+      const bankBal = selectedBankAccount ? Number(selectedBankAccount.current_balance || 0) : 0;
+      if (c > cashDrawerBalance) {
+        setServerError(
+          `INSUFFICIENT_LIQUIDITY: Cannot withdraw Rs. ${c.toLocaleString()} in Cash. Cash drawer only holds Rs. ${cashDrawerBalance.toLocaleString()}.`
+        );
+        return;
+      }
+      if (b > bankBal) {
+        setServerError(
+          `INSUFFICIENT_LIQUIDITY: Cannot withdraw Rs. ${b.toLocaleString()} from Bank. Selected bank account only holds Rs. ${bankBal.toLocaleString()}.`
+        );
+        return;
+      }
+    } else if (isSupplier && availableOutflowBalance !== Infinity && cleanAmount > availableOutflowBalance) {
       setServerError(
         `INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds. Available balance is Rs. ${availableOutflowBalance.toLocaleString()}, requested Rs. ${cleanAmount.toLocaleString()}.`
       );
@@ -798,6 +820,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                   {isSupplier ? (
                     <>
                       <option value="BANK_TRANSFER">Bank Transfer</option>
+                      <option value="SPLIT">🔀 Split Payment (Cash + Bank)</option>
                       <option value="CHEQUE">Post-Dated Cheque (PDC)</option>
                     </>
                   ) : (
@@ -921,7 +944,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
               )}
 
               {/* Split Payment UI (Cash + Bank) */}
-              {selectedPaymentMethod === 'SPLIT' && !isSupplier ? (
+              {selectedPaymentMethod === 'SPLIT' ? (
                 <div className="md:col-span-2 p-5 bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/70 rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-indigo-100">
                     <div className="flex items-center gap-2">
@@ -961,10 +984,10 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                     )}
                   </div>
 
-                  {/* Target Bank Account selection inside split */}
+                  {/* Target / Source Bank Account selection inside split */}
                   <div>
                     <label htmlFor="split_bank_account_id" className="mb-1 block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Select Target Bank Account (For Bank Transfer Portion) <span className="text-red-500">*</span>
+                      Select {isSupplier ? 'Source' : 'Target'} Bank Account (For Bank Transfer Portion) <span className="text-red-500">*</span>
                     </label>
                     <select
                       id="split_bank_account_id"
@@ -981,7 +1004,11 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                     >
                       <option value="">Select Bank Account...</option>
                       {(bankAccounts || []).map((acc) => (
-                        <option key={acc.id} value={acc.id}>
+                        <option
+                          key={acc.id}
+                          value={acc.id}
+                          disabled={isSupplier && Number(acc.current_balance) <= 0}
+                        >
                           {acc.bank_name} — {acc.account_title} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
                         </option>
                       ))}
@@ -996,7 +1023,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           <Wallet className="w-3.5 h-3.5 text-emerald-600" />
                           Cash Portion (Rs.)
                         </label>
-                        <span className="text-[11px] text-emerald-600 font-semibold">Cash Drawer</span>
+                        <span className="text-[11px] text-emerald-600 font-semibold">{isSupplier ? `Drawer: Rs. ${cashDrawerBalance.toLocaleString()}` : 'Cash Drawer'}</span>
                       </div>
                       <div className="relative">
                         <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 text-sm">Rs.</span>
@@ -1019,7 +1046,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           <Building2 className="w-3.5 h-3.5 text-blue-600" />
                           Bank Transfer Portion (Rs.)
                         </label>
-                        <span className="text-[11px] text-blue-600 font-semibold">Direct Deposit</span>
+                        <span className="text-[11px] text-blue-600 font-semibold">{isSupplier ? (selectedBankAccount ? `Avail: Rs. ${Number(selectedBankAccount.current_balance).toLocaleString()}` : 'Select Account') : 'Direct Deposit'}</span>
                       </div>
                       <div className="relative">
                         <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 text-sm">Rs.</span>
