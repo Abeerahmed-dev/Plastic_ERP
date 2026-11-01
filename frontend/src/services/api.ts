@@ -33,8 +33,15 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl = originalRequest?.url || '';
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Don't attempt token refresh for login, refresh or if already retried
+    if (
+      error.response?.status === 401 &&
+      !originalRequest?._retry &&
+      !requestUrl.includes('/auth/login') &&
+      !requestUrl.includes('/auth/refresh')
+    ) {
       originalRequest._retry = true;
 
       try {
@@ -66,7 +73,9 @@ api.interceptors.response.use(
       } catch (err) {
         refreshPromise = null;
         useAuthStore.getState().clearAuth();
-        window.location.href = '/login';
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
         return Promise.reject(err);
       }
     }

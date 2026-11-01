@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { settingsService } from '../../services/settings.service';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   LogOut, Users, Box, FileText, Truck, Tag,
@@ -73,6 +75,21 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/employees', label: 'Staff', icon: Users, permission: null },
       { to: '/settings', label: 'Settings', icon: Settings, permission: null },
+    ],
+  },
+];
+
+const accountantNavSections: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: 'Accountant Menu',
+    items: [
+      { to: '/customers', label: 'Customer', icon: Users, permission: null },
+      { to: '/suppliers', label: 'Party', icon: Truck, permission: null },
+      { to: '/purchases', label: 'Purchasing Invoice', icon: FileText, permission: null },
+      { to: '/products', label: 'Products', icon: Box, permission: null },
+      { to: '/categories', label: 'Categories', icon: Tag, permission: null },
+      { to: '/expenses', label: 'Expenses', icon: Receipt, permission: null },
+      { to: '/stocks', label: 'Stocks', icon: Boxes, permission: null },
     ],
   },
 ];
@@ -167,6 +184,8 @@ type SidebarContentProps = {
 
 function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: SidebarContentProps) {
   const isCashierRole = (user?.role || '').toUpperCase() === 'CASHIER';
+  const isAccountantRole = (user?.role || '').toUpperCase() === 'ACCOUNTANT';
+  const sectionsToRender = isAccountantRole ? accountantNavSections : navSections;
 
   return (
     <div className="flex flex-col h-full bg-slate-900 text-slate-100">
@@ -179,16 +198,18 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
         />
         <div>
           <p className="font-bold text-white text-sm leading-tight tracking-tight">Sabir Plastic Store</p>
-          <p className="text-[11px] text-amber-400 font-medium leading-tight">ERP System</p>
+          <p className="text-[11px] text-amber-400 font-medium leading-tight">
+            {isAccountantRole ? 'Accountant Portal' : 'ERP System'}
+          </p>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-        {navSections.map((section) => {
+        {sectionsToRender.map((section) => {
           const visibleItems = section.items.filter((item) => {
             if (isCashierRole) {
-              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers', '/settings', '/expenses', '/employees'];
+              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers', '/settings', '/expenses', '/employees', '/products', '/categories'];
               if (item.to && hidden.some((h) => item.to!.startsWith(h))) return false;
               if (!item.to && item.label === 'Reports') return false;
             }
@@ -323,6 +344,14 @@ export const MainLayout = () => {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
+  const { data: featureAccess } = useQuery({
+    queryKey: ['cashier-feature-access'],
+    queryFn: () => settingsService.getCashierFeatureAccess(),
+    enabled: !!user && isCashier,
+    staleTime: 60000,
+    retry: false,
+  });
+  const isAccountant = (user?.role || '').toUpperCase() === 'ACCOUNTANT';
   const currentPage = getPageTitle(location.pathname, location.search);
 
   const handleLogout = async () => {
@@ -369,10 +398,10 @@ export const MainLayout = () => {
                     { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
                     { to: '/pos-invoices', label: 'POS Sale Invoices', icon: FileText },
                     { to: '/invoices', label: 'Sales Invoices', icon: FileText },
+                    ...(featureAccess?.customer_access ? [{ to: '/customers', label: 'Customers', icon: Users }] : []),
+                    ...(featureAccess?.party_access ? [{ to: '/suppliers', label: 'Party', icon: Truck }] : []),
                     { to: '/exchange', label: 'Exchange', icon: ArrowLeftRight },
-                    { to: '/purchases', label: 'Purchasing', icon: Truck },
-                    { to: '/products', label: 'Products', icon: Box },
-                    { to: '/categories', label: 'Categories', icon: Tag },
+                    { to: '/stocks', label: 'Stocks', icon: Boxes },
                   ].map(({ to, label, icon: Icon }) => {
                     const searchParams = new URLSearchParams(location.search);
                     const isPosTab = searchParams.get('type') === 'pos';
@@ -453,7 +482,7 @@ export const MainLayout = () => {
     );
   }
 
-  /* ─── Owner / Admin: fixed sidebar layout ─── */
+  /* ─── Owner / Admin / Accountant: fixed sidebar layout ─── */
   return (
     <div className="min-h-screen bg-slate-50 flex print:bg-white print:m-0 print:p-0">
       {/* Desktop fixed sidebar - hidden on POS page */}
@@ -566,7 +595,7 @@ export const MainLayout = () => {
             )}
 
             {/* Walk-in POS button: In top navbar on all pages */}
-            {!isPOSPage && (
+            {!isPOSPage && !isAccountant && (
               <Link
                 to="/pos"
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md shadow-amber-500/20 transition-all active:scale-95 mr-1"
@@ -578,7 +607,7 @@ export const MainLayout = () => {
             )}
 
             {/* Go to SPS ERP button: Only for Admin / Owner on POS screen */}
-            {isPOSPage && !isCashier && (
+            {isPOSPage && !isCashier && !isAccountant && (
               <Link
                 to="/dashboard"
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md transition-all active:scale-95 mr-1"

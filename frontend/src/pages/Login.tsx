@@ -35,7 +35,10 @@ export const Login = () => {
     mutationFn: authService.login,
     onSuccess: (data) => {
       setAuth(data.user, data.access_token, data.refresh_token);
-      navigate(from, { replace: true });
+      const role = (data.user?.roleName || data.user?.role || '').toUpperCase();
+      const defaultDest = role === 'CASHIER' ? '/pos' : role === 'ACCOUNTANT' ? '/customers' : '/dashboard';
+      const target = location.state?.from?.pathname || defaultDest;
+      navigate(target, { replace: true });
     },
     onError: (error: import('axios').AxiosError<{message: string}>) => {
       setServerError(

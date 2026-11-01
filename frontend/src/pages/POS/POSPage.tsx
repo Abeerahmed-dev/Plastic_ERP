@@ -597,36 +597,6 @@ export default function POSPage() {
 
       {/* RIGHT: Cart & Locked Payment Panel (Compact Width w-[350px]) */}
       <div className="w-[340px] xl:w-[350px] flex flex-col bg-white shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] z-10 shrink-0 dark:bg-[#0c101c] dark:border-l dark:border-[#1e2235]">
-        <div className="p-3 border-b border-slate-100 bg-blue-50/40 flex items-center justify-between dark:bg-[#0f1422] dark:border-[#1e2235]">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg dark:bg-blue-950/60 dark:text-blue-400">
-              <ShoppingCart className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 leading-tight dark:text-white">Current Sale Cart</h2>
-              <span className="text-[11px] text-slate-500 font-medium dark:text-slate-400">
-                {selectedCustomerId ? customers.find(c => c.id === selectedCustomerId)?.name : 'Walk-In Customer'}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {cart.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsHoldConfirmOpen(true)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition cursor-pointer shadow-2xs dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300 dark:hover:bg-amber-900/50"
-                title="Hold this transaction and serve next customer"
-              >
-                <PauseCircle className="w-3 h-3 text-amber-700 dark:text-amber-400" />
-                <span>Hold</span>
-              </button>
-            )}
-            <span className="text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full dark:bg-blue-950/60 dark:border dark:border-blue-800/60 dark:text-blue-300">
-              {cart.length} Items
-            </span>
-          </div>
-        </div>
-
         {/* Cart Item List */}
         <div className="flex-1 overflow-y-auto px-3 py-1 flex flex-col divide-y divide-slate-100 dark:divide-[#1e2235]">
           {cart.length === 0 ? (

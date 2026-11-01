@@ -22,8 +22,8 @@ router.get('/:id/ledger', requireAuth, getSupplierLedgerController);
 router.get('/:id/refundable-credits', requireAuth, getSupplierRefundableCreditsController);
 router.post('/payments', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER']), recordSupplierPaymentController);
 router.post('/:id/payments', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER']), recordSupplierPaymentController);
-router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER']), createSupplierController);
-router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), updateSupplierController);
+router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER', 'ACCOUNTANT']), createSupplierController);
+router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER', 'ACCOUNTANT']), updateSupplierController);
 router.delete('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), deleteSupplierController);
 
 export default router;

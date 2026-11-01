@@ -11,6 +11,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { getCustomer } from '../../services/customers.service';
+import { useAuthStore } from '../../store/auth.store';
 import { CustomerLedger } from './CustomerLedger';
 import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
@@ -27,6 +28,9 @@ export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { user } = useAuthStore();
+  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = userRole === 'CASHIER';
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
@@ -152,50 +156,52 @@ export default function CustomerDetailPage() {
             </div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="flex items-center gap-2.5 flex-wrap justify-end">
-            <button
-              type="button"
-              onClick={() => setIsPaymentModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 px-3.5 py-2 text-xs font-bold transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
-              title="Record Payment against Invoice"
-            >
-              <Plus className="w-3.5 h-3.5 text-slate-950" />
-              <span>Record Payment</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsAdvanceModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
-              title="Log Advance Deposit"
-            >
-              <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Log Advance</span>
-            </button>
-
-            {advanceCredit > 0 && (
+          {/* Quick Actions (Hidden for Cashier - Read-only access) */}
+          {!isCashier && (
+            <div className="flex items-center gap-2.5 flex-wrap justify-end">
               <button
                 type="button"
-                onClick={() => setIsRefundModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
-                title="Process Cash Refund"
+                onClick={() => setIsPaymentModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 px-3.5 py-2 text-xs font-bold transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
+                title="Record Payment against Invoice"
               >
-                <ArrowDownLeft className="w-3.5 h-3.5 text-rose-600" />
-                <span>Refund ({formatRs(advanceCredit)})</span>
+                <Plus className="w-3.5 h-3.5 text-slate-950" />
+                <span>Record Payment</span>
               </button>
-            )}
 
-            <button
-              type="button"
-              onClick={() => setIsEditModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
-              title="Edit Customer Details"
-            >
-              <Edit2 className="w-3.5 h-3.5 text-slate-500" />
-              <span>Edit</span>
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setIsAdvanceModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                title="Log Advance Deposit"
+              >
+                <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Log Advance</span>
+              </button>
+
+              {advanceCredit > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsRefundModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                  title="Process Cash Refund"
+                >
+                  <ArrowDownLeft className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Refund ({formatRs(advanceCredit)})</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                title="Edit Customer Details"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>Edit</span>
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -208,52 +214,56 @@ export default function CustomerDetailPage() {
         />
       </main>
 
-      {/* ─── Modals ─── */}
-      <RecordPaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        entityType="customer"
-        customerId={customer.id}
-        onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['customers', customer.id] });
-          qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
-          refetch();
-        }}
-      />
+      {/* ─── Modals (Only for Admin / Owner / Accountant) ─── */}
+      {!isCashier && (
+        <>
+          <RecordPaymentModal
+            isOpen={isPaymentModalOpen}
+            onClose={() => setIsPaymentModalOpen(false)}
+            entityType="customer"
+            customerId={customer.id}
+            onSuccess={() => {
+              qc.invalidateQueries({ queryKey: ['customers', customer.id] });
+              qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
+              refetch();
+            }}
+          />
 
-      <LogAdvanceDepositModal
-        isOpen={isAdvanceModalOpen}
-        onClose={() => setIsAdvanceModalOpen(false)}
-        entityType="customer"
-        customer={customer}
-        onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['customers', customer.id] });
-          qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
-          refetch();
-        }}
-      />
+          <LogAdvanceDepositModal
+            isOpen={isAdvanceModalOpen}
+            onClose={() => setIsAdvanceModalOpen(false)}
+            entityType="customer"
+            customer={customer}
+            onSuccess={() => {
+              qc.invalidateQueries({ queryKey: ['customers', customer.id] });
+              qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
+              refetch();
+            }}
+          />
 
-      <ProcessCashRefundModal
-        isOpen={isRefundModalOpen}
-        onClose={() => setIsRefundModalOpen(false)}
-        entityType="customer"
-        customer={customer}
-        onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['customers', customer.id] });
-          qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
-          refetch();
-        }}
-      />
+          <ProcessCashRefundModal
+            isOpen={isRefundModalOpen}
+            onClose={() => setIsRefundModalOpen(false)}
+            entityType="customer"
+            customer={customer}
+            onSuccess={() => {
+              qc.invalidateQueries({ queryKey: ['customers', customer.id] });
+              qc.invalidateQueries({ queryKey: ['customers', customer.id, 'statement'] });
+              refetch();
+            }}
+          />
 
-      {isEditModalOpen && (
-        <CustomerFormModal
-          customer={customer}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            qc.invalidateQueries({ queryKey: ['customers', customer.id] });
-            refetch();
-          }}
-        />
+          {isEditModalOpen && (
+            <CustomerFormModal
+              customer={customer}
+              onClose={() => {
+                setIsEditModalOpen(false);
+                qc.invalidateQueries({ queryKey: ['customers', customer.id] });
+                refetch();
+              }}
+            />
+          )}
+        </>
       )}
     </div>
   );

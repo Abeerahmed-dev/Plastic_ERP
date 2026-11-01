@@ -21,7 +21,7 @@ export default function SuppliersListPage() {
   const { user, hasPermission } = useAuthStore();
   const userRole = (user?.roleName || user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
-  const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:write');
+  const canWrite = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:write'));
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('suppliers:delete'));
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -145,13 +145,13 @@ export default function SuppliersListPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
+                <tr><td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-gray-400">Loading parties…</td></tr>
               )}
               {isError && (
-                <tr><td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
+                <tr><td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-red-500">Failed to load. <button onClick={() => refetch()} className="underline">Retry</button></td></tr>
               )}
               {!isLoading && !isError && filteredTableRows.length === 0 && (
-                <tr><td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">
+                <tr><td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-gray-400">
                   {selectedCity || selectedName
                     ? 'No suppliers match the active cascading filters. Try resetting filters.'
                     : 'No parties yet.'}

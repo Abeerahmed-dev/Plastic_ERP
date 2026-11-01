@@ -19,8 +19,8 @@ router.get('/:id', requireAuth, getCustomerController);
 router.get('/:id/statement', requireAuth, getCustomerStatementController);
 router.get('/:id/ledger', requireAuth, getCustomerLedgerController);
 router.get('/:id/refundable-credits', requireAuth, getCustomerRefundableCreditsController);
-router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER']), createCustomerController);
-router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), updateCustomerController);
+router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER', 'ACCOUNTANT']), createCustomerController);
+router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER', 'ACCOUNTANT']), updateCustomerController);
 router.delete('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), deleteCustomerController);
 
 export default router;

@@ -1,35 +1,50 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { useQuery } from '@tanstack/react-query';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
-import { ProtectedRoute } from './components/ProtectedRoute';
+import ProductsListPage from './pages/Products/ProductsListPage';
+import CategoriesPage from './pages/Categories/CategoriesPage';
 import CustomersListPage from './pages/Customers/CustomersListPage';
 import CustomerDetailPage from './pages/Customers/CustomerDetailPage';
 import SuppliersListPage from './pages/Suppliers/SuppliersListPage';
 import SupplierDetailPage from './pages/Suppliers/SupplierDetailPage';
-import ProductsListPage from './pages/Products/ProductsListPage';
-import CategoriesPage from './pages/Categories/CategoriesPage';
 import InvoicesListPage from './pages/Invoices/InvoicesListPage';
 import PurchasesListPage from './pages/Purchases/PurchasesListPage';
 import PaymentsListPage from './pages/Payments/PaymentsListPage';
 import SupplierPaymentsListPage from './pages/Payments/SupplierPaymentsListPage';
-import POSPage from './pages/POS/POSPage';
-import { MainLayout } from './components/Layout/MainLayout';
-import { useAuthStore } from './store/auth.store';
-import FinancialReports from './pages/FinancialReports';
 import ExpensesListPage from './pages/Expenses/ExpensesListPage';
-import CashierStockPage from './pages/Cashier/CashierStockPage';
+import ExchangePage from './pages/Exchange/ExchangePage';
+import FinancialReports from './pages/FinancialReports';
 import IncomeStatementPage from './pages/Reports/IncomeStatementPage';
 import MarginAnalyticsPage from './pages/Reports/MarginAnalyticsPage';
 import InventoryValuationPage from './pages/Reports/InventoryValuationPage';
-import SettingsPage from './pages/Settings/SettingsPage';
+import POSPage from './pages/POS/POSPage';
 import EmployeesListPage from './pages/Employees/EmployeesListPage';
 import EmployeeDetailPage from './pages/Employees/EmployeeDetailPage';
-import ExchangePage from './pages/Exchange/ExchangePage';
+import SettingsPage from './pages/Settings/SettingsPage';
+import { MainLayout } from './components/Layout/MainLayout';
+import { useAuthStore } from './store/auth.store';
+import { settingsService } from './services/settings.service';
 
 function App() {
   const { user } = useAuthStore();
-  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+  const role = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = role === 'CASHIER';
+  const isAccountant = role === 'ACCOUNTANT';
+  const defaultRoute = isCashier ? '/pos' : isAccountant ? '/customers' : '/dashboard';
+
+  const { data: featureAccess } = useQuery({
+    queryKey: ['cashier-feature-access'],
+    queryFn: () => settingsService.getCashierFeatureAccess(),
+    enabled: !!user,
+    staleTime: 60000,
+    retry: false,
+  });
+
+  const canCashierAccessCustomer = Boolean(featureAccess?.customer_access);
+  const canCashierAccessParty = Boolean(featureAccess?.party_access);
 
   return (
     <>
@@ -42,47 +57,59 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
 
-      {/* Protected Routes */}
-      <Route element={<ProtectedRoute />}>
-        <Route element={<MainLayout />}>
-          <Route path="/dashboard" element={isCashier ? <Navigate to="/pos" replace /> : <Dashboard />} />
-          <Route path="/users" element={isCashier ? <Navigate to="/pos" replace /> : <Navigate to="/settings?tab=employees" replace />} />
-          <Route path="/employees" element={isCashier ? <Navigate to="/pos" replace /> : <EmployeesListPage />} />
-          <Route path="/employees/:id" element={isCashier ? <Navigate to="/pos" replace /> : <EmployeeDetailPage />} />
-          <Route path="/settings" element={isCashier ? <Navigate to="/pos" replace /> : <SettingsPage />} />
-          <Route path="/products" element={<ProductsListPage />} />
-          <Route path="/categories" element={<CategoriesPage />} />
-          <Route path="/uom" element={<Navigate to="/categories" replace />} />
-          <Route path="/customers" element={<CustomersListPage />} />
-          <Route path="/customers/:id" element={<CustomerDetailPage />} />
-          <Route path="/suppliers" element={isCashier ? <Navigate to="/pos" replace /> : <SuppliersListPage />} />
-          <Route path="/suppliers/:id" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierDetailPage />} />
-          <Route path="/invoices" element={<InvoicesListPage />} />
-          <Route path="/sales" element={<InvoicesListPage />} />
-          <Route path="/pos/invoices" element={<InvoicesListPage defaultType="pos" />} />
-          <Route path="/pos-invoices" element={<InvoicesListPage defaultType="pos" />} />
-          <Route path="/purchases" element={<PurchasesListPage />} />
-          <Route path="/exchange" element={<ExchangePage />} />
-          <Route path="/exchanges" element={<ExchangePage />} />
-          <Route path="/payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
-          <Route path="/customer-payments" element={isCashier ? <Navigate to="/pos" replace /> : <PaymentsListPage />} />
-          <Route path="/supplier-payments" element={isCashier ? <Navigate to="/pos" replace /> : <SupplierPaymentsListPage />} />
-          <Route path="/expenses" element={isCashier ? <Navigate to="/pos" replace /> : <ExpensesListPage />} />
-          <Route path="/pos" element={<POSPage />} />
-          <Route path="/stock" element={<CashierStockPage />} />
-          <Route path="/reports" element={isCashier ? <Navigate to="/pos" replace /> : <FinancialReports />} />
-          <Route path="/reports/income-statement" element={isCashier ? <Navigate to="/pos" replace /> : <IncomeStatementPage />} />
-          <Route path="/reports/pnl" element={isCashier ? <Navigate to="/pos" replace /> : <IncomeStatementPage />} />
-          <Route path="/reports/margin-analytics" element={isCashier ? <Navigate to="/pos" replace /> : <MarginAnalyticsPage />} />
-          <Route path="/reports/sales-margin" element={isCashier ? <Navigate to="/pos" replace /> : <MarginAnalyticsPage />} />
-          <Route path="/stocks" element={isCashier ? <Navigate to="/pos" replace /> : <InventoryValuationPage />} />
-          <Route path="/reports/inventory-valuation" element={<Navigate to="/stocks" replace />} />
+        {/* Protected Routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<MainLayout />}>
+            <Route path="/dashboard" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <Dashboard />} />
+            <Route path="/users" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <Navigate to="/settings?tab=employees" replace />} />
+            <Route path="/employees" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <EmployeesListPage />} />
+            <Route path="/employees/:id" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <EmployeeDetailPage />} />
+            <Route path="/settings" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <SettingsPage />} />
+            <Route path="/products" element={isCashier ? <Navigate to="/pos" replace /> : <ProductsListPage />} />
+            <Route path="/categories" element={isCashier ? <Navigate to="/pos" replace /> : <CategoriesPage />} />
+            <Route path="/uom" element={<Navigate to="/categories" replace />} />
+            <Route
+              path="/customers"
+              element={isCashier && !canCashierAccessCustomer ? <Navigate to="/pos" replace /> : <CustomersListPage />}
+            />
+            <Route
+              path="/customers/:id"
+              element={isCashier && !canCashierAccessCustomer ? <Navigate to="/pos" replace /> : <CustomerDetailPage />}
+            />
+            <Route
+              path="/suppliers"
+              element={isCashier && !canCashierAccessParty ? <Navigate to="/pos" replace /> : <SuppliersListPage />}
+            />
+            <Route
+              path="/suppliers/:id"
+              element={isCashier && !canCashierAccessParty ? <Navigate to="/pos" replace /> : <SupplierDetailPage />}
+            />
+            <Route path="/invoices" element={isAccountant ? <Navigate to="/customers" replace /> : <InvoicesListPage />} />
+            <Route path="/sales" element={isAccountant ? <Navigate to="/customers" replace /> : <InvoicesListPage />} />
+            <Route path="/pos/invoices" element={isAccountant ? <Navigate to="/customers" replace /> : <InvoicesListPage defaultType="pos" />} />
+            <Route path="/pos-invoices" element={isAccountant ? <Navigate to="/customers" replace /> : <InvoicesListPage defaultType="pos" />} />
+            <Route path="/purchases" element={isCashier ? <Navigate to="/pos" replace /> : <PurchasesListPage />} />
+            <Route path="/exchange" element={isAccountant ? <Navigate to="/customers" replace /> : <ExchangePage />} />
+            <Route path="/exchanges" element={isAccountant ? <Navigate to="/customers" replace /> : <ExchangePage />} />
+            <Route path="/payments" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <PaymentsListPage />} />
+            <Route path="/customer-payments" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <PaymentsListPage />} />
+            <Route path="/supplier-payments" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <SupplierPaymentsListPage />} />
+            <Route path="/expenses" element={isCashier ? <Navigate to="/pos" replace /> : <ExpensesListPage />} />
+            <Route path="/pos" element={isAccountant ? <Navigate to="/customers" replace /> : <POSPage />} />
+            <Route path="/stock" element={<Navigate to="/stocks" replace />} />
+            <Route path="/reports" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <FinancialReports />} />
+            <Route path="/reports/income-statement" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <IncomeStatementPage />} />
+            <Route path="/reports/pnl" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <IncomeStatementPage />} />
+            <Route path="/reports/margin-analytics" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <MarginAnalyticsPage />} />
+            <Route path="/reports/sales-margin" element={(isCashier || isAccountant) ? <Navigate to={defaultRoute} replace /> : <MarginAnalyticsPage />} />
+            <Route path="/stocks" element={<InventoryValuationPage />} />
+            <Route path="/reports/inventory-valuation" element={<Navigate to="/stocks" replace />} />
+          </Route>
         </Route>
-      </Route>
 
-      <Route path="/" element={<Navigate to={isCashier ? '/pos' : '/dashboard'} replace />} />
-      <Route path="*" element={<Navigate to={isCashier ? '/pos' : '/dashboard'} replace />} />
-    </Routes>
+        <Route path="/" element={<Navigate to={defaultRoute} replace />} />
+        <Route path="*" element={<Navigate to={defaultRoute} replace />} />
+      </Routes>
     </>
   );
 }

@@ -10,6 +10,7 @@ Yeh file Sabir Plastic ERP ki tamam backend APIs ki complete documentation hai. 
 - **Content-Type:** `application/json`
 - **Default Port:** `3001`
 - **Authorization Header:** `Authorization: Bearer <ACCESS_TOKEN>`
+- **Token Validity:** Access tokens ab **24 hours** valid rehte hain (`JWT_ACCESS_EXPIRES_IN=24h`), testing ke doran bar bar expire nahi honge. Single-flight mutex queue token refresh automatically handle karti hai.
 
 ### Default Seed Credentials (For Testing)
 | Role | Email | Password | Allowed Access |
@@ -485,6 +486,7 @@ Backend standard response wrapper follow karta hai:
 
 ### `POST /api/v1/products`
 - **Auth:** Bearer Token (Role: `OWNER`, `ADMIN`, `CASHIER`)
+- **Note on Dynamic Cost & Selling Price:** Product create karte waqt `cost_price` aur `sale_price` lazmi nahi hain (dono optional hain aur default `0` hoti hain). Asal cost purchase se aati hai aur final selling price purchases ke zariye ya **Update Stock DC & Selling Price** modal se dynamically set hoti hai jo POS aur Invoices par apply hoti hai.
 - **Request Body:**
 ```json
 {
@@ -493,15 +495,13 @@ Backend standard response wrapper follow karta hai:
   "name_urdu": "ایچ ڈی پی ای دانہ",
   "size": "25kg Bag",
   "category_id": "a9b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
-  "cost_price": 395.0,
-  "sale_price": 440.0,
-  "fixed_retail_price_per_kg": 440.0,
-  "opening_stock": 20,
-  "opening_stock_kg": 500,
   "low_stock_threshold": 100,
-  "notes": "Fresh lot"
+  "opening_stock": 0,
+  "opening_stock_kg": 0,
+  "notes": "Fresh lot catalog item"
 }
 ```
+*(Agar pehle se cost/sale price pata ho to `cost_price`, `sale_price`, `fixed_retail_price_per_kg` bhi pass kiye ja sakte hain).*
 - **Expected Status:** `201 Created`
 
 ### `PUT /api/v1/products/:id`
@@ -638,6 +638,11 @@ Backend standard response wrapper follow karta hai:
 
 ### `POST /api/v1/purchases`
 - **Auth:** Bearer Token (Role: `OWNER`, `ADMIN`, `CASHIER`)
+- **Important Delivery Charges (DC) Accounting Rules:**
+  - `delivery_charges` optional field hai (default `0`).
+  - **Supplier Ledger Neutrality:** Delivery charges supplier/party ke ledger balance me add **nahi** hote (party ledger me sirf net purchase bill amount credit hota hai).
+  - **OPEX Auto-Recording:** Delivery charges automatically Operational Expense (`Logistics` category) me record hote hain (`status: 'PENDING'` ya `'PAID'`).
+  - **Cost Allocation (Per KG):** Purchase ke delivery charges shipment ke total weight (KG) par barabar divide hotay hain: `DC_per_kg = total_dc / total_kg`. Har product ka landed cost = `buy_price_per_kg + DC_per_kg` calculate hota hai.
 - **Request Body:**
 ```json
 {
@@ -645,6 +650,7 @@ Backend standard response wrapper follow karta hai:
   "date": "2026-10-28T10:00:00.000Z",
   "due_date": "2026-11-12T10:00:00.000Z",
   "discount": 1000,
+  "delivery_charges": 15000,
   "advance_applied_amount": 0,
   "notes": "Direct truck delivery from factory",
   "items": [
@@ -660,6 +666,72 @@ Backend standard response wrapper follow karta hai:
 }
 ```
 - **Expected Status:** `201 Created`
+
+### `GET /api/v1/purchases/recent-for-stock-update`
+- **Auth:** Bearer Token (Role: `OWNER`, `ADMIN`, `CASHIER`)
+- **Query Params:** `limit` (default: 20)
+- **Description:** Recent purchase invoices unke items, total weight (KG), party name, aur current delivery charges ke sath laata hai taake unki DC aur final selling price update ki ja sake.
+- **Expected Status:** `200 OK`
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f",
+      "invoice_number": "PUR-0007",
+      "supplier_name": "wajid",
+      "date": "2026-10-29T00:00:00.000Z",
+      "total_amount": 44300,
+      "total_kg": 118,
+      "delivery_charges": 15000,
+      "items": [
+        {
+          "product_id": "e4f5a6b7-c8d9-0e1f-2a3b-4c5d6e7f8a9b",
+          "product_name": "water bottle",
+          "product_code": "PROD-0003",
+          "size": "100ml",
+          "quantity_kg": 60,
+          "base_unit_price": 400.0,
+          "current_sale_price": 606.19
+        }
+      ]
+    }
+  ]
+}
+```
+
+### `POST /api/v1/purchases/:id/update-stock-dc-and-prices`
+- **Auth:** Bearer Token (Role: `OWNER`, `ADMIN`, `CASHIER`)
+- **Description:** Kisi bhi purchase par Delivery Charges (DC) update karta hai, auto per-KG divide karta hai, logistics OPEX maintain karta hai, aur purchased items ki final active selling prices set karta hai jo POS aur Invoices par apply hoti hain.
+- **Request Body:**
+```json
+{
+  "delivery_charges": 15000,
+  "items": [
+    {
+      "product_id": "e4f5a6b7-c8d9-0e1f-2a3b-4c5d6e7f8a9b",
+      "selling_price": 606.19
+    },
+    {
+      "product_id": "f5a6b7c8-d90e-1f2a-3b4c-5d6e7f8a9b0c",
+      "selling_price": 548.69
+    }
+  ]
+}
+```
+- **Expected Status:** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Stock delivery charges and selling prices updated successfully",
+  "data": {
+    "purchase_id": "c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f",
+    "delivery_charges": 15000,
+    "dc_per_kg": 127.12,
+    "updated_items_count": 2
+  }
+}
+```
 
 ### `PATCH /api/v1/purchases/:id/status`
 - **Auth:** Bearer Token (Role: `OWNER`, `ADMIN`)
@@ -894,11 +966,36 @@ Agar customer ka advance wapis karna ho ya overpayment refund karni ho:
 
 ### `GET /api/v1/expenses`
 - **Auth:** Bearer Token
-- **Query Params:** `startDate`, `endDate`, `category`, `payment_method`, `bank_account_id`
+- **Query Params:** `startDate`, `endDate`, `category`, `status`, `payment_method`, `bank_account_id`
 - **Expected Status:** `200 OK`
+
+### `GET /api/v1/expenses/outstanding`
+- **Auth:** Bearer Token
+- **Description:** Unpaid ya payable operational expenses laata hai (khaaskar purchases ki Delivery Charges / Logistics expenses jo abhi driver ko pay nahi hue).
+- **Expected Status:** `200 OK`
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "8f9a0b1c-2d3e-4f5a-6b7c-8d9e0f1a2b3c",
+      "category": "Logistics",
+      "amount": 15000,
+      "due_amount": 15000,
+      "status": "PENDING",
+      "purchase_id": "c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f",
+      "purchase_invoice_number": "PUR-0007",
+      "supplier_name": "wajid",
+      "description": "Delivery Charges for Purchase PUR-0007 (Party: wajid)",
+      "expense_date": "2026-10-29"
+    }
+  ]
+}
+```
 
 ### `POST /api/v1/expenses`
 - **Auth:** Bearer Token
+- **Description:** Direct expense log karta hai. `status: 'PAID'` par Cash Drawer ya Bank Account se funds deduct hotay hain. Agar `status: 'PENDING'` ya `'UNPAID'` ho to liability khari hoti hai aur funds deduct nahi hotay.
 - **Request Body:**
 ```json
 {
@@ -906,11 +1003,41 @@ Agar customer ka advance wapis karna ho ya overpayment refund karni ho:
   "category": "Utilities",
   "description": "Electricity meter bill payment",
   "payment_method": "CASH",
-  "expense_date": "2026-10-28"
+  "bank_account_id": null,
+  "status": "PAID",
+  "expense_date": "2026-10-28",
+  "purchase_id": null
 }
 ```
 *(Valid Categories: `Salaries`, `Utilities`, `Logistics`, `Petty Cash`, `Tea & Refreshments`, `Maintenance`, `Rent`, `Other`)*
+*(Valid Statuses: `PAID`, `PENDING`, `UNPAID`)*
 - **Expected Status:** `201 Created`
+
+### `POST /api/v1/expenses/:id/pay`
+- **Auth:** Bearer Token
+- **Description:** Kisi bhi outstanding/pending delivery charge ya expense ko cash counter drawer ya bank account se direct settle/pay karta hai.
+- **Request Body:**
+```json
+{
+  "amount": 15000,
+  "payment_method": "CASH",
+  "bank_account_id": null,
+  "payment_date": "2026-10-31",
+  "notes": "Paid truck driver directly from counter drawer"
+}
+```
+- **Expected Status:** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Expense payment recorded successfully",
+  "data": {
+    "expense_id": "8f9a0b1c-2d3e-4f5a-6b7c-8d9e0f1a2b3c",
+    "paid_amount": 15000,
+    "status": "PAID"
+  }
+}
+```
 
 ### `DELETE /api/v1/expenses/:id`
 - **Auth:** Bearer Token (Role: `OWNER`, `ADMIN`)
@@ -922,7 +1049,9 @@ Agar customer ka advance wapis karna ho ya overpayment refund karni ho:
 
 ### `POST /api/v1/pos/checkout` (or `POST /api/v1/pos`)
 - **Auth:** Bearer Token (Permission: `sales:write`)
-- **Request Body:**
+- **Payment Methods Supported:** `CASH`, `BANK`, `SPLIT`
+
+#### Option A: 100% Cash Counter Checkout
 ```json
 {
   "customer_id": "00000000-0000-0000-0000-000000000001",
@@ -931,12 +1060,32 @@ Agar customer ka advance wapis karna ho ya overpayment refund karni ho:
       "product_id": "e4f5a6b7-c8d9-0e1f-2a3b-4c5d6e7f8a9b",
       "quantity": 25,
       "selected_unit": "KG",
-      "unit_price": 420.0
+      "unit_price": 548.69
     }
   ],
   "discount": 200,
-  "amount_paid": 10300,
+  "amount_paid": 13517.25,
   "payment_method": "CASH"
+}
+```
+
+#### Option B: Split Payment (Cash + Bank in Single Sale)
+```json
+{
+  "customer_id": "00000000-0000-0000-0000-000000000001",
+  "items": [
+    {
+      "product_id": "e4f5a6b7-c8d9-0e1f-2a3b-4c5d6e7f8a9b",
+      "quantity": 25,
+      "selected_unit": "KG",
+      "unit_price": 548.69
+    }
+  ],
+  "discount": 0,
+  "payment_method": "SPLIT",
+  "split_cash_amount": 5000,
+  "split_bank_amount": 8717.25,
+  "bank_account_id": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d"
 }
 ```
 - **Expected Status:** `200 OK` or `201 Created`
@@ -945,10 +1094,10 @@ Agar customer ka advance wapis karna ho ya overpayment refund karni ho:
   "success": true,
   "data": {
     "invoice": {
-      "id": "...",
+      "id": "b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e",
       "invoice_number": "POS-202610-0002",
-      "total_amount": 10300,
-      "paid_amount": 10300,
+      "total_amount": 13717.25,
+      "paid_amount": 13717.25,
       "status": "PAID"
     }
   }
@@ -962,26 +1111,73 @@ Agar customer ka advance wapis karna ho ya overpayment refund karni ho:
 
 ### `GET /api/v1/pos/shift-audit`
 - **Auth:** Bearer Token (Permission: `sales:read`)
-- **Description:** Current cashier ki shift audit report.
+- **Description:** Current cashier ki complete shift cash audit reconciliation:
+  - Total cash collected from POS sales
+  - Customer udhaar payments collected in cash
+  - Total cash outflows (petty expenses + customer cash refunds)
+  - Calculated net cash in counter drawer
 - **Expected Status:** `200 OK`
+```json
+{
+  "success": true,
+  "data": {
+    "cashier": { "id": "...", "name": "Cashier Ali" },
+    "shift_date": "2026-10-31",
+    "summary": {
+      "sales_cash_inflow": 45000,
+      "customer_payments_cash_inflow": 12000,
+      "total_cash_inflow": 57000,
+      "expenses_cash_outflow": 3500,
+      "refunds_cash_outflow": 0,
+      "total_cash_outflow": 3500,
+      "net_cash_in_drawer": 53500
+    },
+    "sales_count": 8,
+    "invoices": [...]
+  }
+}
+```
 
 ### `GET /api/v1/pos/invoices`
 - **Auth:** Bearer Token (Permission: `sales:read`)
 - **Expected Status:** `200 OK`
 
-### Held Orders (Counter park feature):
-- `GET /api/v1/pos/held-orders` -> List all held orders
-- `POST /api/v1/pos/held-orders` -> Save order on hold
+### Held Orders / Parked Bills (`/api/v1/pos/held-orders`):
+Customer ka bill counter par temporarily hold karne ke liye:
+
+#### 1. `GET /api/v1/pos/held-orders`
+- **Description:** Tamam currently held bills list karta hai.
+- **Expected Status:** `200 OK`
+
+#### 2. `POST /api/v1/pos/held-orders`
+- **Description:** Order hold/park karta hai taake doosre customer ko deal kiya ja sake.
+- **Request Body:**
 ```json
 {
-  "reference_note": "Customer gone to ATM",
+  "reference_note": "Customer gone to ATM / Vehicle",
   "customer_id": null,
-  "items": [{ "product_id": "...", "quantity": 10, "unit_price": 400 }],
-  "total_amount": 4000,
-  "payment_method": "CASH"
+  "customer_name": "Walk-In Customer",
+  "items": [
+    {
+      "product_id": "e4f5a6b7-c8d9-0e1f-2a3b-4c5d6e7f8a9b",
+      "productName": "PP Film Grade",
+      "quantity": 10,
+      "selected_unit": "KG",
+      "unit_price": 548.69
+    }
+  ],
+  "subtotal": 5486.9,
+  "discount": 0,
+  "total_amount": 5486.9,
+  "payment_method": "CASH",
+  "slip_mode": "SINGLE"
 }
 ```
-- `DELETE /api/v1/pos/held-orders/:id` -> Unhold / Cancel held order
+- **Expected Status:** `201 Created`
+
+#### 3. `DELETE /api/v1/pos/held-orders/:id`
+- **Description:** Bill resume hone ya discard hone par held order ko table se remove karta hai.
+- **Expected Status:** `200 OK`
 
 ---
 
@@ -1289,12 +1485,12 @@ System start hone par opening data bulk me import karne ke endpoints:
 
 ## 🚀 Step-by-Step API Testing Flow (In Postman / Thunder Client)
 
-Postman ya Thunder Client me test karne ke liye yeh sequence follow karen:
+Postman ya Thunder Client me complete end-to-end testing ke liye yeh workflow sequence follow karen:
 
 1. **Get Token:**
    - Request: `POST http://localhost:3001/api/v1/auth/login`
    - Body: `{"email": "owner@sabir.local", "password": "Admin@1234"}`
-   - Token copy karen aur collection variable me set karen: `{{token}}`.
+   - Token copy karen aur collection variable me set karen: `{{token}}` *(Token ab 24 hours valid rehta hai)*.
 2. **Set Header in next requests:**
    - `Authorization`: `Bearer {{token}}`
    - `Content-Type`: `application/json`
@@ -1302,17 +1498,36 @@ Postman ya Thunder Client me test karne ke liye yeh sequence follow karen:
    - `GET http://localhost:3001/api/v1/health`
 4. **Create Master Data:**
    - Category banayein (`POST /categories`)
-   - Product banayein (`POST /products`)
+   - Product banayein (`POST /products` — *cost/sale price optional hain*)
    - Supplier banayein (`POST /suppliers`)
    - Customer banayein (`POST /customers`)
    - Bank Account banayein (`POST /bank-accounts`)
-5. **Run Operational Flows:**
-   - Raw material purchase invoice banayein (`POST /purchases`)
-   - Supplier ko payment bheinjen (`POST /supplier-payments`)
-   - Customer ko sale invoice ya POS checkout karen (`POST /pos/checkout`)
-   - Customer se payment receive karen (`POST /payments`)
+5. **Run Operational Flows & Test New Features:**
+   - **Step 5.1 (Purchasing with Delivery Charges):**
+     - Purchase invoice banayein with `"delivery_charges": 15000` (`POST /purchases`).
+     - Check party ledger: Party ledger me sirf item bill charge hoga, 15000 DC shamil nahi hogi.
+   - **Step 5.2 (Stock DC & Selling Price Allocation):**
+     - Recent purchases fetch karen (`GET /purchases/recent-for-stock-update`).
+     - DC per KG aur new active selling prices set karen (`POST /purchases/:id/update-stock-dc-and-prices`).
+   - **Step 5.3 (Pay Outstanding Logistics OPEX):**
+     - Outstanding logistics charges check karen (`GET /expenses/outstanding`).
+     - Truck driver ki delivery charges counter drawer se pay karen (`POST /expenses/:id/pay`).
+   - **Step 5.4 (POS Split Payment Checkout):**
+     - POS counter sale checkout karen half cash aur half bank (`POST /pos/checkout` with `payment_method: "SPLIT"`).
+   - **Step 5.5 (POS Held Bills / Bill Parking):**
+     - Customer cart ko temporarily hold par dalein (`POST /pos/held-orders`).
+     - Held list check karen (`GET /pos/held-orders`) aur resume karne par delete karen (`DELETE /pos/held-orders/:id`).
+   - **Step 5.6 (Cashier Shift Reconciliation Audit):**
+     - Shift audit run karen (`GET /pos/shift-audit`) — Sales inflow, udhaar collection inflow, aur expenses outflow ka net drawer cash match hoga.
+   - **Step 5.7 (Treasury Transfer Funds):**
+     - Counter cash drawer se bank me funds transfer karen (`POST /bank-accounts/transfer`).
+   - **Step 5.8 (Customer & Supplier Payments):**
+     - Supplier ko payment bheinjen (`POST /supplier-payments`).
+     - Customer se udhaar payment receive karen (`POST /payments` with `CASH`, `BANK`, ya `SPLIT`).
 6. **Verify Financial Reports:**
    - `GET /reports/dashboard`
-   - `GET /reports/inventory`
-   - `GET /reports/liquidity`
+   - `GET /reports/liquidity` + granular drill-downs (`/liquidity/receivables`, `/liquidity/payables`, `/liquidity/unsold-stock`)
+   - `GET /reports/pnl` (Profit & Loss statement)
+   - `GET /reports/margin-analytics` (Sales & Margin COGS report)
+   - `GET /reports/inventory-valuation` (Stocks valuation & FIFO price buckets)
    - `GET /bank-accounts/cash-drawer-balance`

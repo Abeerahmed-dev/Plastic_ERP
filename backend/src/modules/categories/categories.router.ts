@@ -15,8 +15,8 @@ router.use(requireAuth);
 
 router.get('/', getCategoriesHandler);
 router.get('/:id', getCategoryByIdHandler);
-router.post('/', verifyRole(['ADMIN', 'OWNER', 'CASHIER']), createCategoryHandler);
-router.put('/:id', verifyRole(['ADMIN', 'OWNER']), updateCategoryHandler);
+router.post('/', verifyRole(['ADMIN', 'OWNER', 'CASHIER', 'ACCOUNTANT']), createCategoryHandler);
+router.put('/:id', verifyRole(['ADMIN', 'OWNER', 'ACCOUNTANT']), updateCategoryHandler);
 router.delete('/:id', verifyRole(['ADMIN', 'OWNER']), deleteCategoryHandler);
 
 export default router;

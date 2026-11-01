@@ -21,7 +21,7 @@ export default function CustomersListPage() {
   const { user, hasPermission } = useAuthStore();
   const userRole = (user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
-  const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:write');
+  const canWrite = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:write'));
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:delete'));
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -180,14 +180,14 @@ export default function CustomersListPage() {
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">
+                  <td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-gray-400">
                     Loading customers…
                   </td>
                 </tr>
               )}
               {isError && (
                 <tr>
-                  <td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-red-500">
+                  <td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-red-500">
                     Failed to load customers.{' '}
                     <button onClick={() => refetch()} className="underline">Retry</button>
                   </td>
@@ -195,7 +195,7 @@ export default function CustomersListPage() {
               )}
               {!isLoading && !isError && filteredTableRows.length === 0 && (
                 <tr>
-                  <td colSpan={isCashier ? 5 : 7} className="py-16 text-center text-gray-400">
+                  <td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-gray-400">
                     {selectedCity || selectedName
                       ? 'No customers match the active cascading filters. Try resetting filters.'
                       : 'No customers yet. Add your first one.'}

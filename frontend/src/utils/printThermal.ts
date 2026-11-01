@@ -66,7 +66,7 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
   const isSplit = paymentMethod === 'SPLIT' || (Number(invoice.split_cash_amount) > 0 && Number(invoice.split_bank_amount) > 0);
   const isBank = !isSplit && (paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name);
   const isCheque = !isSplit && paymentMethod === 'CHEQUE';
-  const bankNameStr = invoice.bank_name ? ` (${invoice.bank_name})` : '';
+  const bankNameStr = '';
 
   const splitCash = Number(invoice.split_cash_amount ?? invoice.cash_tendered ?? 0);
   const splitBank = Number(invoice.split_bank_amount ?? 0);

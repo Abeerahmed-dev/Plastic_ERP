@@ -43,7 +43,7 @@ router.get('/pnl', verifyRole(['OWNER', 'ADMIN']), getPnLController);
 router.get('/income-statement/returns-detail', verifyRole(['OWNER', 'ADMIN']), getIncomeStatementReturnsDetailController);
 router.get('/income-statement', verifyRole(['OWNER', 'ADMIN']), getIncomeStatementController);
 router.get('/margin-analytics', verifyRole(['OWNER', 'ADMIN']), getMarginAnalyticsController);
-router.get('/inventory-valuation', verifyRole(['OWNER', 'ADMIN']), getInventoryValuationController);
+router.get('/inventory-valuation', verifyRole(['OWNER', 'ADMIN', 'CASHIER', 'ACCOUNTANT']), getInventoryValuationController);
 router.get('/cash-ledger', verifyRole(['OWNER', 'ADMIN']), getCashLedgerController);
 router.get('/profit', verifyRole(['OWNER', 'ADMIN']), getProfitMatrixController);
 router.get('/sales-margin', verifyRole(['OWNER', 'ADMIN']), getMarginAnalyticsController);

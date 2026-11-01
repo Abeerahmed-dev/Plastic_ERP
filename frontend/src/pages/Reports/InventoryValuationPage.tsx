@@ -18,6 +18,7 @@ import {
   CircleDot,
 } from 'lucide-react';
 import { reportsService, InventoryValuationData, InventoryValuationItem, FifoBucketItem } from '../../services/reports.service';
+import { useAuthStore } from '../../store/auth.store';
 import { UpdateStockModal } from './UpdateStockModal';
 
 interface ProductGroup {
@@ -29,6 +30,9 @@ interface ProductGroup {
 }
 
 export default function InventoryValuationPage() {
+  const { user } = useAuthStore();
+  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [sortField, setSortField] = useState<'asset_value' | 'current_stock_kg' | 'product_name'>('asset_value');
@@ -202,14 +206,16 @@ export default function InventoryValuationPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsUpdateStockOpen(true)}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 via-black-700 to-indigo-800 hover:from-blue-700 hover:to-indigo-800 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
-            title="Update Delivery Charges and Selling Price for latest purchase stocks"
-          >
-            <TrendingUp className="h-4 w-4" />
-            <span>Update Stocks</span>
-          </button>
+          {!isCashier && (
+            <button
+              onClick={() => setIsUpdateStockOpen(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 via-black-700 to-indigo-800 hover:from-blue-700 hover:to-indigo-800 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
+              title="Update Delivery Charges and Selling Price for latest purchase stocks"
+            >
+              <TrendingUp className="h-4 w-4" />
+              <span>Update Stocks</span>
+            </button>
+          )}
           <button
             onClick={() => refetch()}
             disabled={isFetching}
@@ -759,10 +765,12 @@ export default function InventoryValuationPage() {
         )}
       </div>
 
-      <UpdateStockModal
-        isOpen={isUpdateStockOpen}
-        onClose={() => setIsUpdateStockOpen(false)}
-      />
+      {!isCashier && (
+        <UpdateStockModal
+          isOpen={isUpdateStockOpen}
+          onClose={() => setIsUpdateStockOpen(false)}
+        />
+      )}
     </div>
   );
 }

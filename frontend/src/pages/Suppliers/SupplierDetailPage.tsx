@@ -16,6 +16,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { getSupplier, updateSupplier } from '../../services/suppliers.service';
+import { useAuthStore } from '../../store/auth.store';
 import { SupplierLedger } from './SupplierLedger';
 import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
@@ -32,6 +33,9 @@ export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { user } = useAuthStore();
+  const userRole = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = userRole === 'CASHIER';
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isAdvanceModalOpen, setIsAdvanceModalOpen] = useState(false);
@@ -113,10 +117,10 @@ export default function SupplierDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* ─── Party Header Bar ─── */}
+      {/* ─── Supplier Header Bar ─── */}
       <header className="bg-white border-b border-slate-200 px-6 py-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          {/* Party Name & Metadata */}
+          {/* Supplier Name & Metadata */}
           <div className="flex items-center gap-3.5">
             <button
               type="button"
@@ -128,7 +132,7 @@ export default function SupplierDetailPage() {
               <span>Back</span>
             </button>
 
-            <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-bold text-lg shadow-sm shrink-0">
+            <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center text-white font-bold text-lg shadow-sm shrink-0">
               {supplier.name.charAt(0).toUpperCase()}
             </div>
             <div>
@@ -137,7 +141,7 @@ export default function SupplierDetailPage() {
                   {supplier.name}
                 </h1>
                 {supplier.city && (
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
                     {supplier.city}
                   </span>
                 )}
@@ -159,50 +163,52 @@ export default function SupplierDetailPage() {
             </div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="flex items-center gap-2.5 flex-wrap justify-end">
-            <button
-              type="button"
-              onClick={() => setIsPaymentModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 px-3.5 py-2 text-xs font-bold transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
-              title="Record Payment against Purchase Bill"
-            >
-              <Plus className="w-3.5 h-3.5 text-slate-950" />
-              <span>Record Payment</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsAdvanceModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
-              title="Log Advance Deposit"
-            >
-              <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Log Advance</span>
-            </button>
-
-            {advancePayable > 0 && (
+          {/* Quick Actions (Hidden for Cashier - Read-only access) */}
+          {!isCashier && (
+            <div className="flex items-center gap-2.5 flex-wrap justify-end">
               <button
                 type="button"
-                onClick={() => setIsRefundModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
-                title="Process Cash Refund"
+                onClick={() => setIsPaymentModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 px-3.5 py-2 text-xs font-bold transition shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
+                title="Record Payment against Purchase Bill"
               >
-                <ArrowDownLeft className="w-3.5 h-3.5 text-rose-600" />
-                <span>Refund ({formatRs(advancePayable)})</span>
+                <Plus className="w-3.5 h-3.5 text-slate-950" />
+                <span>Record Payment</span>
               </button>
-            )}
 
-            <button
-              type="button"
-              onClick={() => setIsEditModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
-              title="Edit Party Details"
-            >
-              <Edit2 className="w-3.5 h-3.5 text-slate-500" />
-              <span>Edit</span>
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => setIsAdvanceModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                title="Log Advance Deposit"
+              >
+                <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Log Advance</span>
+              </button>
+
+              {advancePayable > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsRefundModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                  title="Process Cash Refund"
+                >
+                  <ArrowDownLeft className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Refund ({formatRs(advancePayable)})</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsEditModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3 py-2 text-xs font-bold transition shadow-2xs cursor-pointer"
+                title="Edit Party Details"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>Edit</span>
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -215,52 +221,56 @@ export default function SupplierDetailPage() {
         />
       </main>
 
-      {/* ─── Modals ─── */}
-      <RecordPaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => setIsPaymentModalOpen(false)}
-        entityType="supplier"
-        supplierId={supplier.id}
-        onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
-          qc.invalidateQueries({ queryKey: ['suppliers', supplier.id, 'statement'] });
-          refetch();
-        }}
-      />
+      {/* ─── Modals (Only for Admin / Owner / Accountant) ─── */}
+      {!isCashier && (
+        <>
+          <RecordPaymentModal
+            isOpen={isPaymentModalOpen}
+            onClose={() => setIsPaymentModalOpen(false)}
+            entityType="supplier"
+            supplierId={supplier.id}
+            onSuccess={() => {
+              qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
+              qc.invalidateQueries({ queryKey: ['suppliers', supplier.id, 'statement'] });
+              refetch();
+            }}
+          />
 
-      <LogAdvanceDepositModal
-        isOpen={isAdvanceModalOpen}
-        onClose={() => setIsAdvanceModalOpen(false)}
-        entityType="supplier"
-        supplier={supplier}
-        onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
-          qc.invalidateQueries({ queryKey: ['suppliers', supplier.id, 'statement'] });
-          refetch();
-        }}
-      />
+          <LogAdvanceDepositModal
+            isOpen={isAdvanceModalOpen}
+            onClose={() => setIsAdvanceModalOpen(false)}
+            entityType="supplier"
+            supplier={supplier}
+            onSuccess={() => {
+              qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
+              qc.invalidateQueries({ queryKey: ['suppliers', supplier.id, 'statement'] });
+              refetch();
+            }}
+          />
 
-      <ProcessCashRefundModal
-        isOpen={isRefundModalOpen}
-        onClose={() => setIsRefundModalOpen(false)}
-        entityType="supplier"
-        supplier={supplier}
-        onSuccess={() => {
-          qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
-          qc.invalidateQueries({ queryKey: ['suppliers', supplier.id, 'statement'] });
-          refetch();
-        }}
-      />
+          <ProcessCashRefundModal
+            isOpen={isRefundModalOpen}
+            onClose={() => setIsRefundModalOpen(false)}
+            entityType="supplier"
+            supplier={supplier}
+            onSuccess={() => {
+              qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
+              qc.invalidateQueries({ queryKey: ['suppliers', supplier.id, 'statement'] });
+              refetch();
+            }}
+          />
 
-      {isEditModalOpen && (
-        <SupplierFormModal
-          supplier={supplier}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
-            refetch();
-          }}
-        />
+          {isEditModalOpen && (
+            <SupplierFormModal
+              supplier={supplier}
+              onClose={() => {
+                setIsEditModalOpen(false);
+                qc.invalidateQueries({ queryKey: ['suppliers', supplier.id] });
+                refetch();
+              }}
+            />
+          )}
+        </>
       )}
     </div>
   );
