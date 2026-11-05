@@ -37,7 +37,9 @@ export async function createPaymentController(req: Request, res: Response, next:
         throw new Error(`NOT_FOUND: Bank account with ID ${payload.bank_account_id} does not exist.`);
       }
 
-      const availableBalance = parseFloat(account.current_balance || 0);
+      const { getBankAccountBalance } = await import('../bank-accounts/bank-accounts.repository');
+      const calculatedBalance = await getBankAccountBalance(account.id, trx);
+      const availableBalance = Math.max(parseFloat(account.current_balance || 0), calculatedBalance);
       const requestedAmount = parseFloat((payload.amount as any) || 0);
 
       // Cheques / PDCs are post-dated liabilities with upcoming due dates.

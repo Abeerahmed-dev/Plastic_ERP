@@ -221,6 +221,8 @@ export const BusinessPerformanceCharts: React.FC = () => {
       });
       return response.data.data;
     },
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
   });
 
   // 2. Fetch daily sales trend data from margin-analytics
@@ -231,6 +233,8 @@ export const BusinessPerformanceCharts: React.FC = () => {
   } = useQuery({
     queryKey: ['marginAnalyticsTrend', startDate, endDate],
     queryFn: () => reportsService.getMarginAnalytics(startDate, endDate),
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
   });
 
   // 3. Fetch itemized expenses to map daily expenses
@@ -246,6 +250,8 @@ export const BusinessPerformanceCharts: React.FC = () => {
       });
       return response.data.data || [];
     },
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
   });
 
   const isLoading = isPnLLoading || isMarginLoading || isExpensesLoading;

@@ -10,6 +10,7 @@ export interface BankAccountRow {
   account_number: string;
   iban_details: string | null;
   initial_balance: number;
+  current_balance?: number;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -258,6 +259,12 @@ export async function findAllBankAccounts(): Promise<BankAccountWithBalance[]> {
   return await Promise.all(
     accounts.map(async (acc) => {
       const detail = await getBankAccountBalanceDetail(acc.id);
+      if (Number(acc.current_balance) !== detail.current_balance) {
+        await db('bank_accounts')
+          .where('id', acc.id)
+          .update({ current_balance: detail.current_balance });
+        (acc as any).current_balance = detail.current_balance;
+      }
       return {
         ...acc,
         name: acc.account_title || `${acc.bank_name} - ${acc.account_number}`,
@@ -318,20 +325,35 @@ export async function updateBankAccount(
   id: string,
   data: UpdateBankAccountInput
 ): Promise<BankAccountRow | undefined> {
-  const updateData: Record<string, any> = { updated_at: new Date() };
-  if (data.account_title !== undefined) updateData.account_title = data.account_title.trim();
-  if (data.bank_name !== undefined) updateData.bank_name = data.bank_name.trim();
-  if (data.account_number !== undefined) updateData.account_number = data.account_number.trim();
-  if (data.iban_details !== undefined) updateData.iban_details = data.iban_details ? data.iban_details.trim() : null;
-  if (data.initial_balance !== undefined) updateData.initial_balance = data.initial_balance;
-  if (data.is_active !== undefined) updateData.is_active = data.is_active;
+  return await db.transaction(async (trx: Knex.Transaction) => {
+    const existing = await trx('bank_accounts').where('id', id).first();
+    if (!existing) return undefined;
 
-  const [row] = await db('bank_accounts')
-    .where('id', id)
-    .update(updateData)
-    .returning('*');
+    const updateData: Record<string, any> = { updated_at: new Date() };
+    if (data.account_title !== undefined) updateData.account_title = data.account_title.trim();
+    if (data.bank_name !== undefined) updateData.bank_name = data.bank_name.trim();
+    if (data.account_number !== undefined) updateData.account_number = data.account_number.trim();
+    if (data.iban_details !== undefined) updateData.iban_details = data.iban_details ? data.iban_details.trim() : null;
+    if (data.is_active !== undefined) updateData.is_active = data.is_active;
 
-  return row;
+    const hasNewInitial = data.initial_balance !== undefined || (data as any).opening_balance !== undefined;
+    if (hasNewInitial) {
+      const newInitial = Number(data.initial_balance !== undefined ? data.initial_balance : (data as any).opening_balance) || 0;
+      updateData.initial_balance = newInitial;
+    }
+
+    await trx('bank_accounts')
+      .where('id', id)
+      .update(updateData);
+
+    const detail = await getBankAccountBalanceDetail(id, trx);
+    const [row] = await trx('bank_accounts')
+      .where('id', id)
+      .update({ current_balance: detail.current_balance })
+      .returning('*');
+
+    return row;
+  });
 }
 
 export async function softDeleteBankAccount(id: string): Promise<boolean> {
@@ -628,9 +650,10 @@ export async function transferFunds(
       if (!fromAccount) {
         throw new NotFoundError('Source bank account');
       }
-      fromBalance = fromAccount.current_balance !== undefined
-        ? Number(fromAccount.current_balance)
-        : await getBankAccountBalance(from_account_id, trx);
+      fromBalance = Math.max(
+        Number(fromAccount.current_balance || 0),
+        await getBankAccountBalance(from_account_id, trx)
+      );
       if (fromBalance < amount) {
         throw new InsufficientLiquidityError(
           'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.'

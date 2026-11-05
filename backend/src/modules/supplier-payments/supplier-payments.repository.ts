@@ -2,7 +2,7 @@ import db from '../../db/knex';
 import { Knex } from 'knex';
 import { CreateSupplierPaymentInput, PaymentQuery } from './supplier-payments.schemas';
 import { InsufficientLiquidityError } from '../../shared/errors';
-import { getCashDrawerBalance } from '../bank-accounts/bank-accounts.repository';
+import { getCashDrawerBalance, getBankAccountBalance } from '../bank-accounts/bank-accounts.repository';
 
 export async function generatePaymentNumber(trx: Knex.Transaction | Knex = db): Promise<string> {
   const rows = await trx('supplier_payments')
@@ -204,7 +204,8 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
         if (!account) {
           throw new Error(`NOT_FOUND: Bank account with ID ${data.bank_account_id} does not exist.`);
         }
-        const availableBalance = parseFloat(account.current_balance || 0);
+        const calculatedBalance = await getBankAccountBalance(data.bank_account_id, trx);
+        const availableBalance = Math.max(parseFloat(account.current_balance || 0), calculatedBalance);
         if (availableBalance < splitBank) {
           throw new InsufficientLiquidityError(
             `INSUFFICIENT_LIQUIDITY: Cannot withdraw ${splitBank} from Bank. Account only holds ${availableBalance}.`
@@ -348,7 +349,8 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
         throw new Error(`NOT_FOUND: Bank account with ID ${data.bank_account_id} does not exist.`);
       }
 
-      const availableBalance = parseFloat(account.current_balance || 0);
+      const calculatedBalance = await getBankAccountBalance(data.bank_account_id, trx);
+      const availableBalance = Math.max(parseFloat(account.current_balance || 0), calculatedBalance);
 
       // Post-dated cheques (PDCs) are future liabilities and do not immediately debit the bank balance.
       // Enforce the liquidity check only for immediate withdrawals or cheques that are already CLEARED.

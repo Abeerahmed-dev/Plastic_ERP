@@ -1,3 +1,4 @@
+import { getBankAccountBalance } from '../bank-accounts/bank-accounts.repository';
 import db from '../../db/knex';
 import { parseDateFilter } from '../../shared/dateFilter';
 import { CreateExpenseInput, PayExpenseInput, ExpenseQuery } from './expenses.schemas';
@@ -93,7 +94,9 @@ export async function createExpenseRecord(input: CreateExpenseInput, userId?: st
       .forUpdate()
       .first();
 
-    if (!account || Number(account.current_balance) < Number(payload.amount)) {
+    const calculatedBalance = payload.bank_account_id ? await getBankAccountBalance(payload.bank_account_id, trx) : 0;
+    const availableBalance = Math.max(Number(account?.current_balance || 0), calculatedBalance);
+    if (!account || availableBalance < Number(payload.amount)) {
       throw new Error('INSUFFICIENT_LIQUIDITY: Cannot log an expense larger than the account balance.');
     }
 
@@ -219,8 +222,10 @@ export async function payExpenseRecord(expenseId: string, input: PayExpenseInput
         .forUpdate()
         .first();
 
-      if (!account || Number(account.current_balance) < payAmount) {
-        const avail = account ? Number(account.current_balance).toLocaleString() : '0';
+      const calculatedBalance = input.bank_account_id ? await getBankAccountBalance(input.bank_account_id, trx) : 0;
+      const availableBalance = Math.max(Number(account?.current_balance || 0), calculatedBalance);
+      if (!account || availableBalance < payAmount) {
+        const avail = availableBalance.toLocaleString();
         throw new Error(
           `INSUFFICIENT_LIQUIDITY: Cannot pay Rs. ${payAmount.toLocaleString()} from ${account?.account_title || account?.bank_name || 'Bank Account'} (Available: Rs. ${avail}).`
         );

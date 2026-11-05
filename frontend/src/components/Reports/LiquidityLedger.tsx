@@ -46,9 +46,18 @@ export function LiquidityLedger() {
   useEffect(() => {
     fetchAllReports();
     const interval = setInterval(() => {
-      useReportStore.getState().fetchLiquidityLedger(true);
-    }, 15000);
-    return () => clearInterval(interval);
+      useReportStore.getState().fetchAllReports(true);
+    }, 5000);
+
+    const handleFocus = () => {
+      useReportStore.getState().fetchAllReports(true);
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc' | 'customer-advances' | 'supplier-advances') => {
@@ -529,14 +538,41 @@ export function LiquidityLedger() {
         </div>
       )}
 
-      <CashBookModal isOpen={isCashBookOpen} onClose={() => setIsCashBookOpen(false)} />
-      <PdcLedgerModal isOpen={isPdcModalOpen} onClose={() => setIsPdcModalOpen(false)} />
-      <IssuedPdcLedgerModal isOpen={isIssuedPdcModalOpen} onClose={() => setIsIssuedPdcModalOpen(false)} />
-      <BankAccountsModal isOpen={isBankAccountsModalOpen} onClose={() => setIsBankAccountsModalOpen(false)} />
+      <CashBookModal
+        isOpen={isCashBookOpen}
+        onClose={() => {
+          setIsCashBookOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <PdcLedgerModal
+        isOpen={isPdcModalOpen}
+        onClose={() => {
+          setIsPdcModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <IssuedPdcLedgerModal
+        isOpen={isIssuedPdcModalOpen}
+        onClose={() => {
+          setIsIssuedPdcModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <BankAccountsModal
+        isOpen={isBankAccountsModalOpen}
+        onClose={() => {
+          setIsBankAccountsModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
       <TransferFundsModal
         isOpen={isTransferModalOpen}
-        onClose={() => setIsTransferModalOpen(false)}
-        onSuccess={() => fetchAllReports()}
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          fetchAllReports(true);
+        }}
+        onSuccess={() => fetchAllReports(true)}
       />
     </>
   );

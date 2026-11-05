@@ -83,14 +83,14 @@ interface ReportState {
   isLoadingLiquidity: boolean;
   isLoadingProfit: boolean;
   error: string | null;
-  fetchInventoryLedger: () => Promise<void>;
+  fetchInventoryLedger: (silent?: boolean) => Promise<void>;
   fetchLiquidityLedger: (silent?: boolean) => Promise<void>;
-  fetchProfitMatrix: (productId?: string, timeFilter?: string) => Promise<void>;
-  fetchSalesMarginReport: (productId?: string, timeFilter?: string) => Promise<void>;
-  fetchProductProfitMatrix: (productId?: string) => Promise<void>;
+  fetchProfitMatrix: (productId?: string, timeFilter?: string, silent?: boolean) => Promise<void>;
+  fetchSalesMarginReport: (productId?: string, timeFilter?: string, silent?: boolean) => Promise<void>;
+  fetchProductProfitMatrix: (productId?: string, silent?: boolean) => Promise<void>;
   setSelectedProductId: (productId: string) => void;
   setTimeFilter: (timeFilter: string) => void;
-  fetchAllReports: () => Promise<void>;
+  fetchAllReports: (silent?: boolean) => Promise<void>;
 }
 
 export const useReportStore = create<ReportState>((set, get) => ({
@@ -107,8 +107,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
   isLoadingProfit: false,
   error: null,
 
-  fetchInventoryLedger: async () => {
-    set({ isLoadingInventory: true, error: null });
+  fetchInventoryLedger: async (silent = false) => {
+    if (!silent && get().inventoryLedger.length === 0) {
+      set({ isLoadingInventory: true, error: null });
+    }
     try {
       const response = await api.get('/reports/inventory');
       set({ inventoryLedger: response.data.data, isLoadingInventory: false });
@@ -129,12 +131,14 @@ export const useReportStore = create<ReportState>((set, get) => ({
     }
   },
 
-  fetchProfitMatrix: async (productId?: string, timeFilter?: string) => {
-    return get().fetchSalesMarginReport(productId, timeFilter);
+  fetchProfitMatrix: async (productId?: string, timeFilter?: string, silent = false) => {
+    return get().fetchSalesMarginReport(productId, timeFilter, silent);
   },
 
-  fetchSalesMarginReport: async (productId?: string, timeFilter?: string) => {
-    set({ isLoadingProfit: true, error: null });
+  fetchSalesMarginReport: async (productId?: string, timeFilter?: string, silent = false) => {
+    if (!silent && !get().salesMargin) {
+      set({ isLoadingProfit: true, error: null });
+    }
     try {
       const pId = productId !== undefined ? productId : get().selectedProductId;
       const tFilter = timeFilter !== undefined ? timeFilter : get().timeFilter;
@@ -151,8 +155,8 @@ export const useReportStore = create<ReportState>((set, get) => ({
     }
   },
 
-  fetchProductProfitMatrix: async (productId?: string) => {
-    return get().fetchSalesMarginReport(productId, get().timeFilter);
+  fetchProductProfitMatrix: async (productId?: string, silent = false) => {
+    return get().fetchSalesMarginReport(productId, get().timeFilter, silent);
   },
 
   setSelectedProductId: (productId: string) => {
@@ -165,12 +169,12 @@ export const useReportStore = create<ReportState>((set, get) => ({
     get().fetchSalesMarginReport(get().selectedProductId || undefined, timeFilter);
   },
 
-  fetchAllReports: async () => {
+  fetchAllReports: async (silent = false) => {
     const store = useReportStore.getState();
     await Promise.all([
-      store.fetchInventoryLedger(),
-      store.fetchLiquidityLedger(),
-      store.fetchSalesMarginReport(store.selectedProductId || undefined, store.timeFilter),
+      store.fetchInventoryLedger(silent),
+      store.fetchLiquidityLedger(silent),
+      store.fetchSalesMarginReport(store.selectedProductId || undefined, store.timeFilter, silent),
     ]);
   },
 }));

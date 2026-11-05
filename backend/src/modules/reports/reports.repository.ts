@@ -370,21 +370,22 @@ export async function getLiquidityUnsoldStockDetail() {
 export async function getSalesMarginReport(productId?: string, timeFilter?: string) {
   const now = new Date();
   let startDate: Date | null = null;
-  let endDate: Date = now;
+  let endDate: Date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
   if (timeFilter === 'today') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   } else if (timeFilter === 'last_7_days') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
   } else if (timeFilter === 'last_2_days') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
   } else if (timeFilter === 'this_month') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   }
 
   let query = db('sales_invoice_items as sii')
     .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
+    .whereNot('si.status', 'CANCELLED')
     .select(
       'si.id as invoice_id',
       'si.total_amount',
@@ -400,7 +401,9 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
     );
 
   if (startDate) {
-    query = query.where('si.created_at', '>=', startDate).andWhere('si.created_at', '<=', endDate);
+    query = query
+      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [startDate.toISOString().split('T')[0]])
+      .andWhereRaw('COALESCE(si.date, si.created_at::date) <= ?', [endDate.toISOString().split('T')[0]]);
   }
 
   if (productId) {
@@ -511,6 +514,7 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
       .select(db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'));
 
     let expensesQuery = db('expenses as e')
+      .whereNull('e.purchase_id')
       .select(db.raw('SUM(CAST(e.amount AS NUMERIC)) as total'));
 
     if (sDateObj) {
@@ -1017,14 +1021,16 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
-    // 4. Operating Expenses Query
+    // 4. Operating Expenses Query (Excludes purchase freight/delivery charges already capitalized into COGS)
     let expensesQuery = db('expenses as e')
+      .whereNull('e.purchase_id')
       .select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total_expenses'))
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
 
     // 5. Expenses Breakdown Query
     let expensesBreakdownQuery = db('expenses as e')
+      .whereNull('e.purchase_id')
       .select('category', db.raw('SUM(CAST(COALESCE(amount, 0) AS NUMERIC)) as total'))
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj])

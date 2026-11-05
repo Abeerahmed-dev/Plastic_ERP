@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, TrendingDown, DollarSign, Receipt, Calendar, Filter, ExternalLink, Plus } from 'lucide-react';
 import api from '../../services/api';
+import { useReportStore } from '../../store/useReportStore';
 import { ExpensesListModal } from './ExpensesListModal';
 import { LogExpenseModal } from '../../pages/POS/LogExpenseModal';
 
@@ -83,6 +84,8 @@ export const BusinessPerformanceRow: React.FC = () => {
         throw err;
       }
     },
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
   });
 
   const totalSales = pnlData?.total_sales ?? 0;
@@ -238,6 +241,7 @@ export const BusinessPerformanceRow: React.FC = () => {
         onClose={() => {
           setIsExpensesModalOpen(false);
           refetch();
+          useReportStore.getState().fetchAllReports(true);
         }}
         startDate={startDate}
         endDate={endDate}
@@ -246,9 +250,13 @@ export const BusinessPerformanceRow: React.FC = () => {
       {/* Log Expense Modal */}
       <LogExpenseModal
         isOpen={isLogExpenseOpen}
-        onClose={() => setIsLogExpenseOpen(false)}
+        onClose={() => {
+          setIsLogExpenseOpen(false);
+          useReportStore.getState().fetchAllReports(true);
+        }}
         onExpenseLogged={() => {
           refetch();
+          useReportStore.getState().fetchAllReports(true);
         }}
       />
     </div>

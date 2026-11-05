@@ -61,6 +61,19 @@ export default function FinancialReports() {
 
   useEffect(() => {
     fetchAllReports();
+    const interval = setInterval(() => {
+      fetchAllReports(true);
+    }, 5000);
+
+    const handleFocus = () => {
+      fetchAllReports(true);
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   const formatPKR = (val: number | undefined | null) => {
@@ -722,22 +735,49 @@ export default function FinancialReports() {
       )}
 
       {/* ─── CASH BOOK AUDIT MODAL ─── */}
-      <CashBookModal isOpen={isCashBookOpen} onClose={() => setIsCashBookOpen(false)} />
+      <CashBookModal
+        isOpen={isCashBookOpen}
+        onClose={() => {
+          setIsCashBookOpen(false);
+          fetchAllReports(true);
+        }}
+      />
 
       {/* ─── PDC DRILL-DOWN LEDGER MODAL ─── */}
-      <PdcLedgerModal isOpen={isPdcModalOpen} onClose={() => setIsPdcModalOpen(false)} />
+      <PdcLedgerModal
+        isOpen={isPdcModalOpen}
+        onClose={() => {
+          setIsPdcModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
 
       {/* ─── ISSUED PDC DRILL-DOWN LEDGER MODAL ─── */}
-      <IssuedPdcLedgerModal isOpen={isIssuedPdcModalOpen} onClose={() => setIsIssuedPdcModalOpen(false)} />
+      <IssuedPdcLedgerModal
+        isOpen={isIssuedPdcModalOpen}
+        onClose={() => {
+          setIsIssuedPdcModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
 
       {/* ─── MULTI-BANK ACCOUNTS BREAKDOWN & MANAGEMENT MODAL ─── */}
-      <BankAccountsModal isOpen={isBankAccountsModalOpen} onClose={() => setIsBankAccountsModalOpen(false)} />
+      <BankAccountsModal
+        isOpen={isBankAccountsModalOpen}
+        onClose={() => {
+          setIsBankAccountsModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
 
       {/* ─── INTERNAL FUNDS TRANSFER (CONTRA) MODAL ─── */}
       <TransferFundsModal
         isOpen={isTransferModalOpen}
-        onClose={() => setIsTransferModalOpen(false)}
-        onSuccess={() => fetchAllReports()}
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          fetchAllReports(true);
+        }}
+        onSuccess={() => fetchAllReports(true)}
       />
     </div>
   );
