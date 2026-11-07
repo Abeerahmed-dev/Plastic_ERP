@@ -18,7 +18,7 @@ interface CartItem {
   productName: string;
   name_urdu?: string | null;
   category?: string;
-  quantity: number;
+  quantity: number | string;
   selected_unit: string;
   unit_price: number;
   fixed_retail_price_per_kg: number;
@@ -99,9 +99,9 @@ export default function POSPage() {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
         const existing = prev[existingIndex];
-        if (existing.quantity >= stockKg) return prev;
+        if (Number(existing.quantity) >= stockKg) return prev;
         return prev.map((item, idx) =>
-          idx === existingIndex ? { ...item, quantity: item.quantity + 1 } : item,
+          idx === existingIndex ? { ...item, quantity: (Number(item.quantity) || 0) + 1 } : item,
         );
       }
 
@@ -159,7 +159,7 @@ export default function POSPage() {
   const hasCreditBalance = customerBalance < 0;
   const availableCredit = hasCreditBalance ? Math.abs(customerBalance) : 0;
 
-  const subtotal = cart.reduce((acc, item) => acc + item.quantity * item.unit_price, 0);
+  const subtotal = cart.reduce((acc, item) => acc + (Number(item.quantity) || 0) * item.unit_price, 0);
   const effectiveDiscount = isCashier ? 0 : discount;
   const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
@@ -174,7 +174,7 @@ export default function POSPage() {
 
   const isCartValid =
     cart.length > 0 &&
-    cart.every((item) => item.quantity > 0);
+    cart.every((item) => Number(item.quantity) > 0);
 
   const checkoutMutation = useMutation({
     mutationFn: () =>
@@ -182,7 +182,7 @@ export default function POSPage() {
         customer_id: selectedCustomerId || undefined,
         items: cart.map((i) => ({
           product_id: i.product_id,
-          quantity: i.quantity,
+          quantity: Number(i.quantity) || 0,
           selected_unit: i.selected_unit,
           unit_price: i.unit_price,
         })),
@@ -659,14 +659,22 @@ export default function POSPage() {
 
                       <input
                         type="number"
-                        min={1}
-                        value={item.quantity}
-                        onChange={(e) =>
+                        step="any"
+                        min={0.001}
+                        value={item.quantity === '' ? '' : item.quantity}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const val = e.target.value;
                           updateCartItem(item.product_id, {
-                            quantity: Math.max(1, parseInt(e.target.value) || 1),
-                          })
-                        }
-                        className="w-12 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+                            quantity: val === '' ? '' : (parseFloat(val) || 0),
+                          });
+                        }}
+                        onBlur={() => {
+                          if (item.quantity === '' || Number(item.quantity) <= 0) {
+                            updateCartItem(item.product_id, { quantity: 1 });
+                          }
+                        }}
+                        className="w-14 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
                       />
 
                       <span className="text-[11px] text-slate-500 font-semibold font-mono dark:text-slate-400">
@@ -676,7 +684,7 @@ export default function POSPage() {
 
                     <div className="text-right shrink-0">
                       <span className="text-xs font-black text-slate-900 block font-mono dark:text-white">
-                        Rs. {(item.quantity * item.unit_price).toLocaleString()}
+                        Rs. {((Number(item.quantity) || 0) * item.unit_price).toLocaleString()}
                       </span>
                     </div>
                   </div>

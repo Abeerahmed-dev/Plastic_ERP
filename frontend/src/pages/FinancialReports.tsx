@@ -399,9 +399,14 @@ export default function FinancialReports() {
             <span className="font-semibold text-slate-300 dark:text-slate-400">Total Liquid Funds (Cash + Bank):</span>
             <span className="font-bold text-emerald-400 text-base">{formatPKR(liquidityLedger?.total_liquid)}</span>
           </div>
-          <div className="flex items-center gap-2 border-t sm:border-t-0 sm:border-l border-slate-700 dark:border-slate-800 pt-2 sm:pt-0 sm:pl-4">
-            <span className="font-bold text-slate-200 dark:text-slate-300">Net Business Capital:</span>
-            <span className="font-black text-xl text-blue-400 dark:text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
+          <div className="flex flex-col sm:items-end border-t sm:border-t-0 sm:border-l border-slate-700 dark:border-slate-800 pt-2 sm:pt-0 sm:pl-4">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-200 dark:text-slate-300">Net Business Capital:</span>
+              <span className="font-black text-xl text-blue-400 dark:text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
+            </div>
+            <span className="text-[10px] text-teal-300/80 dark:text-teal-400/80 font-mono">
+              (Liquid + Udhaar + Stock + Sup Advance) − (Payables + Cust Advance)
+            </span>
           </div>
         </div>
       </div>

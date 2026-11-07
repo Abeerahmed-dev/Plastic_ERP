@@ -332,9 +332,14 @@ export function LiquidityLedger() {
             <span className="text-slate-300 dark:text-slate-400 font-medium">Liquid (Cash + Bank)</span>
             <span className="font-mono font-bold text-emerald-400 text-sm">{formatPKR(liquidityLedger?.total_liquid)}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-slate-300 dark:text-slate-400 font-medium">Net Capital:</span>
-            <span className="font-black text-base text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
+          <div className="flex flex-col sm:items-end">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-300 dark:text-slate-400 font-medium">Net Capital:</span>
+              <span className="font-black text-base text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
+            </div>
+            <span className="text-[10px] text-teal-200/80 dark:text-teal-400/80 font-mono">
+              (Liquid + Udhaar + Stock + Sup Advance) − (Payables + Cust Advance)
+            </span>
           </div>
         </div>
       </div>
