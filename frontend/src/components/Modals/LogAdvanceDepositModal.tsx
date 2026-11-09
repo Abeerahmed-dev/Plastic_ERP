@@ -222,7 +222,7 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
                   <option value="">Select a customer...</option>
                   {customersList.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.code})
+                      {c.name} {c.city ? `(${c.city})` : ''}
                     </option>
                   ))}
                 </select>
@@ -233,8 +233,8 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Customer</p>
                     <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
-                    {activeCustomer?.code && (
-                      <p className="text-xs text-slate-400 font-mono">({activeCustomer.code})</p>
+                    {activeCustomer?.city && (
+                      <p className="text-xs text-slate-400 font-mono">({activeCustomer.city})</p>
                     )}
                   </div>
                   <div className="text-right">
@@ -262,7 +262,7 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
                 <option value="">Select a supplier...</option>
                 {suppliersList.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} ({s.code})
+                    {s.name} {s.city ? `(${s.city})` : ''}
                   </option>
                 ))}
               </select>
@@ -273,8 +273,8 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
                 <div>
                   <p className="text-xs font-semibold text-slate-600">Supplier</p>
                   <p className="text-sm font-bold text-slate-900">{activeSupplier?.name}</p>
-                  {activeSupplier?.code && (
-                    <p className="text-xs text-slate-400 font-mono">({activeSupplier.code})</p>
+                  {activeSupplier?.city && (
+                    <p className="text-xs text-slate-400 font-mono">({activeSupplier.city})</p>
                   )}
                 </div>
                 <div className="text-right">

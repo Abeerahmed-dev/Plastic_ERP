@@ -2,7 +2,8 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
-import { UnauthorizedError } from '../../shared/errors';
+import { ValidationError, UnauthorizedError } from '../../shared/errors';
+import { sendPasswordResetEmail } from '../../services/mail.service';
 import {
   findUserByEmail,
   findUserById,
@@ -10,6 +11,10 @@ import {
   findRefreshToken,
   revokeRefreshToken,
   revokeAllUserRefreshTokens,
+  savePasswordResetToken,
+  findPasswordResetToken,
+  markPasswordResetTokenUsed,
+  updateUserPassword,
 } from './auth.repository';
 
 export interface LoginResult {
@@ -168,5 +173,78 @@ export async function getMe(userId: string): Promise<MeResult> {
     email: user.email || '',
     role: user.role_name || '',
     permissions: user.permissions,
+  };
+}
+
+/**
+ * Forgot Password — generate a secure reset token and send reset email.
+ */
+export async function forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+  const normalizedEmail = email.toLowerCase().trim();
+  const user = await findUserByEmail(normalizedEmail);
+
+  const genericMessage = 'If your email is registered in our system, a password reset link has been sent. Please check your inbox.';
+
+  if (!user || !user.is_active || !user.email) {
+    return {
+      success: true,
+      message: genericMessage,
+    };
+  }
+
+  // Generate 64-char hex random token
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  await savePasswordResetToken(user.id, tokenHash, expiresAt);
+
+  const resetUrl = `${env.FRONTEND_URL.replace(/\/$/, '')}/reset-password?token=${rawToken}`;
+  await sendPasswordResetEmail(user.email, resetUrl, user.name);
+
+  return {
+    success: true,
+    message: genericMessage,
+  };
+}
+
+/**
+ * Reset Password — verify reset token and update user's password.
+ */
+export async function resetPassword(
+  token: string,
+  newPassword: string,
+): Promise<{ success: boolean; message: string }> {
+  if (!token?.trim()) {
+    throw new ValidationError('Password reset token is required');
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new ValidationError('New password must be at least 6 characters');
+  }
+
+  const tokenHash = hashToken(token.trim());
+  const tokenRecord = await findPasswordResetToken(tokenHash);
+
+  if (!tokenRecord) {
+    throw new ValidationError('Invalid or expired password reset link. Please request a new one.');
+  }
+
+  // Hash new password with bcrypt
+  const saltRounds = 10;
+  const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+
+  // Update password in DB
+  await updateUserPassword(tokenRecord.user_id, newPasswordHash);
+
+  // Invalidate this reset token
+  await markPasswordResetTokenUsed(tokenHash);
+
+  // Revoke all existing sessions/refresh tokens for security
+  await revokeAllUserRefreshTokens(tokenRecord.user_id);
+
+  return {
+    success: true,
+    message: 'Your password has been reset successfully. You can now login with your new password.',
   };
 }

@@ -354,7 +354,7 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
                   ) : (
                     availableCustomers.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name} ({c.code}) — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
+                        {c.name} {c.city ? `(${c.city})` : ''} — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
                       </option>
                     ))
                   )}
@@ -366,8 +366,8 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
                   <div>
                     <p className="text-xs font-semibold text-slate-600">Customer</p>
                     <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
-                    {activeCustomer?.code && (
-                      <p className="text-xs text-slate-400 font-mono">({activeCustomer.code})</p>
+                    {activeCustomer?.city && (
+                      <p className="text-xs text-slate-400 font-mono">({activeCustomer.city})</p>
                     )}
                   </div>
                   <div className="text-right">
@@ -400,7 +400,7 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
                 ) : (
                   availableSuppliers.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} ({s.code}) — Wallet: {formatCurrency(Number((s as any).advance_payable || 0))}
+                      {s.name} {s.city ? `(${s.city})` : ''} — Wallet: {formatCurrency(Number((s as any).advance_payable || 0))}
                     </option>
                   ))
                 )}
@@ -412,8 +412,8 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
                 <div>
                   <p className="text-xs font-semibold text-slate-600">Supplier</p>
                   <p className="text-sm font-bold text-slate-900">{activeSupplier?.name}</p>
-                  {activeSupplier?.code && (
-                    <p className="text-xs text-slate-400 font-mono">({activeSupplier.code})</p>
+                  {activeSupplier?.city && (
+                    <p className="text-xs text-slate-400 font-mono">({activeSupplier.city})</p>
                   )}
                 </div>
                 <div className="text-right">

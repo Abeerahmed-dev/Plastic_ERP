@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
+import { verifyRole } from '../../middleware/requireRole';
 import {
   listIncomingPdcsController,
   createIncomingPdcController,
@@ -12,8 +13,8 @@ const router = Router();
 router.use(requireAuth);
 
 router.get('/', listIncomingPdcsController);
-router.post('/', createIncomingPdcController);
-router.post('/:id/clear', clearIncomingPdcController);
-router.post('/:id/bounce', bounceIncomingPdcController);
+router.post('/', verifyRole(['OWNER', 'ADMIN', 'CASHIER', 'ACCOUNTANT']), createIncomingPdcController);
+router.post('/:id/clear', verifyRole(['OWNER', 'ADMIN', 'ACCOUNTANT']), clearIncomingPdcController);
+router.post('/:id/bounce', verifyRole(['OWNER', 'ADMIN', 'ACCOUNTANT']), bounceIncomingPdcController);
 
 export default router;

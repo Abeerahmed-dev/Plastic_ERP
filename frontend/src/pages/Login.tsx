@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -159,12 +159,12 @@ export const Login = () => {
               </div>
 
               <div className="text-sm">
-                <a
-                  href="#"
-                  className="font-medium text-blue-300 hover:text-white transition-colors drop-shadow"
+                <Link
+                  to="/forgot-password"
+                  className="font-medium text-blue-300 hover:text-white transition-colors drop-shadow cursor-pointer"
                 >
                   Forgot your password?
-                </a>
+                </Link>
               </div>
             </div>
 

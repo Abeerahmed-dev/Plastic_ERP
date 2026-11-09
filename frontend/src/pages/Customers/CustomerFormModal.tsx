@@ -13,7 +13,7 @@ const schema = z.object({
   phone: z.string().max(30).optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   address: z.string().optional(),
-  city: z.string().optional(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required'),
   region: z.enum(['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other']).optional(),
   credit_limit: z.coerce.number().min(0).default(0),
   opening_balance: z.coerce.number().min(0).default(0),
@@ -130,8 +130,9 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
 
             {/* City */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
-              <input {...register('city')} placeholder="Karachi" className={inputCls(false)} />
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">City <span className="text-red-500">*</span></label>
+              <input {...register('city')} placeholder="Karachi" className={inputCls(!!errors.city)} />
+              {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
             </div>
 
             {/* Day-Zero Dual Financial Inputs */}

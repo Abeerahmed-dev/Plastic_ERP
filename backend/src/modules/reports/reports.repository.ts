@@ -1350,7 +1350,8 @@ export async function getInventoryValuationReport() {
         'c.name as category',
         'p.total_stock_kg',
         'p.rolling_avg_cost_per_kg',
-        'p.cost_price'
+        'p.cost_price',
+        'p.low_stock_threshold'
       )
       .orderBy('p.name', 'asc');
 
@@ -1468,6 +1469,12 @@ export async function getInventoryValuationReport() {
       const profit = salesData.revenue - salesData.cogs;
       const all_time_gross_margin = salesData.revenue > 0 ? Math.round((profit / salesData.revenue) * 10000) / 100 : 0;
 
+      const low_stock_threshold = Math.round(Number(r.low_stock_threshold || 0) * 100) / 100;
+      const is_low_stock = low_stock_threshold > 0 ? stock_on_hand <= low_stock_threshold : stock_on_hand <= 0;
+      const deficit_kg = low_stock_threshold > 0 && stock_on_hand < low_stock_threshold
+        ? Math.max(0, Math.round((low_stock_threshold - stock_on_hand) * 100) / 100)
+        : 0;
+
       return {
         id: r.id,
         product_name: r.product_name || 'Unnamed Product',
@@ -1479,6 +1486,9 @@ export async function getInventoryValuationReport() {
         current_wac,
         asset_value,
         total_asset_value: asset_value,
+        low_stock_threshold,
+        is_low_stock,
+        deficit_kg,
         buckets,
         lifetime_kg_sold,
         lifetime_kg_acquired,

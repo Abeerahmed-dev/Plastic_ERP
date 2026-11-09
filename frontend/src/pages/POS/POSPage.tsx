@@ -397,14 +397,14 @@ export default function POSPage() {
                   <optgroup label="Cash Customers" className="dark:bg-[#161925] dark:text-slate-200">
                     {customers.filter((c) => c.customer_type === 'CASH').map((c) => (
                       <option key={c.id} value={c.id} className="dark:bg-[#161925] dark:text-white">
-                        {c.name} ({c.code || c.phone || 'Cash Customer'})
+                        {c.name} {c.city ? `(${c.city})` : ''}
                       </option>
                     ))}
                   </optgroup>
                   <optgroup label="Credit Accounts (Udhaar)" className="dark:bg-[#161925] dark:text-slate-200">
                     {customers.filter((c) => c.customer_type === 'CREDIT').map((c) => (
                       <option key={c.id} value={c.id} className="dark:bg-[#161925] dark:text-white">
-                        {c.name} ({c.code || c.phone || 'Credit Account'})
+                        {c.name} {c.city ? `(${c.city})` : ''}
                       </option>
                     ))}
                   </optgroup>

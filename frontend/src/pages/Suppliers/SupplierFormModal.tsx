@@ -15,7 +15,7 @@ const PAKISTAN_CITIES = [
 
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
-  city: z.string().optional(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required'),
   payment_terms: z.coerce.number().int().min(0).default(30),
   opening_payable: z.coerce.number().min(0).default(0),
   opening_advance: z.coerce.number().min(0).default(0),
@@ -98,13 +98,14 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">City <span className="text-red-500">*</span></label>
               <input
                 list="pakistan-cities"
                 {...register('city')}
                 placeholder="e.g. Karachi, Lahore, Gujranwala"
-                className={inputCls(false)}
+                className={inputCls(!!errors.city)}
               />
+              {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
               <datalist id="pakistan-cities">
                 {PAKISTAN_CITIES.map((c) => (
                   <option key={c} value={c} />

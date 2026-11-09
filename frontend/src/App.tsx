@@ -3,6 +3,8 @@ import { Toaster } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
 import { Dashboard } from './pages/Dashboard';
 import ProductsListPage from './pages/Products/ProductsListPage';
 import CategoriesPage from './pages/Categories/CategoriesPage';
@@ -56,6 +58,8 @@ function App() {
       />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>

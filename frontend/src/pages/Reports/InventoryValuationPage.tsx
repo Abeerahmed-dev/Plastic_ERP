@@ -16,10 +16,15 @@ import {
   History,
   CheckCircle2,
   CircleDot,
+  AlertTriangle,
+  Edit3,
+  ShieldAlert,
 } from 'lucide-react';
 import { reportsService, InventoryValuationData, InventoryValuationItem, FifoBucketItem } from '../../services/reports.service';
 import { useAuthStore } from '../../store/auth.store';
 import { UpdateStockModal } from './UpdateStockModal';
+import { UpdateThresholdModal } from './UpdateThresholdModal';
+import { LowStockWidget } from '../../components/Dashboard/LowStockWidget';
 
 interface ProductGroup {
   groupKey: string;
@@ -27,17 +32,24 @@ interface ProductGroup {
   variants: InventoryValuationItem[];
   totalGroupStock: number;
   totalGroupAssetValue: number;
+  hasLowStock: boolean;
+  lowStockCount: number;
+  totalThreshold: number;
 }
 
 export default function InventoryValuationPage() {
   const { user } = useAuthStore();
-  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
+  const role = (user?.roleName || user?.role || '').toUpperCase();
+  const isCashier = role === 'CASHIER';
+  const isAccountant = role === 'ACCOUNTANT';
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [sortField, setSortField] = useState<'asset_value' | 'current_stock_kg' | 'product_name'>('asset_value');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [isUpdateStockOpen, setIsUpdateStockOpen] = useState<boolean>(false);
+  const [showLowStockOnly, setShowLowStockOnly] = useState<boolean>(false);
+  const [editingThresholdProduct, setEditingThresholdProduct] = useState<InventoryValuationItem | null>(null);
 
   // Two-tier Accordion expansion state: Level 1 (Group) & Level 2 (Variant)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -83,13 +95,18 @@ export default function InventoryValuationPage() {
 
     // Filter products
     const filtered = data.products.filter((p) => {
+      const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
+      const threshold = Number(p.low_stock_threshold || 0);
+      const isLow = Boolean(p.is_low_stock || (threshold > 0 && stockKg <= threshold) || stockKg <= 0);
+
       const matchesSearch =
         p.product_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.size && p.size.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = selectedCategory === 'ALL' || p.category === selectedCategory;
+      const matchesLowStock = !showLowStockOnly || isLow;
 
-      return matchesSearch && matchesCategory;
+      return matchesSearch && matchesCategory && matchesLowStock;
     });
 
     // Reduce into groups by normalized product_name
@@ -99,6 +116,8 @@ export default function InventoryValuationPage() {
       const normalizedName = p.product_name.trim().toLowerCase();
       const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
       const assetVal = p.total_asset_value !== undefined ? p.total_asset_value : p.asset_value || 0;
+      const threshold = Number(p.low_stock_threshold || 0);
+      const isLow = Boolean(p.is_low_stock || (threshold > 0 && stockKg <= threshold) || stockKg <= 0);
 
       if (!groupMap.has(normalizedName)) {
         groupMap.set(normalizedName, {
@@ -107,6 +126,9 @@ export default function InventoryValuationPage() {
           variants: [],
           totalGroupStock: 0,
           totalGroupAssetValue: 0,
+          hasLowStock: false,
+          lowStockCount: 0,
+          totalThreshold: 0,
         });
       }
 
@@ -114,6 +136,11 @@ export default function InventoryValuationPage() {
       group.variants.push(p);
       group.totalGroupStock += stockKg;
       group.totalGroupAssetValue += assetVal;
+      group.totalThreshold += threshold;
+      if (isLow) {
+        group.hasLowStock = true;
+        group.lowStockCount += 1;
+      }
     });
 
     // Sort groups based on sortField & sortOrder
@@ -140,7 +167,7 @@ export default function InventoryValuationPage() {
     });
 
     return groupsArray;
-  }, [data?.products, searchQuery, selectedCategory, sortField, sortOrder]);
+  }, [data?.products, searchQuery, selectedCategory, sortField, sortOrder, showLowStockOnly]);
 
   const expandAll = () => {
     if (!groupedProducts) return;
@@ -162,17 +189,24 @@ export default function InventoryValuationPage() {
   };
 
   const stats = useMemo(() => {
-    if (!data?.products) return { totalProducts: 0, totalWeightKg: 0 };
+    if (!data?.products) return { totalProducts: 0, totalWeightKg: 0, lowStockCount: 0 };
     let totalWeight = 0;
+    let lowStockCount = 0;
 
     data.products.forEach((p) => {
       const stockKg = p.stock_on_hand !== undefined ? p.stock_on_hand : p.current_stock_kg || 0;
       totalWeight += stockKg;
+      const threshold = Number(p.low_stock_threshold || 0);
+      const isLow = Boolean(p.is_low_stock || (threshold > 0 && stockKg <= threshold) || stockKg <= 0);
+      if (isLow) {
+        lowStockCount += 1;
+      }
     });
 
     return {
       totalProducts: data.products.length,
       totalWeightKg: totalWeight,
+      lowStockCount,
     };
   }, [data?.products]);
 
@@ -227,6 +261,9 @@ export default function InventoryValuationPage() {
         </div>
       </div>
 
+      {/* ─── LOW STOCK EARLY WARNINGS WIDGET (ACCOUNTANT ONLY) ─────── */}
+      {isAccountant && <LowStockWidget />}
+
       {/* ─── ERROR STATE ────────────────────────────────────────── */}
       {isError && (
         <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm flex items-center justify-between">
@@ -257,25 +294,74 @@ export default function InventoryValuationPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
-                <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
-                  <Package className="w-3.5 h-3.5 text-blue-400" /> Active Products
+            {isAccountant ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
+                  <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-blue-400" /> Active Products
+                  </div>
+                  <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
+                    {stats.totalProducts}
+                  </div>
                 </div>
-                <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
-                  {stats.totalProducts}
-                </div>
-              </div>
 
-              <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
-                <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-emerald-400" /> Total Stock Weight
+                <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
+                  <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-emerald-400" /> Total Stock Weight
+                  </div>
+                  <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
+                    {stats.totalWeightKg.toLocaleString(undefined, { maximumFractionDigits: 1 })} KG
+                  </div>
                 </div>
-                <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
-                  {stats.totalWeightKg.toLocaleString(undefined, { maximumFractionDigits: 1 })} KG
+
+                <button
+                  type="button"
+                  onClick={() => setShowLowStockOnly((prev) => !prev)}
+                  className={`text-left p-3.5 rounded-xl border backdrop-blur-md transition-all cursor-pointer ${
+                    showLowStockOnly
+                      ? 'bg-amber-500/20 border-amber-500 ring-2 ring-amber-500/30'
+                      : stats.lowStockCount > 0
+                      ? 'bg-amber-950/40 border-amber-600/60 hover:border-amber-500'
+                      : 'bg-slate-800/80 dark:bg-[#161925]/90 border-slate-700 dark:border-[#23283B]'
+                  }`}
+                  title="Click to toggle low stock filter"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className={`text-xs font-medium flex items-center gap-1.5 ${stats.lowStockCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                      <AlertTriangle className={`w-3.5 h-3.5 ${stats.lowStockCount > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-400'}`} /> Low Stock Alerts
+                    </div>
+                    {stats.lowStockCount > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-200">
+                        {showLowStockOnly ? 'Filtered' : 'Action'}
+                      </span>
+                    )}
+                  </div>
+                  <div className={`text-lg font-bold font-mono mt-1 tabular-nums ${stats.lowStockCount > 0 ? 'text-amber-300' : 'text-white'}`}>
+                    {stats.lowStockCount} {stats.lowStockCount === 1 ? 'Variant' : 'Variants'}
+                  </div>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
+                  <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-blue-400" /> Active Products
+                  </div>
+                  <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
+                    {stats.totalProducts}
+                  </div>
+                </div>
+
+                <div className="bg-slate-800/80 dark:bg-[#161925]/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-700 dark:border-[#23283B]">
+                  <div className="text-slate-400 text-xs font-medium flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-emerald-400" /> Total Stock Weight
+                  </div>
+                  <div className="text-lg font-bold font-mono text-white mt-1 tabular-nums">
+                    {stats.totalWeightKg.toLocaleString(undefined, { maximumFractionDigits: 1 })} KG
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -314,6 +400,52 @@ export default function InventoryValuationPage() {
               </select>
             </div>
           </div>
+
+          {/* Quick Filter Buttons & Accordion Toggles (Accountant Only) */}
+          {isAccountant && (
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowLowStockOnly(false)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                  !showLowStockOnly
+                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm'
+                    : 'bg-white dark:bg-[#161925] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                All Items
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLowStockOnly(true)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                  showLowStockOnly
+                    ? 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
+                    : stats.lowStockCount > 0
+                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/60 hover:bg-amber-100'
+                    : 'bg-white dark:bg-[#161925] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>Low Stock Alerts ({stats.lowStockCount})</span>
+              </button>
+              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-1" />
+              <button
+                type="button"
+                onClick={expandAll}
+                className="px-2.5 py-1.5 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Expand All
+              </button>
+              <button
+                type="button"
+                onClick={collapseAll}
+                className="px-2.5 py-1.5 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                Collapse
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Table Content */}
@@ -355,6 +487,12 @@ export default function InventoryValuationPage() {
                       <ArrowUpDown className="h-3 w-3" />
                     </button>
                   </th>
+
+                  {isAccountant && (
+                    <th className="py-3.5 px-4 text-right uppercase tracking-wider text-[11px] font-bold">
+                      Threshold (KG)
+                    </th>
+                  )}
 
                   <th className="py-3.5 px-4 text-right uppercase tracking-wider text-[11px] font-bold">
                     Rolling Cost (WAC/KG)
@@ -432,6 +570,12 @@ export default function InventoryValuationPage() {
                             >
                               {variantCount} {variantCount === 1 ? 'Variant' : 'Variants'}
                             </span>
+                            {isAccountant && group.hasLowStock && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                                <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                                {group.lowStockCount} Low Stock
+                              </span>
+                            )}
                           </div>
                         </td>
 
@@ -440,8 +584,8 @@ export default function InventoryValuationPage() {
                           <span
                             className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
                               isGroupExpanded
-                                ? 'bg-slate-800 text-slate-200 border border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700'
-                                : 'bg-slate-200/80 text-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border dark:border-slate-700/60'
+                                  ? 'bg-slate-800 text-slate-200 border border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border-slate-700'
+                                  : 'bg-slate-200/80 text-slate-700 dark:bg-slate-800/80 dark:text-slate-300 dark:border dark:border-slate-700/60'
                             }`}
                           >
                             {categoryDisplay}
@@ -456,6 +600,21 @@ export default function InventoryValuationPage() {
                           })}{' '}
                           KG
                         </td>
+
+                        {/* Group Threshold (Accountant Only) */}
+                        {isAccountant && (
+                          <td className="py-3.5 px-4 text-right font-mono text-xs sm:text-sm tabular-nums">
+                            {variantCount > 1 ? (
+                              <span className="text-slate-400 dark:text-slate-500 text-xs">
+                                {group.totalThreshold > 0 ? `${group.totalThreshold.toLocaleString(undefined, { minimumFractionDigits: 1 })} KG (Total)` : 'Not set'}
+                              </span>
+                            ) : (
+                              <span className={group.variants[0]?.low_stock_threshold ? 'font-semibold' : 'text-slate-400 italic'}>
+                                {group.variants[0]?.low_stock_threshold ? `${Number(group.variants[0].low_stock_threshold).toLocaleString(undefined, { minimumFractionDigits: 1 })} KG` : 'Not set'}
+                              </span>
+                            )}
+                          </td>
+                        )}
 
                         {/* Master WAC Column: Display "Multiple" or single WAC */}
                         <td
@@ -509,6 +668,9 @@ export default function InventoryValuationPage() {
                               ? Math.min(100, Math.max(0, Math.round((kgSold / kgAcquired) * 100)))
                               : 0;
 
+                          const variantThreshold = Number(product.low_stock_threshold || 0);
+                          const isVariantLow = Boolean(product.is_low_stock || (variantThreshold > 0 && stockKg <= variantThreshold) || stockKg <= 0);
+
                           return (
                             <Fragment key={product.id}>
                               {/* LEVEL 2: VARIANT SUB-ROW */}
@@ -539,7 +701,7 @@ export default function InventoryValuationPage() {
 
                                 {/* Size / Variant Label & Product Code */}
                                 <td className="py-3 px-4 sm:px-6">
-                                  <div className="flex items-center gap-2 pl-4 border-l-2 border-slate-300 dark:border-slate-700">
+                                  <div className="flex items-center gap-2 pl-4 border-l-2 border-slate-300 dark:border-slate-700 flex-wrap">
                                     <span className="font-semibold text-slate-800 dark:text-white text-xs sm:text-sm">
                                       {product.size ? `Size: ${product.size}` : product.product_name}
                                     </span>
@@ -547,6 +709,21 @@ export default function InventoryValuationPage() {
                                       <span className="inline-block text-[11px] font-mono text-slate-700 dark:text-slate-300 bg-slate-200 dark:bg-slate-800 dark:border dark:border-slate-700/60 px-2 py-0.5 rounded font-bold">
                                         {product.code}
                                       </span>
+                                    )}
+                                    {isAccountant && (
+                                      stockKg <= 0 ? (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800">
+                                          <AlertTriangle className="w-2.5 h-2.5" /> Out of Stock
+                                        </span>
+                                      ) : isVariantLow ? (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-300 dark:border-amber-700">
+                                          <AlertTriangle className="w-2.5 h-2.5" /> Low Stock
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
+                                          Healthy
+                                        </span>
+                                      )
                                     )}
                                   </div>
                                 </td>
@@ -560,12 +737,51 @@ export default function InventoryValuationPage() {
 
                                 {/* Variant Stock on Hand */}
                                 <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums font-semibold text-slate-800 dark:text-white">
-                                  {stockKg.toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}{' '}
-                                  KG
+                                  <div>
+                                    {stockKg.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}{' '}
+                                    KG
+                                  </div>
+                                  {isAccountant && variantThreshold > 0 && stockKg <= variantThreshold && (
+                                    <div className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 font-sans">
+                                      Deficit: {Math.max(0, Math.round((variantThreshold - stockKg) * 10) / 10)} KG
+                                    </div>
+                                  )}
                                 </td>
+
+                                {/* Variant Low Stock Threshold (Accountant Only) */}
+                                {isAccountant && (
+                                  <td className="py-3 px-4 text-right">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <span
+                                        className={`font-mono text-xs sm:text-sm tabular-nums font-semibold ${
+                                          variantThreshold > 0
+                                            ? 'text-slate-800 dark:text-slate-200'
+                                            : 'text-slate-400 dark:text-slate-500 italic'
+                                        }`}
+                                      >
+                                        {variantThreshold > 0
+                                          ? `${variantThreshold.toLocaleString(undefined, {
+                                              minimumFractionDigits: 1,
+                                            })} KG`
+                                          : 'Not set'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingThresholdProduct(product);
+                                        }}
+                                        className="p-1 rounded-md text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition cursor-pointer"
+                                        title="Edit Low Stock Threshold"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                )}
 
                                 {/* Variant Rolling Cost WAC */}
                                 <td className="py-3 px-4 text-right font-mono text-xs sm:text-sm tabular-nums text-slate-700 dark:text-slate-300">
@@ -591,7 +807,7 @@ export default function InventoryValuationPage() {
                               {/* LEVEL 3: FIFO BUCKETS & TURNOVER */}
                               {isRowExpanded && (
                                 <tr className="bg-slate-100/90 dark:bg-[#0c0e17] border-b border-slate-200 dark:border-[#23283B] shadow-inner">
-                                  <td colSpan={6} className="p-4 sm:p-6 pl-12 sm:pl-16 space-y-6">
+                                  <td colSpan={isAccountant ? 7 : 6} className="p-4 sm:p-6 pl-12 sm:pl-16 space-y-6">
                                     {/* Sub-Row Header */}
                                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-[#23283B] pb-3">
                                       <div className="flex items-center gap-2">
@@ -769,6 +985,14 @@ export default function InventoryValuationPage() {
         <UpdateStockModal
           isOpen={isUpdateStockOpen}
           onClose={() => setIsUpdateStockOpen(false)}
+        />
+      )}
+
+      {isAccountant && (
+        <UpdateThresholdModal
+          isOpen={!!editingThresholdProduct}
+          onClose={() => setEditingThresholdProduct(null)}
+          product={editingThresholdProduct}
         />
       )}
     </div>

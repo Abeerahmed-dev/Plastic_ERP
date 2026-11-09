@@ -34,6 +34,10 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       setError('Customer name is required');
       return;
     }
+    if (!city.trim()) {
+      setError('City is required');
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -143,10 +147,11 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
-                City (Optional)
+                City <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
                 placeholder="e.g. Karachi"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}

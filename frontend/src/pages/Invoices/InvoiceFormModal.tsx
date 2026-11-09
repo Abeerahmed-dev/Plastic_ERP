@@ -379,7 +379,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess }: Props) =
                 <select {...register('customer_id')} className={inputCls(!!errors.customer_id)}>
                   <option value="">Select a customer...</option>
                   {customersResponse?.data.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                    <option key={c.id} value={c.id}>{c.name} {c.city ? `(${c.city})` : ''}</option>
                   ))}
                 </select>
                 {errors.customer_id && <p className="mt-1 text-xs text-red-600">{errors.customer_id.message}</p>}

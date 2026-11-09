@@ -7,7 +7,7 @@ export const createCustomerSchema = z.object({
   phone: z.string().max(30).optional().nullable(),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable(),
-  city: z.string().max(100).optional().nullable(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required').max(100),
   region: z.enum(REGIONS).optional().nullable(),
   customer_type: z.enum(['CASH', 'CREDIT']).default('CREDIT'),
   credit_limit: z.coerce.number().min(0).default(0),

@@ -713,12 +713,12 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                   {isSupplier
                     ? suppliers.map((supplier) => (
                         <option key={supplier.id} value={supplier.id}>
-                          {supplier.name} {supplier.code ? `(${supplier.code})` : ''}
+                          {supplier.name} {supplier.city ? `(${supplier.city})` : ''}
                         </option>
                       ))
                     : customers.map((customer) => (
                         <option key={customer.id} value={customer.id}>
-                          {customer.name} {customer.code ? `(${customer.code})` : ''}
+                          {customer.name} {customer.city ? `(${customer.city})` : ''}
                         </option>
                       ))}
                 </select>
@@ -850,7 +850,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                     <option value="">Select Target Supplier...</option>
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} ({s.code}) — Balance: Rs. {(Number(s?.outstanding_payable ?? (s as any)?.outstanding_balance) || 0).toLocaleString()}
+                        {s.name} {s.city ? `(${s.city})` : ''} — Balance: Rs. {(Number(s?.outstanding_payable ?? (s as any)?.outstanding_balance) || 0).toLocaleString()}
                       </option>
                     ))}
                   </select>
