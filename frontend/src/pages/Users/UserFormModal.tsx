@@ -214,7 +214,7 @@ export const UserFormModal = ({
         <div className="overflow-y-auto px-6 py-6 flex-1">
           <form id="employee-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
             
-            {/* ─── SECTION 1: HR DETAILS ────────────────────────────── */}
+            {/* â”€â”€â”€ SECTION 1: HR DETAILS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4 space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-200/60 pb-2">
                 <Briefcase className="h-4 w-4 text-blue-600" />
@@ -327,7 +327,7 @@ export const UserFormModal = ({
               </div>
             </div>
 
-            {/* ─── SECTION 2: SYSTEM ACCESS ─────────────────────────── */}
+            {/* â”€â”€â”€ SECTION 2: SYSTEM ACCESS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="rounded-xl border border-slate-200/80 bg-slate-50/40 p-4 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
                 <div className="flex items-center gap-2">
@@ -387,7 +387,7 @@ export const UserFormModal = ({
                     <input
                       {...register('password')}
                       type="password"
-                      placeholder={initialData ? 'Leave empty to keep existing password' : '••••••••'}
+                      placeholder={initialData ? 'Leave empty to keep existing password' : 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢'}
                       className={inputCls(!!errors.password)}
                     />
                     {errors.password && (
@@ -407,11 +407,13 @@ export const UserFormModal = ({
                     </label>
                     <select {...register('role_id')} className={inputCls(!!errors.role_id)}>
                       <option value="">Select a system role...</option>
-                      {roles.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
+                      {roles
+                        .filter((r) => r.name.toLowerCase() !== 'warehouse')
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
                     </select>
                     {errors.role_id && (
                       <p className="mt-1 text-xs text-rose-600">{errors.role_id.message}</p>

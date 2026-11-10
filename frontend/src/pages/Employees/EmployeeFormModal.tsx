@@ -12,6 +12,7 @@ interface EmployeeFormModalProps {
 
 const COMMON_DESIGNATIONS = [
   'Cashier',
+  'Accountant',
   'Labour',
   'Store Keeper',
   'Gaurd',
@@ -183,9 +184,9 @@ export const EmployeeFormModal = ({
                 onChange={(e) => setStatus(e.target.value as EmployeeStatus)}
                 className="w-full rounded-xl border border-slate-300 py-2.5 px-3.5 text-sm font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
-                <option value="ACTIVE">🟢 Active on Duty</option>
-                <option value="ON_LEAVE">🟡 On Leave / Temporary</option>
-                <option value="INACTIVE">🔴 Inactive / Left</option>
+                <option value="ACTIVE">ðŸŸ¢ Active on Duty</option>
+                <option value="ON_LEAVE">ðŸŸ¡ On Leave / Temporary</option>
+                <option value="INACTIVE">ðŸ”´ Inactive / Left</option>
               </select>
             </div>
           </div>
