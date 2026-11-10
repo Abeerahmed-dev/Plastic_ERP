@@ -38,16 +38,22 @@ export interface ProductWithStock extends ProductRow {
 export async function generateProductCode(): Promise<string> {
   const result = await db('products')
     .whereILike('code', 'PROD-%')
-    .max('code as max_code')
-    .first<{ max_code: string | null }>();
+    .select('code');
 
-  if (!result?.max_code) {
+  if (!result || result.length === 0) {
     return 'PROD-0001';
   }
 
-  const parts = result.max_code.split('-');
-  const num = parseInt(parts[1] ?? '0', 10);
-  const nextNum = isNaN(num) ? 1 : num + 1;
+  let maxNum = 0;
+  for (const row of result) {
+    const parts = (row.code || '').split('-');
+    const num = parseInt(parts[1] ?? '0', 10);
+    if (!isNaN(num) && num > maxNum) {
+      maxNum = num;
+    }
+  }
+
+  const nextNum = maxNum + 1;
   return `PROD-${String(nextNum).padStart(4, '0')}`;
 }
 
@@ -175,8 +181,9 @@ export async function createProduct(
   data: CreateProductInput,
   createdBy?: string | null,
 ): Promise<ProductWithStock> {
-  const code = (data.code && data.code.trim().length > 0)
-    ? data.code.trim()
+  const rawCode = (data as any).product_code || data.code;
+  const code = (rawCode && String(rawCode).trim().length > 0)
+    ? String(rawCode).trim()
     : await generateProductCode();
   const initialStock = data.opening_stock_kg !== undefined
     ? Number(data.opening_stock_kg)

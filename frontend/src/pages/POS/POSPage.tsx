@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Search, ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy, Clock, PauseCircle, Play } from 'lucide-react';
 import { productsService } from '../../services/products.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
+import { offlineVaultService } from '../../services/offline-vault.service';
 import { reportsService } from '../../services/reports.service';
 import { getCustomers } from '../../services/customers.service';
 import { useAuthStore } from '../../store/auth.store';
@@ -48,9 +50,34 @@ export default function POSPage() {
   const [slipMode, setSlipMode] = useState<'SINGLE' | 'DUPLICATE'>('SINGLE');
 
   const [lastInvoice, setLastInvoice] = useState<any>(null);
+  const [offlinePendingCount, setOfflinePendingCount] = useState<number>(0);
 
   const queryClient = useQueryClient();
   const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Track pending offline vault records & register auto-sync listener
+  useEffect(() => {
+    offlineVaultService.getPendingCount().then(setOfflinePendingCount);
+
+    const handleOnline = async () => {
+      try {
+        const count = await offlineVaultService.getPendingCount();
+        if (count > 0) {
+          toast.info('Connection restored. Syncing offline invoices...');
+          await offlineVaultService.syncOfflineInvoices();
+          const newCount = await offlineVaultService.getPendingCount();
+          setOfflinePendingCount(newCount);
+          toast.success('Offline invoices synchronized successfully!');
+          queryClient.invalidateQueries({ queryKey: ['posProducts'] });
+        }
+      } catch (err) {
+        console.error('Offline auto-sync error:', err);
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [queryClient]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -233,6 +260,7 @@ export default function POSPage() {
       setSelectedCustomerId('');
       setSelectedBankAccountId('');
       printThermalReceipt(receiptData);
+      toast.success('Sale completed successfully!');
 
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['posProducts'] });
@@ -249,10 +277,75 @@ export default function POSPage() {
       useReportStore.getState().fetchLiquidityLedger();
       useReportStore.getState().fetchAllReports();
     },
-    onError: (err: any) => {
+    onError: async (err: any) => {
+      const isNetworkErr =
+        (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        err?.code === 'ERR_NETWORK' ||
+        err?.message?.includes('Network') ||
+        err?.message?.includes('Failed to fetch');
+
+      if (isNetworkErr) {
+        await handleOfflineCheckout();
+        return;
+      }
       alert(err?.response?.data?.error || err.message || 'Checkout failed');
     },
   });
+
+  const handleOfflineCheckout = async () => {
+    try {
+      const orderData = {
+        customer_id: selectedCustomerId || undefined,
+        items: cart.map((i) => ({
+          product_id: i.product_id,
+          quantity: Number(i.quantity) || 0,
+          selected_unit: i.selected_unit,
+          unit_price: i.unit_price,
+        })),
+        discount: effectiveDiscount,
+        amount_paid: effectiveAmountPaid,
+        payment_method: paymentMethod,
+        bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
+        split_cash_amount: isSplit ? effectiveSplitCash : undefined,
+        split_bank_amount: isSplit ? effectiveSplitBank : undefined,
+      };
+
+      await offlineVaultService.saveOfflineInvoice(orderData);
+
+      // State Assertion: Cashier local UI stock quantity decrements immediately to prevent blind overselling
+      queryClient.setQueriesData({ queryKey: ['posProducts'] }, (oldData: any) => {
+        if (!Array.isArray(oldData)) return oldData;
+        return oldData.map((prod: any) => {
+          const cartItem = cart.find((c) => c.product_id === prod.id);
+          if (!cartItem) return prod;
+          const soldQty = Number(cartItem.quantity) || 0;
+          const curStock = Number(prod.total_stock_kg ?? prod.current_stock ?? 0);
+          const nextStock = Math.max(0, curStock - soldQty);
+          return {
+            ...prod,
+            total_stock_kg: nextStock,
+            current_stock: nextStock,
+          };
+        });
+      });
+
+      const newCount = await offlineVaultService.getPendingCount();
+      setOfflinePendingCount(newCount);
+
+      setCart([]);
+      setDiscount(0);
+      setAmountPaid('');
+      setSplitCashAmount('');
+      setSplitBankAmount('');
+      setSelectedCustomerId('');
+      setSelectedBankAccountId('');
+
+      toast.warning('Offline Sync Pending: Sale saved in local vault');
+    } catch (err: any) {
+      console.error('Failed to store offline checkout:', err);
+      toast.error('Failed to save offline sale');
+    }
+  };
 
   // Hold Order Mutation
   const createHeldOrderMutation = useMutation({
@@ -378,6 +471,25 @@ export default function POSPage() {
               )}
             </div>
           </div>
+
+          {/* Offline Sync Pending Warning Banner */}
+          {offlinePendingCount > 0 && (
+            <div
+              data-testid="offline-sync-banner"
+              className="mb-2 px-3.5 py-2.5 bg-amber-500/15 border border-amber-500/80 rounded-xl text-amber-500 flex items-center justify-between shadow-2xs shrink-0 animate-pulse"
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="font-bold text-xs uppercase tracking-wide">Offline Sync Pending</span>
+                <span className="text-[11px] text-amber-400 font-medium">
+                  ({offlinePendingCount} invoice{offlinePendingCount > 1 ? 's' : ''} stored locally in vault)
+                </span>
+              </div>
+              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 uppercase">
+                Vault Active
+              </span>
+            </div>
+          )}
 
           {/* TOP: Direct Side-by-Side Customer Selection (Left) & Product Search (Right) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-2.5 shrink-0">
@@ -1052,6 +1164,12 @@ export default function POSPage() {
                     return;
                   }
                 }
+
+                if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                  handleOfflineCheckout();
+                  return;
+                }
+
                 checkoutMutation.mutate();
               }}
               disabled={!isCartValid || checkoutMutation.isPending}

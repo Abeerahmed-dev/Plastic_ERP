@@ -42,7 +42,11 @@ export interface LiquidityLedgerData {
   total_accounts_payable: number;
   customer_advances_liability?: number;
   supplier_advances_asset?: number;
+  pending_expenses_liability?: number;
+  pending_opex_liability?: number;
   total_liquid: number;
+  total_assets?: number;
+  total_liabilities?: number;
   net_business_capital: number;
   total_market_capital: number;
 }

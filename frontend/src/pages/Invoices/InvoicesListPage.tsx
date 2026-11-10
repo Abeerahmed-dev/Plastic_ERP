@@ -43,6 +43,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 20;
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<'ALL' | 'ADMIN' | 'CASHIER'>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
@@ -162,10 +163,17 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
     resetFilters,
   } = useCascadingFilters(normalizedInvoices);
 
+  const handleResetFilters = () => {
+    resetFilters();
+    setSelectedStatus('All');
+    setCurrentPage(1);
+  };
+
   const handleTabChange = (tab: 'erp' | 'pos' | 'all') => {
     setActiveTab(tab);
     setCurrentPage(1);
     setSelectedRoleFilter('ALL');
+    setSelectedStatus('All');
     resetFilters();
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -217,9 +225,23 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
       const matchesCity = selectedCity ? row.city === selectedCity : true;
       const matchesName = selectedName ? row.name === selectedName : true;
       const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
-      return matchesCity && matchesName && matchesInvoice;
+
+      const isReturned =
+        Boolean(row.has_returns) ||
+        Number(row.returned_quantity || 0) > 0 ||
+        (Array.isArray(row.linked_credit_notes) && row.linked_credit_notes.length > 0) ||
+        Number(row.linked_returns_total || 0) > 0;
+
+      let matchesStatus = true;
+      if (selectedStatus === 'Returned') {
+        matchesStatus = isReturned;
+      } else if (selectedStatus === 'Standard') {
+        matchesStatus = !isReturned;
+      }
+
+      return matchesCity && matchesName && matchesInvoice && matchesStatus;
     });
-  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice]);
+  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice, selectedStatus]);
 
   const totalPages = Math.ceil(filteredTableRows.length / PAGE_SIZE) || 1;
   const paginatedInvoices = filteredTableRows.slice(
@@ -309,16 +331,15 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                 {activeTab === 'pos'
                   ? 'POS Sale Invoices (Retail Counter)'
                   : activeTab === 'erp'
-                  ? 'ERP Sales Invoices & Credit Notes'
-                  : 'All Sales Invoices'}
+                    ? 'ERP Sales Invoices & Credit Notes'
+                    : 'All Sales Invoices'}
               </h1>
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                activeTab === 'pos'
-                  ? 'bg-amber-100 text-amber-900 border-amber-300'
-                  : activeTab === 'erp'
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${activeTab === 'pos'
+                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                : activeTab === 'erp'
                   ? 'bg-blue-100 text-blue-900 border-blue-300'
                   : 'bg-slate-100 text-slate-800 border-slate-300'
-              }`}>
+                }`}>
                 {activeTab === 'pos' ? `${posCount} POS Bills` : activeTab === 'erp' ? `${erpCount} ERP Invoices` : `${allCount} Total Invoices`}
               </span>
             </div>
@@ -326,8 +347,8 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
               {activeTab === 'pos'
                 ? 'Walk-in cash-and-carry retail counter sales history with instant thermal slip printing.'
                 : activeTab === 'erp'
-                ? 'B2B commercial sales invoices, customer ledger balances, and strict invoice-anchored credit notes.'
-                : 'Unified view of commercial B2B sales and retail POS sales history.'}
+                  ? 'B2B commercial sales invoices, customer ledger balances, and strict invoice-anchored credit notes.'
+                  : 'Unified view of commercial B2B sales and retail POS sales history.'}
             </p>
           </div>
         </div>
@@ -378,50 +399,44 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
             <button
               type="button"
               onClick={() => { setSelectedRoleFilter('ALL'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedRoleFilter === 'ALL'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60 dark:text-slate-400 hover:dark:text-white hover:dark:bg-slate-800/60'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${selectedRoleFilter === 'ALL'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60 dark:text-slate-400 hover:dark:text-white hover:dark:bg-slate-800/60'
+                }`}
             >
               <span>All</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                selectedRoleFilter === 'ALL' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-700'
-              }`}>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${selectedRoleFilter === 'ALL' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-700'
+                }`}>
                 {roleCounts.all}
               </span>
             </button>
             <button
               type="button"
               onClick={() => { setSelectedRoleFilter('ADMIN'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedRoleFilter === 'ADMIN'
-                  ? 'bg-purple-700 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-purple-700 hover:bg-purple-50/60 dark:text-slate-400 hover:dark:text-purple-300 hover:dark:bg-purple-950/40'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${selectedRoleFilter === 'ADMIN'
+                ? 'bg-purple-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-purple-700 hover:bg-purple-50/60 dark:text-slate-400 hover:dark:text-purple-300 hover:dark:bg-purple-950/40'
+                }`}
             >
               <ShieldCheck className="w-3.5 h-3.5 text-purple-300" />
               <span>Admin / Owner</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                selectedRoleFilter === 'ADMIN' ? 'bg-purple-800 text-purple-100' : 'bg-purple-100 text-purple-800'
-              }`}>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${selectedRoleFilter === 'ADMIN' ? 'bg-purple-800 text-purple-100' : 'bg-purple-100 text-purple-800'
+                }`}>
                 {roleCounts.admin}
               </span>
             </button>
             <button
               type="button"
               onClick={() => { setSelectedRoleFilter('CASHIER'); setCurrentPage(1); }}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
-                selectedRoleFilter === 'CASHIER'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50/60 dark:text-slate-400 hover:dark:text-blue-300 hover:dark:bg-blue-950/40'
-              }`}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${selectedRoleFilter === 'CASHIER'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50/60 dark:text-slate-400 hover:dark:text-blue-300 hover:dark:bg-blue-950/40'
+                }`}
             >
               <User className="w-3.5 h-3.5 text-blue-300" />
               <span>Cashier</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                selectedRoleFilter === 'CASHIER' ? 'bg-blue-700 text-blue-100' : 'bg-blue-100 text-blue-800'
-              }`}>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${selectedRoleFilter === 'CASHIER' ? 'bg-blue-700 text-blue-100' : 'bg-blue-100 text-blue-800'
+                }`}>
                 {roleCounts.cashier}
               </span>
             </button>
@@ -445,13 +460,18 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
           selectedCity={selectedCity}
           selectedName={selectedName}
           selectedInvoice={selectedInvoice}
+          selectedStatus={selectedStatus}
           onCityChange={(c) => { setSelectedCity(c); setCurrentPage(1); }}
           onNameChange={(n) => { setSelectedName(n); setCurrentPage(1); }}
           onInvoiceChange={(inv) => { setSelectedInvoice(inv); setCurrentPage(1); }}
+          onStatusChange={(st) => { setSelectedStatus(st); setCurrentPage(1); }}
           availableCities={availableCities}
           availableNames={availableNames}
           availableInvoices={availableInvoices}
-          onReset={() => { resetFilters(); setCurrentPage(1); }}
+          statusOptions={['All', 'Standard', 'Returned']}
+          showStatus={true}
+          statusLabel="Status"
+          onReset={handleResetFilters}
           showInvoice={true}
           nameLabel={activeTab === 'pos' ? 'Walk-in / Customer' : 'Customer'}
           namePlaceholder={activeTab === 'pos' ? 'Filter by POS customer…' : 'Filter by customer…'}
@@ -502,34 +522,34 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
               ) : filteredTableRows.length === 0 ? (
                 <tr>
                   <td colSpan={activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
-                    {selectedCity || selectedName || selectedInvoice
+                    {selectedCity || selectedName || selectedInvoice || selectedStatus !== 'All'
                       ? 'No invoices match the active cascading filters. Try resetting filters.'
                       : selectedRoleFilter !== 'ALL'
-                      ? `No invoices generated by ${selectedRoleFilter === 'CASHIER' ? 'Cashier' : 'Admin / Owner'} found.`
-                      : activeTab === 'pos'
-                      ? 'No POS sale invoices found.'
-                      : activeTab === 'erp'
-                      ? 'No ERP sales invoices found.'
-                      : 'No invoices found.'}
+                        ? `No invoices generated by ${selectedRoleFilter === 'CASHIER' ? 'Cashier' : 'Admin / Owner'} found.`
+                        : activeTab === 'pos'
+                          ? 'No POS sale invoices found.'
+                          : activeTab === 'erp'
+                            ? 'No ERP sales invoices found.'
+                            : 'No invoices found.'}
                   </td>
                 </tr>
               ) : (
                 paginatedInvoices.map((invoice) => {
                   const isPos = String(invoice.invoice_number || '').startsWith('POS-') || (invoice.notes && invoice.notes.includes('POS'));
                   const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
+                  const hasReturns = Boolean(invoice.has_returns) || Number((invoice as any).returned_quantity || 0) > 0 || (Array.isArray((invoice as any).linked_credit_notes) && (invoice as any).linked_credit_notes.length > 0) || Number((invoice as any).linked_returns_total || 0) > 0;
                   const balanceDue = Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0));
                   const isPrinting = printingInvoiceId === invoice.id;
 
                   return (
                     <tr
                       key={invoice.id}
-                      className={`transition-colors ${
-                        isCreditNote
-                          ? 'bg-red-50/70 border-l-4 border-l-red-500'
-                          : isPos
+                      className={`transition-colors ${isCreditNote
+                        ? 'bg-red-50/70 border-l-4 border-l-red-500'
+                        : isPos
                           ? 'hover:bg-amber-50/30 hover:dark:bg-[#1a1710]'
                           : 'hover:bg-slate-50/50 hover:dark:bg-[#151928]'
-                      }`}
+                        }`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
@@ -538,13 +558,12 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                             className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 hover:dark:bg-purple-950/40 hover:dark:ring-1 hover:dark:ring-purple-500/30 transition-colors cursor-pointer"
                             title="Click to view detailed line items"
                           >
-                            <div className={`h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl group-hover:scale-105 transition-all shadow-xs ${
-                              isCreditNote
-                                ? 'bg-red-100 text-red-700'
-                                : isPos
+                            <div className={`h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl group-hover:scale-105 transition-all shadow-xs ${isCreditNote
+                              ? 'bg-red-100 text-red-700'
+                              : isPos
                                 ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400'
                                 : 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400'
-                            }`}>
+                              }`}>
                               {isCreditNote ? (
                                 <RotateCcw className="h-5 w-5" />
                               ) : isPos ? (
@@ -554,14 +573,21 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                               )}
                             </div>
                             <div className="ml-3">
-                              <div className={`text-sm font-bold font-mono group-hover:underline flex items-center gap-1.5 ${
-                                isCreditNote
-                                  ? 'text-red-900 group-hover:text-red-700 dark:text-rose-300 group-hover:dark:text-rose-200'
-                                  : isPos
+                              <div className={`text-sm font-bold font-mono group-hover:underline flex items-center gap-1.5 ${isCreditNote
+                                ? 'text-red-900 group-hover:text-red-700 dark:text-rose-300 group-hover:dark:text-rose-200'
+                                : isPos
                                   ? 'text-amber-950 group-hover:text-amber-700 dark:text-amber-300 group-hover:dark:text-amber-200'
                                   : 'text-slate-900 group-hover:text-purple-700 dark:text-white group-hover:dark:text-purple-300'
-                              }`}>
+                                }`}>
                                 <span>{invoice.invoice_number}</span>
+                                {hasReturns && (
+                                  <span
+                                    className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200"
+                                    title="Customer return processed for this sales invoice"
+                                  >
+                                    Returned
+                                  </span>
+                                )}
                                 {isPos && (
                                   <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-200/80 text-amber-900">
                                     POS

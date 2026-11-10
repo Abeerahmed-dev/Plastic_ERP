@@ -91,13 +91,16 @@ export async function getBankAccountBalanceDetail(
     .sum('e.amount as total')
     .first();
 
-  // 4. Bank transactions table (excluding OPEX rows which are already tracked via expenses table)
+  // 4. Bank transactions table (excluding OPEX rows which are already tracked via expenses table, and excluding duplicate payment entries)
   const hasBankTx = await trx.schema.hasTable('bank_transactions');
   const manualQuery = hasBankTx
     ? trx('bank_transactions')
         .where('bank_account_id', accountId)
         .where((qb) => {
-          qb.whereNull('source').orWhere('source', '!=', 'OPEX');
+          qb.whereNull('source').orWhereNotIn('source', ['OPEX', 'PAYMENT', 'SUPPLIER_PAYMENT', 'SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
+        })
+        .where((qb) => {
+          qb.whereNull('category').orWhereNotIn('category', ['SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
         })
     : Promise.resolve([]);
 
@@ -394,8 +397,9 @@ export interface BankTransactionItem {
   description: string;
   type: 'INFLOW' | 'OUTFLOW';
   transaction_type: 'DEPOSIT' | 'WITHDRAWAL';
-  source: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
-  source_type: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
+  source: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW' | 'SUPPLIER_PAYMENT' | 'SUPPLIER_ADVANCE';
+  source_type: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW' | 'SUPPLIER_PAYMENT' | 'SUPPLIER_ADVANCE';
+  category?: string;
   amount: number;
   running_balance: number;
 }
@@ -450,6 +454,7 @@ export async function getBankAccountTransactions(
   // 2. Supplier Payments (Outflows)
   const suppQuery = db('supplier_payments as sp')
     .leftJoin('suppliers as s', 'sp.supplier_id', 's.id')
+    .leftJoin('purchase_invoices as pi', 'sp.purchase_invoice_id', 'pi.id')
     .where((qb) => {
       qb.whereIn('sp.payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
         .orWhere((inner) => {
@@ -469,7 +474,11 @@ export async function getBankAccountTransactions(
       'sp.amount',
       'sp.payment_date',
       'sp.created_at',
-      's.name as supplier_name'
+      'sp.payment_type',
+      'sp.purchase_invoice_id',
+      'sp.notes',
+      's.name as supplier_name',
+      'pi.invoice_number'
     );
 
   // 3. Expenses Paid via Bank (Outflows)
@@ -494,15 +503,18 @@ export async function getBankAccountTransactions(
       'e.created_at'
     );
 
-  // 4. Day Zero Capital Injections / Bank Transactions (excluding OPEX rows which are tracked via expenses)
+  // 4. Day Zero Capital Injections / Bank Transactions (excluding OPEX rows which are tracked via expenses, and excluding duplicate payment entries)
   const hasBankTx = await db.schema.hasTable('bank_transactions');
   const manualQuery = hasBankTx
     ? db('bank_transactions')
         .where('bank_account_id', accountId)
         .where((qb) => {
-          qb.whereNull('source').orWhere('source', '!=', 'OPEX');
+          qb.whereNull('source').orWhereNotIn('source', ['OPEX', 'PAYMENT', 'SUPPLIER_PAYMENT', 'SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
         })
-        .select('id', 'amount', 'transaction_date', 'description', 'type', 'created_at')
+        .where((qb) => {
+          qb.whereNull('category').orWhereNotIn('category', ['SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
+        })
+        .select('id', 'amount', 'transaction_date', 'description', 'type', 'category', 'created_at')
     : Promise.resolve([]);
 
   const [custRows, suppRows, expRows, manualRows] = await Promise.all([custQuery, suppQuery, expQuery, manualQuery]);
@@ -514,8 +526,9 @@ export async function getBankAccountTransactions(
     description: string;
     type: 'INFLOW' | 'OUTFLOW';
     transaction_type: 'DEPOSIT' | 'WITHDRAWAL';
-    source: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
-    source_type: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
+    source: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW' | 'SUPPLIER_PAYMENT' | 'SUPPLIER_ADVANCE';
+    source_type: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW' | 'SUPPLIER_PAYMENT' | 'SUPPLIER_ADVANCE';
+    category?: string;
     amount: number;
   }[] = [];
 
@@ -532,6 +545,7 @@ export async function getBankAccountTransactions(
       transaction_type: isDeposit ? 'DEPOSIT' : 'WITHDRAWAL',
       source: isDeposit ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
       source_type: isDeposit ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
+      category: m.category || (isDeposit ? 'EQUITY' : 'OUTFLOW'),
       amount: Math.round(Number(m.amount || 0) * 100) / 100,
     });
   }
@@ -559,6 +573,7 @@ export async function getBankAccountTransactions(
       transaction_type: 'DEPOSIT',
       source,
       source_type: source,
+      category: isPos ? 'POS' : 'CUSTOMER_PAYMENT',
       amount: Math.round(Number(c.amount || 0) * 100) / 100,
     });
   }
@@ -566,15 +581,24 @@ export async function getBankAccountTransactions(
   for (const s of suppRows) {
     const rawDate = s.payment_date ? new Date(s.payment_date) : new Date(s.created_at || Date.now());
     const dateStr = rawDate.toISOString().split('T')[0];
+    const isAdvance = !s.purchase_invoice_id || s.payment_type === 'ADVANCE_DEPOSIT';
+    const supplierName = s.supplier_name || 'Vendor';
+    const dynamicDescription = isAdvance
+      ? `Advance Deposit to Supplier: ${supplierName}`
+      : `Payment to Supplier: ${supplierName}${s.invoice_number ? ` for Invoice #${s.invoice_number}` : ''}`;
+    const description = s.notes || dynamicDescription;
+    const category = isAdvance ? 'SUPPLIER_ADVANCE' : 'SUPPLIER_PAYMENT';
+
     rawTxList.push({
       id: s.id,
       rawDate,
       dateStr,
-      description: `Payment to Supplier: ${s.supplier_name || 'Vendor'}`,
+      description,
       type: 'OUTFLOW',
       transaction_type: 'WITHDRAWAL',
-      source: 'OUTFLOW',
-      source_type: 'OUTFLOW',
+      source: isAdvance ? 'SUPPLIER_ADVANCE' : 'OUTFLOW',
+      source_type: isAdvance ? 'SUPPLIER_ADVANCE' : 'OUTFLOW',
+      category,
       amount: Math.round(Number(s.amount || 0) * 100) / 100,
     });
   }
@@ -619,6 +643,7 @@ export async function getBankAccountTransactions(
       transaction_type: tx.transaction_type,
       source: tx.source,
       source_type: tx.source_type,
+      category: tx.category,
       amount: tx.amount,
       running_balance: currBalance,
     };

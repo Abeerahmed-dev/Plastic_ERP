@@ -34,6 +34,10 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
       setError('Customer name is required');
       return;
     }
+    if (!city.trim()) {
+      setError('City is required');
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -43,7 +47,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         name: name.trim(),
         customer_type: customerType,
         phone: phone.trim() || undefined,
-        city: city.trim() || undefined,
+        city: city.trim(),
         address: address.trim() || undefined,
         credit_limit: isCashier ? 0 : creditLimit,
         opening_balance: 0,
@@ -90,7 +94,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
+        <form onSubmit={handleSubmit} autoComplete="off" className="p-6 flex flex-col gap-4">
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-center gap-2 dark:bg-red-950/40 dark:border-red-800 dark:text-red-300">
               <AlertCircle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
@@ -106,6 +110,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
               <input
                 type="text"
                 required
+                autoComplete="off"
                 placeholder="e.g. Ali Grocery or Ahmed Raza"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -133,6 +138,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             </label>
             <input
               type="text"
+              autoComplete="off"
               placeholder="e.g. 0300-1234567"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -143,10 +149,12 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1 dark:text-slate-300">
-                City (Optional)
+                City <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
+                required
+                autoComplete="off"
                 placeholder="e.g. Karachi"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
@@ -162,6 +170,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                 <input
                   type="number"
                   min={0}
+                  autoComplete="off"
                   placeholder="0"
                   value={creditLimit}
                   onChange={(e) => setCreditLimit(parseFloat(e.target.value) || 0)}
@@ -177,6 +186,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
                   type="text"
                   disabled
                   readOnly
+                  autoComplete="off"
                   value="0 (Cash Locked)"
                   className="w-full py-2.5 px-3.5 rounded-xl border border-slate-200 bg-slate-100 text-slate-500 text-xs font-semibold cursor-not-allowed dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
                 />
@@ -190,6 +200,7 @@ export const AddCustomerModal: React.FC<AddCustomerModalProps> = ({
             </label>
             <input
               type="text"
+              autoComplete="off"
               placeholder="e.g. Market Area, Shop #4"
               value={address}
               onChange={(e) => setAddress(e.target.value)}

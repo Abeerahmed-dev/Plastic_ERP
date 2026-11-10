@@ -28,6 +28,7 @@ async function listAndClean() {
       'cash_drawer_ledger',
       'bank_transactions',
       'incoming_pdcs',
+      'sales_invoice_item_batches',
       'sales_invoice_items',
       'sales_invoices',
       'purchase_invoice_items',
@@ -101,6 +102,7 @@ async function listAndClean() {
     const verificationTables = [
       'sales_invoices',
       'sales_invoice_items',
+      'sales_invoice_item_batches',
       'purchase_invoices',
       'purchase_invoice_items',
       'customer_payments',

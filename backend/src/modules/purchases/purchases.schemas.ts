@@ -29,8 +29,11 @@ export const createPurchaseInvoiceSchema = z.object({
 });
 
 export const updatePurchaseInvoiceSchema = z.object({
-  status: z.enum(['UNPAID', 'PARTIAL', 'PAID']).optional(),
+  status: z.enum(['UNPAID', 'PARTIAL', 'PAID', 'RETURNED', 'CANCELLED']).optional(),
   paid_amount: z.number().min(0).optional(),
+  balance_due: z.number().optional(),
+  total_amount: z.number().optional(),
+  has_returns: z.boolean().optional(),
 });
 
 export const updateStockDcAndPricesSchema = z.object({

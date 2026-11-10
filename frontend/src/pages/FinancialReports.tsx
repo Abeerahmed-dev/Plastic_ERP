@@ -30,7 +30,7 @@ import { BankAccountsModal } from '../components/Reports/BankAccountsModal';
 import { TransferFundsModal } from '../components/Modals/TransferFundsModal';
 
 interface LiquidityModalData {
-  type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances';
+  type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances' | 'pending-expenses';
   title: string;
   items: any[];
 }
@@ -93,7 +93,7 @@ export default function FinancialReports() {
   const safeInventory = Array.isArray(inventoryLedger) ? inventoryLedger : [];
 
   // Open Interactive Liquidity Drill-Down Modal
-  const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc' | 'customer-advances' | 'supplier-advances') => {
+  const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc' | 'customer-advances' | 'supplier-advances' | 'pending-expenses') => {
     if (type === 'pdc') {
       setIsPdcModalOpen(true);
       return;
@@ -109,6 +109,9 @@ export default function FinancialReports() {
     } else if (type === 'payables') {
       title = 'Accounts Payable Detail (Money Owed to Suppliers)';
       endpoint = '/reports/liquidity/payables';
+    } else if (type === 'pending-expenses') {
+      title = 'Pending OPEX Liability Detail (Unpaid Operational Expenses)';
+      endpoint = '/reports/liquidity/pending-expenses';
     } else if (type === 'unsold-stock') {
       title = 'Unsold Warehouse Stock Asset Detail';
       endpoint = '/reports/liquidity/unsold-stock';
@@ -389,7 +392,38 @@ export default function FinancialReports() {
             <p className="text-2xl font-black text-rose-900 dark:text-rose-400">
               {formatPKR(liquidityLedger?.total_accounts_payable)}
             </p>
-            <p className="text-[11px] text-rose-800 font-medium underline dark:text-rose-400/80">Click to view supplier payables list →</p>
+            {Number(liquidityLedger?.pending_expenses_liability || 0) > 0 ? (
+              <p
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openLiquidityModal('pending-expenses');
+                }}
+                className="text-[11px] font-bold text-rose-800 underline dark:text-rose-300 hover:text-rose-900"
+              >
+                + {formatPKR(liquidityLedger?.pending_expenses_liability)} Pending OPEX Liability →
+              </p>
+            ) : (
+              <p className="text-[11px] text-rose-800 font-medium underline dark:text-rose-400/80">Click to view supplier payables list →</p>
+            )}
+          </button>
+
+          {/* Card 7: Pending OPEX Liability */}
+          <button
+            type="button"
+            onClick={() => openLiquidityModal('pending-expenses')}
+            className="w-full text-left rounded-2xl border border-rose-300 bg-rose-50/60 p-5 space-y-2 hover:ring-2 hover:ring-rose-400 cursor-pointer transition-all shadow-sm active:scale-[0.99] dark:bg-[#25101a] dark:border-rose-400/90 dark:shadow-[0_0_14px_rgba(244,63,94,0.4)] hover:dark:shadow-[0_0_20px_rgba(244,63,94,0.65)]"
+          >
+            <div className="flex items-center justify-between text-rose-800 dark:text-rose-300">
+              <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                Pending OPEX
+                <ExternalLink className="w-3.5 h-3.5" />
+              </span>
+              <DollarSign className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+            </div>
+            <p className="text-2xl font-black text-rose-800 dark:text-rose-300">
+              {formatPKR(liquidityLedger?.pending_expenses_liability)}
+            </p>
+            <p className="text-[11px] text-rose-700 font-medium underline dark:text-rose-400/80">Click to view pending expenses →</p>
           </button>
         </div>
 
@@ -405,7 +439,7 @@ export default function FinancialReports() {
               <span className="font-black text-xl text-blue-400 dark:text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
             </div>
             <span className="text-[10px] text-teal-300/80 dark:text-teal-400/80 font-mono">
-              (Liquid + Udhaar + Stock + Sup Advance) − (Payables + Cust Advance)
+              (Liquid + Udhaar + Stock + Sup Adv + Rec PDC) - (Payables + Cust Adv + Iss PDC) - Pending OPEX
             </span>
           </div>
         </div>
@@ -717,6 +751,45 @@ export default function FinancialReports() {
                               <td className="py-3 px-4 text-right font-mono text-slate-600 dark:text-slate-400">{formatPKR(row.total_billed)}</td>
                               <td className="py-3 px-4 text-right font-mono text-slate-600 dark:text-slate-400">{formatPKR(row.total_paid)}</td>
                               <td className="py-3 px-4 text-right font-bold text-teal-600 dark:text-cyan-300 font-mono">{formatPKR(row.advance_payable)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {modalData.type === 'pending-expenses' && (
+                      <>
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#161925] dark:text-slate-400 dark:border-[#23283B]">
+                          <tr>
+                            <th className="py-3 px-4">Expense Date</th>
+                            <th className="py-3 px-4">Category</th>
+                            <th className="py-3 px-4">Description / Notes</th>
+                            <th className="py-3 px-4 text-right">Total Amount</th>
+                            <th className="py-3 px-4 text-right">Paid</th>
+                            <th className="py-3 px-4 text-right">Pending Liability (PKR)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B]">
+                          {modalData.items.map((row: any) => (
+                            <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-[#181c2b]">
+                              <td className="py-3 px-4 font-mono text-xs text-slate-600 dark:text-slate-400">
+                                {new Date(row.expense_date).toLocaleDateString('en-PK')}
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
+                                {row.category}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 dark:text-slate-400 text-xs">
+                                {row.description}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600 dark:text-slate-400">
+                                {formatPKR(row.amount)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                                {formatPKR(row.paid_amount)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-bold text-rose-600 dark:text-rose-400 font-mono">
+                                {formatPKR(row.remaining_amount)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

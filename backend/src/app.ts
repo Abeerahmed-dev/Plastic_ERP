@@ -12,6 +12,7 @@ import suppliersRouter from './modules/suppliers/suppliers.router';
 import categoriesRouter from './modules/categories/categories.router';
 import productsRouter from './modules/products/products.router';
 import invoicesRouter from './modules/invoices/invoices.router';
+import { syncOfflineInvoices } from './modules/invoices/invoices.controller';
 import paymentsRouter from './modules/payments/payments.router';
 import advancesRouter from './modules/advances/advances.router';
 import refundsRouter from './modules/refunds/refunds.router';
@@ -69,6 +70,8 @@ export function createApp(): Application {
   app.use('/api/inventory', inventoryRouter);
   app.use('/api/v1/invoices', invoicesRouter);
   app.use('/api/invoices', invoicesRouter);
+  app.post('/api/v1/sync-offline', syncOfflineInvoices);
+  app.post('/api/sync-offline', syncOfflineInvoices);
   app.use('/api/v1/sales', invoicesRouter);
   app.use('/api/sales', invoicesRouter);
   app.use('/api/v1/purchases', purchasesRouter);

@@ -234,7 +234,7 @@ export function CascadingFilterBar({
               >
                 {statusOptions.map((opt) => (
                   <option key={opt} value={opt} className="text-slate-800">
-                    {opt === 'All' ? 'Filter by Status: All' : opt}
+                    {opt}
                   </option>
                 ))}
               </select>

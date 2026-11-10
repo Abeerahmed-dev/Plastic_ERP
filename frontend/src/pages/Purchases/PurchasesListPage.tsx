@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck } from 'lucide-react';
+import { Plus, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck, RotateCcw } from 'lucide-react';
 import { purchasesService } from '../../services/purchases.service';
 import { useAuthStore } from '../../store/auth.store';
 import PurchaseFormModal from './PurchaseFormModal';
@@ -102,6 +102,8 @@ export default function PurchasesListPage() {
   }, [invoices]);
 
   // Phase 1: Cascading filters hook
+  const [selectedStatus, setSelectedStatus] = useState<string>('All');
+
   const {
     selectedCity,
     selectedName,
@@ -115,15 +117,28 @@ export default function PurchasesListPage() {
     resetFilters,
   } = useCascadingFilters(normalizedInvoices);
 
+  const handleResetFilters = () => {
+    resetFilters();
+    setSelectedStatus('All');
+  };
+
   // Phase 3: Strict multi-condition filter before rendering
   const filteredTableRows = useMemo(() => {
     return normalizedInvoices.filter((row: any) => {
       const matchesCity = selectedCity ? row.city === selectedCity : true;
       const matchesName = selectedName ? row.name === selectedName : true;
       const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
-      return matchesCity && matchesName && matchesInvoice;
+
+      let matchesStatus = true;
+      if (selectedStatus === 'Returned') {
+        matchesStatus = Boolean(row.has_returns) || (Array.isArray(row.linked_debit_notes) && row.linked_debit_notes.length > 0) || Number(row.linked_returns_total || 0) > 0;
+      } else if (selectedStatus === 'Standard') {
+        matchesStatus = !row.has_returns && (!Array.isArray(row.linked_debit_notes) || row.linked_debit_notes.length === 0) && Number(row.linked_returns_total || 0) === 0;
+      }
+
+      return matchesCity && matchesName && matchesInvoice && matchesStatus;
     });
-  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice]);
+  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice, selectedStatus]);
 
   const handleOpenInvoice = async (id: string) => {
     try {
@@ -175,13 +190,18 @@ export default function PurchasesListPage() {
           selectedCity={selectedCity}
           selectedName={selectedName}
           selectedInvoice={selectedInvoice}
+          selectedStatus={selectedStatus}
           onCityChange={setSelectedCity}
           onNameChange={setSelectedName}
           onInvoiceChange={setSelectedInvoice}
+          onStatusChange={setSelectedStatus}
           availableCities={availableCities}
           availableNames={availableNames}
           availableInvoices={availableInvoices}
-          onReset={resetFilters}
+          statusOptions={['All', 'Standard', 'Returned']}
+          showStatus={true}
+          statusLabel="Status"
+          onReset={handleResetFilters}
           showInvoice={true}
           nameLabel="Supplier"
           namePlaceholder="Filter by supplier…"
@@ -207,11 +227,11 @@ export default function PurchasesListPage() {
         <div className="flex flex-col items-center justify-center py-16 rounded-2xl bg-white border border-slate-200 text-center">
           <FileText className="h-12 w-12 text-slate-300 mb-3" />
           <span className="text-slate-500 font-medium">
-            {selectedCity || selectedName || selectedInvoice
+            {selectedCity || selectedName || selectedInvoice || selectedStatus !== 'All'
               ? 'No purchase invoices match the active cascading filters. Try resetting filters.'
               : 'No purchase invoices found'}
           </span>
-          {canWrite && !selectedCity && !selectedName && !selectedInvoice && (
+          {canWrite && !selectedCity && !selectedName && !selectedInvoice && selectedStatus === 'All' && (
             <button
               onClick={() => setModalOpen(true)}
               className="mt-3 text-sm text-purple-600 hover:text-purple-700 font-semibold"
@@ -224,58 +244,143 @@ export default function PurchasesListPage() {
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+              <thead className="bg-slate-50/50 border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4 font-semibold">Invoice #</th>
-                  <th className="px-6 py-4 font-semibold">Date</th>
-                  <th className="px-6 py-4 font-semibold">Party / Supplier</th>
-                  <th className="px-6 py-4 font-semibold">Billed By</th>
-                  {!isCashier && <th className="px-6 py-4 font-semibold text-right">Total Amount</th>}
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    INVOICE #
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    SUPPLIER
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    BILLED BY
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    DATE
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    AMOUNT
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    BALANCE DUE
+                  </th>
+                  <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    ACTIONS
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredTableRows.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50 transition">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <button
-                          onClick={() => handleOpenInvoice(inv.id)}
-                          className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 hover:dark:bg-purple-950/40 hover:dark:ring-1 hover:dark:ring-purple-500/30 transition-colors cursor-pointer"
-                          title="Click to view purchase invoice details"
-                        >
-                          <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 dark:bg-purple-950/60 dark:text-purple-400 group-hover:dark:bg-purple-900/60 group-hover:scale-105 transition-all shadow-xs">
-                            <FileText className="h-4 w-4" />
-                          </div>
-                          <div className="ml-3">
-                            <div className="text-sm font-bold text-slate-900 group-hover:text-purple-700 dark:text-white group-hover:dark:text-purple-300 group-hover:underline font-mono">
-                              {inv.invoice_number}
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {filteredTableRows.map((inv) => {
+                  const isDebitNote = inv.invoice_type === 'DEBIT_NOTE' || inv.invoice_number?.startsWith('DN-');
+                  const hasReturns = Boolean(inv.has_returns) || (Array.isArray(inv.linked_debit_notes) && inv.linked_debit_notes.length > 0) || Number(inv.linked_returns_total || 0) > 0;
+                  const balanceDue = inv.balance_due !== undefined && inv.balance_due !== null
+                    ? Number(inv.balance_due)
+                    : Math.round((Number(inv.total_amount || 0) - Number(inv.paid_amount || 0)) * 100) / 100;
+
+                  return (
+                    <tr key={inv.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <button
+                            onClick={() => handleOpenInvoice(inv.id)}
+                            className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 hover:dark:bg-purple-950/40 hover:dark:ring-1 hover:dark:ring-purple-500/30 transition-colors cursor-pointer"
+                            title="Click to view purchase invoice details"
+                          >
+                            <div className="h-9 w-9 flex-shrink-0 flex items-center justify-center rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-200 dark:bg-purple-950/60 dark:text-purple-400 group-hover:dark:bg-purple-900/60 group-hover:scale-105 transition-all shadow-xs">
+                              <FileText className="h-4 w-4" />
                             </div>
-                          </div>
-                        </button>
-                        {isOwner && renderCreatorBadge(inv)}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-slate-600">{new Date(inv.date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-slate-900">{inv.supplier_name || 'Unknown'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium text-slate-800">
-                          {inv.creator?.name || inv.created_by_name || 'System'}
-                        </span>
-                        {isOwner && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                            {inv.created_by_role || inv.creator?.role || 'Staff'}
+                            <div className="ml-3 flex items-center">
+                              <span className="text-sm font-bold text-slate-900 group-hover:text-purple-700 dark:text-white group-hover:dark:text-purple-300 group-hover:underline font-mono">
+                                {inv.invoice_number}
+                              </span>
+                              {hasReturns && (
+                                <span
+                                  className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200"
+                                  title="Supplier return processed for this purchase invoice"
+                                >
+                                  Returned
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                          {isOwner && renderCreatorBadge(inv)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-slate-900">{inv.supplier_name || 'Unknown'}</div>
+                        {inv.supplier_code && <div className="text-xs text-slate-500">{inv.supplier_code}</div>}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-slate-800">
+                            {inv.creator?.name || inv.created_by_name || 'System'}
                           </span>
+                          {(() => {
+                            const role = (inv.created_by_role || inv.creator?.role || 'ADMIN').toUpperCase();
+                            if (role === 'CASHIER') {
+                              return (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                  Cashier
+                                </span>
+                              );
+                            }
+                            if (role === 'OWNER') {
+                              return (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                  Owner
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                Admin
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-slate-900">
+                          {new Date(inv.date || inv.created_at).toLocaleDateString()}
+                        </div>
+                        {inv.created_at && (
+                          <div className="text-[10px] text-slate-400">
+                            {new Date(inv.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
                         )}
-                      </div>
-                    </td>
-                    {!isCashier && (
-                      <td className="px-6 py-4 text-right font-medium text-slate-900">{formatRs(inv.total_amount)}</td>
-                    )}
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900">
+                        {formatRs(inv.total_amount)}
+                      </td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${balanceDue > 0 ? 'text-rose-600 font-bold' : 'text-slate-700'}`}>
+                        {formatRs(balanceDue)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-xs">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleOpenInvoice(inv.id)}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                            title="View Full Purchase Invoice Details"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Details</span>
+                          </button>
+
+                          {!isDebitNote && canWrite && (
+                            <button
+                              onClick={() => handleProcessReturn(inv.id)}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg border border-red-200 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                              title="Process Supplier Return & Issue Debit Note"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                              <span>↺ Return</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

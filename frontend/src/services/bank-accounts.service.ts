@@ -7,8 +7,9 @@ export interface BankTransactionItem {
   description: string;
   type: 'INFLOW' | 'OUTFLOW';
   transaction_type?: 'DEPOSIT' | 'WITHDRAWAL';
-  source?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
-  source_type?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
+  source?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW' | 'SUPPLIER_PAYMENT' | 'SUPPLIER_ADVANCE' | string;
+  source_type?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW' | 'SUPPLIER_PAYMENT' | 'SUPPLIER_ADVANCE' | string;
+  category?: string;
   amount: number;
   running_balance: number;
 }

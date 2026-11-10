@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import * as invoicesService from './invoices.service';
 import { createInvoiceSchema, createSalesReturnSchema } from './invoices.schemas';
+import { createExchangeSchema } from '../exchanges/exchanges.schemas';
+import * as exchangesService from '../exchanges/exchanges.service';
 import { ok } from '../../shared/apiResponse';
 import { ValidationError, ForbiddenError } from '../../shared/errors';
 
@@ -117,6 +119,31 @@ export async function getPendingDeliveries(req: Request, res: Response, next: Ne
   try {
     const deliveries = await invoicesService.getPendingDeliveries(req.query as any);
     res.json(ok(deliveries));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createInvoiceExchange(req: Request, res: Response, next: NextFunction) {
+  try {
+    const payload = createExchangeSchema.parse({
+      ...req.body,
+      invoice_id: req.params.id,
+    });
+    const userId = req.user?.id;
+    const exchange = await exchangesService.createExchange(payload, userId);
+    res.status(201).json(ok(exchange));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function syncOfflineInvoices(req: Request, res: Response, next: NextFunction) {
+  try {
+    const rawData = req.body;
+    const userId = (req as any).user?.id;
+    const synced = await invoicesService.syncOfflineInvoices(rawData, userId);
+    res.status(201).json(ok(synced));
   } catch (error) {
     next(error);
   }

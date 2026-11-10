@@ -55,7 +55,7 @@ async function allocateSupplierPaymentToInvoices(
     const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
     const currentAllocated = Number(allocRes?.total_allocated || 0);
     const invTotal = Number(invoice.total_amount || 0);
-    const netInvoiceTotal = invTotal - returnedTotal;
+    const netInvoiceTotal = Boolean(invoice.has_returns) ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
     const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
 
     if (remainingUnpaid <= 0 || amountToAllocate > remainingUnpaid) {
@@ -71,20 +71,27 @@ async function allocateSupplierPaymentToInvoices(
     }
 
     const newPaidAmount = currentAllocated + amountToAllocate;
+    const newBalanceDue = Math.round((netInvoiceTotal - newPaidAmount) * 100) / 100;
     let newStatus = 'UNPAID';
-    if (newPaidAmount >= netInvoiceTotal) {
+    if (newBalanceDue <= 0 || newPaidAmount >= netInvoiceTotal) {
       newStatus = 'PAID';
     } else if (newPaidAmount > 0) {
       newStatus = 'PARTIAL';
     }
 
+    const updatePayload: Record<string, any> = {
+      paid_amount: newPaidAmount,
+      status: newStatus,
+      updated_at: new Date(),
+    };
+    const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
+    if (hasBalanceDue) {
+      updatePayload.balance_due = newBalanceDue;
+    }
+
     await trx('purchase_invoices')
       .where('id', invoice.id)
-      .update({
-        paid_amount: newPaidAmount,
-        status: newStatus,
-        updated_at: new Date()
-      });
+      .update(updatePayload);
   } else {
     // ON-ACCOUNT PAYMENT: Automatically allocate FIFO across supplier's unpaid purchase invoices
     let remainingToAllocate = amountToAllocate;
@@ -128,7 +135,7 @@ async function allocateSupplierPaymentToInvoices(
       const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
       const currentAllocated = Number(allocRes?.total_allocated || 0);
       const invTotal = Number(inv.total_amount || 0);
-      const netInvoiceTotal = invTotal - returnedTotal;
+      const netInvoiceTotal = Boolean(inv.has_returns) ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
       const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
 
       if (remainingUnpaid > 0) {
@@ -140,20 +147,27 @@ async function allocateSupplierPaymentToInvoices(
         });
 
         const newPaidAmount = currentAllocated + allocationForThisInv;
+        const newBalanceDue = Math.round((netInvoiceTotal - newPaidAmount) * 100) / 100;
         let newStatus = 'UNPAID';
-        if (newPaidAmount >= netInvoiceTotal) {
+        if (newBalanceDue <= 0 || newPaidAmount >= netInvoiceTotal) {
           newStatus = 'PAID';
         } else if (newPaidAmount > 0) {
           newStatus = 'PARTIAL';
         }
 
+        const updatePayload: Record<string, any> = {
+          paid_amount: newPaidAmount,
+          status: newStatus,
+          updated_at: new Date(),
+        };
+        const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
+        if (hasBalanceDue) {
+          updatePayload.balance_due = newBalanceDue;
+        }
+
         await trx('purchase_invoices')
           .where('id', inv.id)
-          .update({
-            paid_amount: newPaidAmount,
-            status: newStatus,
-            updated_at: new Date(),
-          });
+          .update(updatePayload);
 
         remainingToAllocate = Math.round((remainingToAllocate - allocationForThisInv) * 100) / 100;
         anyAllocated = true;
@@ -236,7 +250,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
         const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
         const currentAllocated = Number(allocRes?.total_allocated || 0);
         const invTotal = Number(invoice.total_amount || 0);
-        const netInvoiceTotal = invTotal - returnedTotal;
+        const netInvoiceTotal = Boolean(invoice.has_returns) ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
         const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
 
         if (remainingUnpaid <= 0 || totalAmount > remainingUnpaid) {
@@ -247,6 +261,22 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       const payment_number = await generatePaymentNumber(trx);
       let primaryPayment: any = null;
 
+      // Dynamic Transaction Naming (Phase 2)
+      const splitSupplier = await trx('suppliers').where('id', data.supplier_id).first();
+      const splitSupplierName = splitSupplier?.name || 'Vendor';
+
+      let splitInvoiceNumber: string | null = null;
+      if (data.purchase_invoice_id) {
+        const inv = await trx('purchase_invoices').where('id', data.purchase_invoice_id).first();
+        splitInvoiceNumber = inv?.invoice_number || null;
+      }
+
+      const isSplitAdvance = !data.purchase_invoice_id;
+      const splitDynamicDesc = isSplitAdvance
+        ? `Advance Deposit to Supplier: ${splitSupplierName}`
+        : `Payment to Supplier: ${splitSupplierName}${splitInvoiceNumber ? ` for Invoice #${splitInvoiceNumber}` : ''}`;
+      const splitBaseDesc = data.notes || splitDynamicDesc;
+
       // 1. Record Cash Portion
       if (splitCash > 0) {
         const [cashPayment] = await trx('supplier_payments').insert({
@@ -256,7 +286,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
           amount: splitCash,
           payment_method: 'CASH',
           bank_account_id: null,
-          notes: data.notes ? `${data.notes} [Split Cash Portion]` : 'Split Payment - Cash Portion',
+          notes: data.notes ? `${data.notes} [Split Cash Portion]` : `${splitBaseDesc} [Split Cash Portion]`,
           cheque_number: null,
           cheque_bank_name: null,
           cheque_due_date: null,
@@ -274,7 +304,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
             type: 'OUTFLOW',
             amount: splitCash,
             reference_id: cashPayment.id,
-            description: `Supplier Split Cash Payment (${payment_number})`,
+            description: `${splitBaseDesc} [Split Cash Portion]`,
             created_by: userId || null,
           });
         }
@@ -297,7 +327,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
           amount: splitBank,
           payment_method: 'BANK_TRANSFER',
           bank_account_id: data.bank_account_id,
-          notes: data.notes ? `${data.notes} [Split Bank Portion]` : 'Split Payment - Bank Portion',
+          notes: data.notes ? `${data.notes} [Split Bank Portion]` : `${splitBaseDesc} [Split Bank Portion]`,
           cheque_number: null,
           cheque_bank_name: null,
           cheque_due_date: null,
@@ -365,6 +395,22 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       throw new Error('VALIDATION_ERROR: No bank_account_id provided in the request payload.');
     }
 
+    // Dynamic Transaction Naming (Phase 2)
+    const supplier = await trx('suppliers').where('id', data.supplier_id).first();
+    const supplierName = supplier?.name || 'Vendor';
+
+    let invoiceNumber: string | null = null;
+    if (data.purchase_invoice_id) {
+      const inv = await trx('purchase_invoices').where('id', data.purchase_invoice_id).first();
+      invoiceNumber = inv?.invoice_number || null;
+    }
+
+    const isAdvance = !data.purchase_invoice_id;
+    const dynamicDescription = isAdvance
+      ? `Advance Deposit to Supplier: ${supplierName}`
+      : `Payment to Supplier: ${supplierName}${invoiceNumber ? ` for Invoice #${invoiceNumber}` : ''}`;
+    const description = data.notes || dynamicDescription;
+
     const payment_number = await generatePaymentNumber(trx);
 
     const [payment] = await trx('supplier_payments').insert({
@@ -374,7 +420,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       amount: paymentAmount,
       payment_method: data.payment_method,
       bank_account_id: isCash ? null : (data.bank_account_id || null),
-      notes: data.notes || null,
+      notes: description,
       cheque_number: data.cheque_number || null,
       cheque_bank_name: data.cheque_bank_name || null,
       cheque_due_date: data.cheque_due_date || null,
@@ -391,7 +437,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
           type: 'OUTFLOW',
           amount: paymentAmount,
           reference_id: payment.id,
-          description: `Supplier Cash Payment (${payment_number})`,
+          description,
           created_by: userId || null,
         });
       }

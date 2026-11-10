@@ -382,15 +382,25 @@ export const BankAccountDetailView: React.FC<BankAccountDetailViewProps> = ({
 
                     {/* Source Category Tag */}
                     <td className="py-3 px-4 shrink-0 whitespace-nowrap">
-                      {tx.source === 'POS' || tx.source_type === 'POS' ? (
+                      {tx.source === 'POS' || tx.source_type === 'POS' || (tx as any).category === 'POS' ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           <ShoppingBag className="w-3 h-3" />
                           POS Walk-in
                         </span>
-                      ) : tx.source === 'CUSTOMER_PAYMENT' || tx.source_type === 'CUSTOMER_PAYMENT' || (tx.type === 'INFLOW' && tx.transaction_type !== 'WITHDRAWAL') ? (
+                      ) : tx.source === 'CUSTOMER_PAYMENT' || tx.source_type === 'CUSTOMER_PAYMENT' || (tx as any).category === 'CUSTOMER_PAYMENT' || (tx.type === 'INFLOW' && tx.transaction_type !== 'WITHDRAWAL') ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                           <Users className="w-3 h-3" />
                           Customer Payment
+                        </span>
+                      ) : tx.source === 'SUPPLIER_ADVANCE' || (tx as any).category === 'SUPPLIER_ADVANCE' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          <Wallet className="w-3 h-3" />
+                          Supplier Advance
+                        </span>
+                      ) : tx.source === 'SUPPLIER_PAYMENT' || (tx as any).category === 'SUPPLIER_PAYMENT' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                          <Building2 className="w-3 h-3" />
+                          Supplier Payment
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">

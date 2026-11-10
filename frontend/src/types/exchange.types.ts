@@ -23,10 +23,24 @@ export interface ProductExchange {
 }
 
 export interface CreateExchangeData {
-  given_product_id: string;
-  given_quantity: number;
-  received_product_id: string;
-  received_quantity: number;
+  // Standalone / legacy product exchange fields
+  given_product_id?: string;
+  given_quantity?: number;
+  received_product_id?: string;
+  received_quantity?: number;
+
+  // Invoice-based exchange fields (Return + Re-Sale)
+  sales_invoice_item_id?: string;
+  original_item_id?: string;
+  invoice_id?: string;
+  returned_quantity?: number;
+  returned_qty?: number;
+  new_product_id?: string;
+  new_quantity?: number;
+  new_unit_price?: number;
+  size?: string;
+  selected_unit?: string;
+
   exchange_date?: string;
   notes?: string;
 }

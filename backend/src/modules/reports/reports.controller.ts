@@ -80,6 +80,19 @@ export async function getLiquidityPayablesController(
   }
 }
 
+export async function getLiquidityPendingExpensesController(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const data = await reportsService.getLiquidityPendingExpensesDetail();
+    res.status(200).json(ok(data));
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getLiquiditySupplierAdvancesController(
   _req: Request,
   res: Response,

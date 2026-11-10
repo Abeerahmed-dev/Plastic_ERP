@@ -30,3 +30,7 @@ export async function getPendingDeliveries(query?: { status?: string; product_id
   return await invoicesRepo.getPendingDeliveries(query);
 }
 
+export async function syncOfflineInvoices(invoices: any[], userId?: string) {
+  return await invoicesRepo.processOfflineSyncInvoices(invoices, userId);
+}
+

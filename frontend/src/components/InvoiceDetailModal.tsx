@@ -10,6 +10,7 @@ import { getUrduProductName } from '../utils/bilingual';
 
 export interface InvoiceDetailItem {
   id?: string;
+  line_item_id?: string;
   product_id: string;
   product_name: string;
   name_urdu?: string | null;
@@ -22,6 +23,7 @@ export interface InvoiceDetailItem {
   batch_weight_per_unit?: number;
   batch_selected_unit?: string;
   quantity: number;
+  returned_quantity?: number;
   selected_unit?: string;
   net_kg_processed?: number;
   unit_price: number;
@@ -128,6 +130,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
   // Child Returns Calculation (Credit Notes for sales, Debit Notes for purchases)
   const childReturns = (type === 'purchase' ? (invoice.linked_debit_notes || invoice.credit_notes) : invoice.credit_notes) || [];
+  const hasReturns = childReturns.length > 0 || (invoice.items || []).some((i) => Number(i.returned_quantity || 0) > 0);
   const totalReturnedAmount = invoice.linked_returns_total !== undefined
     ? Number(invoice.linked_returns_total)
     : childReturns.reduce((acc, cn) => acc + Math.abs(Number(cn.total_amount || 0)), 0);
@@ -309,8 +312,8 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <th className="py-2.5 px-3">Product</th>
                   <th className="py-2.5 px-3">Size</th>
                   <th className="py-2.5 px-3 text-right">Original Qty</th>
-                  {childReturns.length > 0 && <th className="py-2.5 px-3 text-right text-red-600">Returned</th>}
-                  {childReturns.length > 0 && <th className="py-2.5 px-3 text-right text-purple-700 font-bold">Net Qty</th>}
+                  {hasReturns && <th className="py-2.5 px-3 text-right text-red-600">Returned</th>}
+                  {hasReturns && <th className="py-2.5 px-3 text-right text-purple-700 font-bold">Net Qty</th>}
                   <th className="py-2.5 px-3">Unit</th>
                   <th className="py-2.5 px-3 text-right">Unit Price</th>
                   <th className="py-2.5 px-3 text-right">Total</th>
@@ -319,7 +322,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               <tbody className="divide-y divide-slate-100">
                 {(!invoice.items || invoice.items.length === 0) ? (
                   <tr>
-                    <td colSpan={childReturns.length > 0 ? 9 : 7} className="py-6 text-center text-slate-400 italic">
+                    <td colSpan={hasReturns ? 9 : 7} className="py-6 text-center text-slate-400 italic">
                       No line items found for this invoice.
                     </td>
                   </tr>
@@ -327,11 +330,15 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   invoice.items.map((item, idx) => {
                     const unitName = item.selected_unit || 'Dasti';
 
-                    const returnedQty = childReturns.reduce((acc, cn) => {
-                      const matching = (cn.items || []).filter((i) => i.product_id === item.product_id);
-                      return acc + matching.reduce((sum, ci) => sum + Math.abs(Number(ci.quantity || 0)), 0);
+                    const itemReturnedQty = Number(item.returned_quantity || 0);
+                    const childCalculatedReturnedQty = childReturns.reduce((acc, cn) => {
+                      const matching = (cn.items || []).filter(
+                        (i) => (item.id && (i.id === item.id || i.line_item_id === item.id)) || i.product_id === item.product_id
+                      );
+                      return acc + matching.reduce((sum, ci) => sum + Math.abs(Number(ci.quantity || ci.return_quantity || 0)), 0);
                     }, 0);
 
+                    const returnedQty = itemReturnedQty > 0 ? itemReturnedQty : childCalculatedReturnedQty;
                     const origQty = Number(item.quantity || 0);
                     const netQty = Math.max(0, origQty - returnedQty);
 
@@ -372,12 +379,12 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                         <td className="py-2.5 px-3 text-right font-mono font-medium text-slate-800">
                           {formatNumber(origQty)}
                         </td>
-                        {childReturns.length > 0 && (
+                        {hasReturns && (
                           <td className="py-2.5 px-3 text-right font-mono font-bold text-red-600">
                             {returnedQty > 0 ? `-${formatNumber(returnedQty)}` : '-'}
                           </td>
                         )}
-                        {childReturns.length > 0 && (
+                        {hasReturns && (
                           <td className="py-2.5 px-3 text-right font-mono font-black text-purple-700">
                             {formatNumber(netQty)}
                           </td>

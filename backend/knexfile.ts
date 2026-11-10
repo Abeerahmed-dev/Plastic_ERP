@@ -33,9 +33,9 @@ const config: { [key: string]: Knex.Config } = {
     connection: {
       host: process.env.DB_HOST ?? 'localhost',
       port: Number(process.env.DB_PORT ?? 5432),
-      database: process.env.DB_NAME_TEST ?? process.env.DB_NAME ?? 'sabir_plastic_erp',
+      database: process.env.DB_NAME_TEST ?? (process.env.DB_NAME?.endsWith('_test') ? process.env.DB_NAME : `${process.env.DB_NAME ?? 'sabir_plastic_erp'}_test`),
       user: process.env.DB_USER ?? 'erp_user',
-      password: process.env.DB_PASSWORD ?? 'devpassword',
+      password: process.env.DB_PASSWORD ?? 'change_me_in_production',
     },
     pool: {
       min: 1,

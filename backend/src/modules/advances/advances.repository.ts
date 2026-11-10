@@ -54,7 +54,7 @@ export async function createCustomerAdvance(
       })
       .returning('*');
 
-    // 3. Liquidity Ledger: Insert INFLOW row into cash_drawer_ledger or bank_transactions
+    // 3. Liquidity Ledger: Insert INFLOW row into cash_drawer_ledger or bank_accounts
     if (isCashDrawer) {
       const hasCashDrawerTable = await trx.schema.hasTable('cash_drawer_ledger');
       if (hasCashDrawerTable) {
@@ -68,18 +68,8 @@ export async function createCustomerAdvance(
         });
       }
     } else if (bankAccountId) {
-      const hasBankTxTable = await trx.schema.hasTable('bank_transactions');
-      if (hasBankTxTable) {
-        await trx('bank_transactions').insert({
-          bank_account_id: bankAccountId,
-          type: 'INFLOW',
-          amount: advanceAmount,
-          description: input.notes || `Advance deposit from customer ${customer.name} (${paymentNumber})`,
-          transaction_date: txDate,
-          category: 'CUSTOMER_ADVANCE',
-          created_by: userId || null,
-        });
-      }
+      // customer_payments row already serves as the primary bank ledger entry
+      await trx('bank_accounts').where('id', bankAccountId).increment('current_balance', advanceAmount);
     }
 
     // 4. Return new balance details
@@ -134,6 +124,13 @@ export async function createSupplierAdvance(
 
     const txDate = input.payment_date || input.date || new Date().toISOString().split('T')[0];
 
+    // Dynamic Transaction Naming (Phase 2)
+    const isAdvance = true; // Supplier advances are unlinked from specific invoices
+    const dynamicDescription = isAdvance
+      ? `Advance Deposit to Supplier: ${supplier.name}`
+      : `Payment to Supplier: ${supplier.name}`;
+    const description = input.notes || dynamicDescription;
+
     // 2. Supplier Ledger: Insert row into supplier_payments with payment_type = 'ADVANCE_DEPOSIT' and NO purchase_invoice_id
     const [payment] = await trx('supplier_payments')
       .insert({
@@ -145,7 +142,7 @@ export async function createSupplierAdvance(
         payment_method: paymentMethod,
         payment_type: 'ADVANCE_DEPOSIT',
         bank_account_id: bankAccountId,
-        notes: input.notes || `Supplier Advance Deposit - ${supplier.name}`,
+        notes: description,
         cheque_status: 'CLEARED',
         created_by: userId || null,
       })
@@ -158,25 +155,16 @@ export async function createSupplierAdvance(
         await trx('cash_drawer_ledger').insert({
           type: 'OUTFLOW',
           amount: advanceAmount,
-          description: input.notes || `Advance deposit to supplier ${supplier.name} (${paymentNumber})`,
+          description: description,
           reference_id: payment.id,
           transaction_date: txDate,
           created_by: userId || null,
         });
       }
     } else if (bankAccountId) {
-      const hasBankTxTable = await trx.schema.hasTable('bank_transactions');
-      if (hasBankTxTable) {
-        await trx('bank_transactions').insert({
-          bank_account_id: bankAccountId,
-          type: 'OUTFLOW',
-          amount: advanceAmount,
-          description: input.notes || `Advance deposit to supplier ${supplier.name} (${paymentNumber})`,
-          transaction_date: txDate,
-          category: 'SUPPLIER_ADVANCE',
-          created_by: userId || null,
-        });
-      }
+      // Phase 1: Eliminate redundant manual bank_transactions insert.
+      // The supplier_payments row already serves as the shared financial record queried by bank ledger,
+      // guaranteeing a strictly 1:1 ratio between the bank debit and the supplier wallet credit.
       await trx('bank_accounts').where('id', bankAccountId).decrement('current_balance', advanceAmount);
     }
 

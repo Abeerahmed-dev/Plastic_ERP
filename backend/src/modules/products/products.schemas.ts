@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const createProductSchema = z.object({
   code: z.string().optional().nullable(),
+  product_code: z.string().optional().nullable(),
   name: z.string().min(1, 'Name is required').max(150),
   name_urdu: z.string().optional().nullable(),
   size: z.string().trim().min(1, 'Size/Variant is compulsory').optional().nullable(),

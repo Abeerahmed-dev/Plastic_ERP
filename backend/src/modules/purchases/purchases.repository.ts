@@ -202,12 +202,19 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
   }
 
   const rows = rawRows.map((r: any) => {
-    const original_total = Number(r.total_amount || 0);
+    const hasReturnsFlag = Boolean(r.has_returns);
     const returned_total = debitNotesTotalByInvoice.get(r.id) || 0;
-    const net_invoice_total = Math.round((original_total - returned_total) * 100) / 100;
+    const net_invoice_total = hasReturnsFlag
+      ? Number(r.total_amount || 0)
+      : Math.round((Number(r.total_amount || 0) - returned_total) * 100) / 100;
+    const original_total = hasReturnsFlag
+      ? Math.round((Number(r.total_amount || 0) + returned_total) * 100) / 100
+      : Number(r.total_amount || 0);
     const amount_paid = Number(r.paid_amount || r.amount_paid || 0);
     // CRITICAL: True net balance without Math.max(0, ...). Allow negative numbers for OVERPAID state.
-    const balance_due = Math.round((net_invoice_total - amount_paid) * 100) / 100;
+    const balance_due = (r.balance_due !== undefined && r.balance_due !== null)
+      ? Number(r.balance_due)
+      : Math.round((net_invoice_total - amount_paid) * 100) / 100;
     const payments = paymentsByInvoice.get(r.id) || [];
     const linked_debit_notes = debitNotesByInvoice.get(r.id) || [];
 
@@ -217,8 +224,10 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
 
     return {
       ...r,
+      has_returns: hasReturnsFlag || returned_total > 0,
       status: dynamicStatus,
-      total_amount: original_total,
+      total_amount: net_invoice_total,
+      original_total,
       linked_returns_total: returned_total,
       net_total: net_invoice_total,
       net_invoice_total: net_invoice_total,
@@ -259,25 +268,46 @@ export async function findPurchaseInvoiceById(id: string) {
 
   if (!invoice) return null;
 
-  const original_total = Number(invoice.total_amount || 0);
-  const amount_paid = Number(invoice.paid_amount || invoice.amount_paid || 0);
-
-  const linked_debit_notes = await db('purchase_invoices as pi')
+  const debitNotesRows = await db('purchase_invoices as pi')
     .where('pi.parent_invoice_id', id)
     .where('pi.invoice_type', 'DEBIT_NOTE')
     .whereNot('pi.status', 'CANCELLED')
     .select('pi.*')
     .orderBy('pi.created_at', 'asc');
 
+  const linked_debit_notes = await Promise.all(
+    debitNotesRows.map(async (dn) => {
+      const dnItems = await db('purchase_invoice_items as pii')
+        .join('products as p', 'pii.product_id', 'p.id')
+        .where('pii.purchase_invoice_id', dn.id)
+        .select('pii.*', 'p.name as product_name', 'p.code as product_code');
+      return { ...dn, items: dnItems };
+    })
+  );
+
   const returned_total = (linked_debit_notes || []).reduce(
     (sum: number, dn: any) => sum + Math.abs(Number(dn.total_amount || 0)),
     0
   );
-  const net_invoice_total = Math.round((original_total - returned_total) * 100) / 100;
-  // CRITICAL: Do NOT use Math.max(0, ...). Allow negative numbers for OVERPAID state.
-  const balance_due = Math.round((net_invoice_total - amount_paid) * 100) / 100;
 
-  invoice.total_amount = original_total;
+  const hasReturnsFlag = Boolean(invoice.has_returns) || returned_total > 0;
+  const net_invoice_total = invoice.has_returns
+    ? Number(invoice.total_amount || 0)
+    : Math.round((Number(invoice.total_amount || 0) - returned_total) * 100) / 100;
+
+  const original_total = invoice.has_returns
+    ? Math.round((Number(invoice.total_amount || 0) + returned_total) * 100) / 100
+    : Number(invoice.total_amount || 0);
+
+  const amount_paid = Number(invoice.paid_amount || invoice.amount_paid || 0);
+  // CRITICAL: True net balance without Math.max(0, ...). Allow negative numbers for OVERPAID state.
+  const balance_due = (invoice.balance_due !== undefined && invoice.balance_due !== null)
+    ? Number(invoice.balance_due)
+    : Math.round((net_invoice_total - amount_paid) * 100) / 100;
+
+  invoice.has_returns = hasReturnsFlag;
+  invoice.total_amount = net_invoice_total;
+  invoice.original_total = original_total;
   invoice.linked_returns_total = returned_total;
   invoice.net_total = net_invoice_total;
   invoice.net_invoice_total = net_invoice_total;
@@ -406,62 +436,45 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     const initialPaidAmount = advanceApplied;
     const invoiceStatus = initialPaidAmount >= total_amount ? 'PAID' : (initialPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
 
-    // Total purchase weight in KG for DC allocation
-    const total_invoice_kg = sanitizedItems.reduce((acc: number, item: any) => acc + Number(item.quantity_kg || 0), 0);
-    const dc_per_kg = total_invoice_kg > 0 ? (delivery_charges / total_invoice_kg) : 0;
+    // Landed Cost Formula: Proportional freight burden allocated across purchased plastic
+    const totalInvoiceKg = sanitizedItems.reduce((sum: number, item: any) => sum + Number(item.quantity_kg || 0), 0);
+    const freightPerKg = totalInvoiceKg > 0 ? (delivery_charges / totalInvoiceKg) : 0;
 
-    // Automatic Expense logging for delivery charges (Tracked as PENDING payable expense)
-    let deliveryExpenseId: string | null = null;
-    if (delivery_charges > 0) {
-      const supplier = await trx('suppliers').where('id', data.supplier_id).select('name').first();
-      const hasStatus = await trx.schema.hasColumn('expenses', 'status');
-      const hasPaidAmount = await trx.schema.hasColumn('expenses', 'paid_amount');
-      const hasPurchaseId = await trx.schema.hasColumn('expenses', 'purchase_id');
+    // Phase 2: Severing the OPEX Double-Dip
+    // Inbound freight is capitalized into inventory asset value (buy_price_per_kg of inventory_batches).
+    // Inbound freight is a direct component of COGS, NOT an immediate below-the-line OPEX.
+    // It sits on the Balance Sheet as "Unsold Stock" and only hits the Income Statement as COGS when sold via FIFO.
+    // Automatic OPEX record creation in expenses is removed.
+    const initialBalanceDue = Math.round((total_amount - initialPaidAmount) * 100) / 100;
+    const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
+    const hasReturnsCol = await trx.schema.hasColumn('purchase_invoices', 'has_returns');
 
-      const expPayload: Record<string, any> = {
-        amount: delivery_charges,
-        category: 'Logistics',
-        description: `Delivery Charges for Purchase ${invoice_number} (Party: ${supplier?.name || 'Party'})`,
-        expense_date: data.date ? new Date(data.date) : new Date(),
-        payment_method: 'UNPAID',
-        bank_account_id: null,
-        created_by: createdBy || null,
-      };
-      if (hasStatus) expPayload.status = 'PENDING';
-      if (hasPaidAmount) expPayload.paid_amount = 0;
-      if (hasPurchaseId) expPayload.purchase_id = null;
-
-      const [expense] = await trx('expenses').insert(expPayload).returning('*');
-      deliveryExpenseId = expense?.id || null;
+    const invoicePayload: Record<string, any> = {
+      supplier_id: data.supplier_id,
+      invoice_number,
+      invoice_type: 'PURCHASE',
+      date: data.date,
+      due_date: data.due_date || null,
+      subtotal,
+      discount,
+      delivery_charges,
+      total_amount,
+      paid_amount: initialPaidAmount,
+      status: invoiceStatus,
+      notes: data.notes || null,
+      created_by: createdBy,
+      expense_id: null,
+    };
+    if (hasBalanceDue) {
+      invoicePayload.balance_due = initialBalanceDue;
+    }
+    if (hasReturnsCol) {
+      invoicePayload.has_returns = false;
     }
 
     const [invoice] = await trx('purchase_invoices')
-      .insert({
-        supplier_id: data.supplier_id,
-        invoice_number,
-        invoice_type: 'PURCHASE',
-        date: data.date,
-        due_date: data.due_date || null,
-        subtotal,
-        discount,
-        delivery_charges,
-        total_amount,
-        paid_amount: initialPaidAmount,
-        status: invoiceStatus,
-        notes: data.notes || null,
-        created_by: createdBy,
-        expense_id: deliveryExpenseId,
-      })
+      .insert(invoicePayload)
       .returning('*');
-
-    if (deliveryExpenseId && invoice?.id) {
-      const hasPurchaseId = await trx.schema.hasColumn('expenses', 'purchase_id');
-      if (hasPurchaseId) {
-        await trx('expenses').where('id', deliveryExpenseId).update({
-          purchase_id: invoice.id,
-        });
-      }
-    }
 
     const itemsToInsert = [];
 
@@ -471,7 +484,7 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
       const base_price_per_kg = item.unit_price;
       const itemTotal = item.total_price;
 
-      const item_dc_per_kg = Math.round(dc_per_kg * 10000) / 10000;
+      const item_dc_per_kg = Math.round(freightPerKg * 10000) / 10000;
       // Landed cost includes delivery charges allocated per kg
       const price_per_kg = Math.round((base_price_per_kg + item_dc_per_kg) * 100) / 100;
 
@@ -645,13 +658,15 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         });
 
       // ── Dedicated Batch Creation Tied to Parent Purchase Invoice ──
-      const roundedCostPerKg = Math.round(purchase_cost_per_kg * 100) / 100;
+      // Assign landed cost: item.unit_price + freightPerKg
+      const landedCostPerKg = Math.round((item.unit_price + freightPerKg) * 100) / 100;
+      const roundedCostPerKg = landedCostPerKg;
       const itemSize = (item.size && String(item.size).trim().length > 0)
         ? String(item.size).trim()
         : (productWithCat.size && String(productWithCat.size).trim().length > 0 ? String(productWithCat.size).trim() : 'Standard');
       const batchNum = `PB-${invoice.invoice_number || invoice.id.slice(0, 8)}-${item.product_id.slice(0, 4)}-${Date.now()}`;
 
-      await trx('inventory_batches').insert({
+      const batchData: Record<string, any> = {
         product_id: item.product_id,
         purchase_invoice_id: invoice.id,
         batch_number: batchNum,
@@ -660,7 +675,15 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
         remaining_qty: remainder_kg,
         status: remainder_kg > 0 ? 'ACTIVE' : 'DEPLETED',
         size: itemSize,
-      });
+      };
+
+      const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
+      if (!hasBatchBuyPriceCol) {
+        batchData.buy_price_per_kg = roundedCostPerKg;
+        delete batchData.batch_buy_price_per_kg;
+      }
+
+      await trx('inventory_batches').insert(batchData);
 
       itemsToInsert.push({
         purchase_invoice_id: invoice.id,
@@ -789,6 +812,13 @@ export async function processPurchaseReturn(
       returnMap.set(ret.product_id, Number(ret.total_returned_qty || 0));
     }
 
+    const hasReturnedQtyCol = await trx.schema.hasColumn('purchase_invoice_items', 'returned_quantity');
+    if (!hasReturnedQtyCol) {
+      await trx.schema.alterTable('purchase_invoice_items', (table) => {
+        table.decimal('returned_quantity', 14, 4).notNullable().defaultTo(0);
+      });
+    }
+
     const returnedItems = input.line_items || input.items || [];
     let totalDebitAmount = 0;
     const itemsToInsert: any[] = [];
@@ -797,7 +827,11 @@ export async function processPurchaseReturn(
       const returnedQty = Number(itemInput.return_quantity ?? itemInput.quantity ?? 0);
       if (returnedQty <= 0) continue;
 
-      const parentItem = parentItems.find((p) => p.product_id === itemInput.product_id);
+      const parentItem = parentItems.find((p) =>
+        (itemInput.id && p.id === itemInput.id) ||
+        (itemInput.line_item_id && p.id === itemInput.line_item_id) ||
+        p.product_id === itemInput.product_id
+      );
       if (!parentItem) {
         throw new Error(`Product ${itemInput.product_id} was not billed on the parent invoice.`);
       }
@@ -838,7 +872,7 @@ export async function processPurchaseReturn(
       const currentOriginal = Number(batch.original_qty);
       const newRemaining = Math.max(0, currentRemaining - returnedQty);
       const newOriginal = Math.max(0, currentOriginal - returnedQty);
-      const newStatus = newRemaining <= 0 ? 'DEPLETED' : batch.status;
+      const newStatus = newOriginal === 0 ? 'RETURNED' : (newRemaining <= 0 ? 'DEPLETED' : (batch.status || 'ACTIVE'));
 
       await trx('inventory_batches')
         .where('id', batch.id)
@@ -848,6 +882,13 @@ export async function processPurchaseReturn(
           status: newStatus,
           updated_at: new Date(),
         });
+
+      // Increment Line Items: Mathematically increment returned_quantity column
+      const targetLineItemId = itemInput.id || itemInput.line_item_id || parentItem.id;
+      await trx.raw(
+        'UPDATE purchase_invoice_items SET returned_quantity = returned_quantity + ? WHERE id = ?',
+        [returnedQty, targetLineItemId]
+      );
 
       const unitMultiplier = Number(parentItem.actual_weight_per_unit || 1.0);
       const returnKg = returnedQty * unitMultiplier;
@@ -895,24 +936,35 @@ export async function processPurchaseReturn(
 
     const debitNoteNumber = await generateNextDebitNoteNumber(trx);
 
+    const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
+    const hasReturnsCol = await trx.schema.hasColumn('purchase_invoices', 'has_returns');
+
     // Insert new row into purchase_invoices with invoice_type = 'DEBIT_NOTE'
+    const debitNotePayload: Record<string, any> = {
+      supplier_id: parentInvoice.supplier_id,
+      invoice_number: debitNoteNumber,
+      parent_invoice_id: parentInvoiceId,
+      invoice_type: 'DEBIT_NOTE',
+      return_reason: input.return_reason || null,
+      date: new Date().toISOString().split('T')[0],
+      due_date: null,
+      subtotal: -Math.abs(totalDebitAmount),
+      discount: 0,
+      total_amount: -Math.abs(totalDebitAmount),
+      paid_amount: 0,
+      status: 'UNPAID',
+      notes: `Debit Note against ${parentInvoice.invoice_number} — Reason: ${input.return_reason || 'Goods Returned to Supplier'}`,
+      created_by: userId,
+    };
+    if (hasBalanceDue) {
+      debitNotePayload.balance_due = -Math.abs(totalDebitAmount);
+    }
+    if (hasReturnsCol) {
+      debitNotePayload.has_returns = false;
+    }
+
     const [debitNote] = await trx('purchase_invoices')
-      .insert({
-        supplier_id: parentInvoice.supplier_id,
-        invoice_number: debitNoteNumber,
-        parent_invoice_id: parentInvoiceId,
-        invoice_type: 'DEBIT_NOTE',
-        return_reason: input.return_reason || null,
-        date: new Date().toISOString().split('T')[0],
-        due_date: null,
-        subtotal: -Math.abs(totalDebitAmount),
-        discount: 0,
-        total_amount: -Math.abs(totalDebitAmount),
-        paid_amount: 0,
-        status: 'UNPAID',
-        notes: `Debit Note against ${parentInvoice.invoice_number} — Reason: ${input.return_reason || 'Goods Returned to Supplier'}`,
-        created_by: userId,
-      })
+      .insert(debitNotePayload)
       .returning('*');
 
     const finalItems = itemsToInsert.map((item) => ({
@@ -921,6 +973,75 @@ export async function processPurchaseReturn(
     }));
 
     await trx('purchase_invoice_items').insert(finalItems);
+
+    // ── Phase 1: Parent Purchase Invoice Recalculation & Status Flagging ──
+    // Step 1: Subtract returned item's total value from parent purchase_invoices.total_amount
+    const currentParentTotal = Number(parentInvoice.total_amount || 0);
+    const newParentTotalAmount = Math.round((currentParentTotal - totalDebitAmount) * 100) / 100;
+
+    const currentParentSubtotal = Number(parentInvoice.subtotal ?? currentParentTotal);
+    const newParentSubtotal = Math.round((currentParentSubtotal - totalDebitAmount) * 100) / 100;
+
+    // Step 2: Fetch all payment allocations already made to the supplier for this invoice
+    let totalAllocatedPayments = 0;
+    const hasAllocationsTable = await trx.schema.hasTable('supplier_payment_allocations');
+    if (hasAllocationsTable) {
+      const allocRes = await trx('supplier_payment_allocations')
+        .where('purchase_invoice_id', parentInvoiceId)
+        .sum('allocated_amount as total_allocated')
+        .first();
+      totalAllocatedPayments = Number(allocRes?.total_allocated || 0);
+    }
+
+    // Direct payments fallback (if direct unallocated supplier payments exist)
+    const directRes = await trx('supplier_payments')
+      .where('purchase_invoice_id', parentInvoiceId)
+      .where(function() {
+        if (hasAllocationsTable) {
+          this.whereNotIn('id', trx('supplier_payment_allocations').select('payment_id'));
+        }
+      })
+      .sum('amount as total_direct')
+      .first();
+    const totalDirectPayments = Number(directRes?.total_direct || 0);
+
+    const totalPaidAmount = Math.round((totalAllocatedPayments + totalDirectPayments) * 100) / 100 || Number(parentInvoice.paid_amount || 0);
+
+    // Step 3: Recalculate purchase_invoices.balance_due based on new total_amount minus payment allocations
+    const newBalanceDue = Math.round((newParentTotalAmount - totalPaidAmount) * 100) / 100;
+
+    // Step 4: Status determination and set has_returns = true on parent invoice
+    let newStatus = parentInvoice.status;
+    if (parentInvoice.status !== 'CANCELLED') {
+      if (newParentTotalAmount <= 0) {
+        newStatus = 'PAID';
+      } else if (newBalanceDue <= 0) {
+        newStatus = 'PAID';
+      } else if (totalPaidAmount > 0) {
+        newStatus = 'PARTIAL';
+      } else {
+        newStatus = 'UNPAID';
+      }
+    }
+
+    const parentUpdatePayload: Record<string, any> = {
+      total_amount: newParentTotalAmount,
+      subtotal: newParentSubtotal,
+      paid_amount: totalPaidAmount,
+      status: newStatus,
+      updated_at: new Date(),
+    };
+
+    if (hasBalanceDue) {
+      parentUpdatePayload.balance_due = newBalanceDue;
+    }
+    if (hasReturnsCol) {
+      parentUpdatePayload.has_returns = true;
+    }
+
+    await trx('purchase_invoices')
+      .where('id', parentInvoiceId)
+      .update(parentUpdatePayload);
 
     return { ...debitNote, items: finalItems };
   });
@@ -956,7 +1077,9 @@ export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
   const items = await Promise.all(
     parentItems.map(async (item: any) => {
       const originalQty = Math.abs(Number(item.quantity || 0));
-      const previouslyReturned = returnMap.get(item.product_id) || 0;
+      const itemReturnedQty = Number(item.returned_quantity || 0);
+      const debitNoteReturnedQty = returnMap.get(item.product_id) || 0;
+      const previouslyReturned = Math.max(itemReturnedQty, debitNoteReturnedQty);
       const remainingReturnable = Math.max(0, originalQty - previouslyReturned);
 
       // Check current remaining batch stock
@@ -976,6 +1099,10 @@ export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
       const batchRemaining = batch ? Number(batch.remaining_qty || 0) : 0;
 
       return {
+        id: item.id,
+        line_item_id: item.id,
+        batch_id: batch?.id || item.id,
+        purchase_invoice_item_id: item.id,
         product_id: item.product_id,
         product_name: item.product_name,
         product_code: item.product_code,
@@ -984,6 +1111,7 @@ export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
         unit_price: Number(item.unit_price || 0),
         original_quantity: originalQty,
         previously_returned: previouslyReturned,
+        returned_quantity: previouslyReturned,
         remaining_quantity: remainingReturnable,
         batch_remaining_qty: batchRemaining,
         can_return_qty: Math.min(remainingReturnable, batchRemaining),
@@ -997,10 +1125,24 @@ export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
   };
 }
 
-export async function updatePurchaseInvoiceStatus(id: string, updateData: { status?: string; paid_amount?: number }) {
+export async function updatePurchaseInvoiceStatus(
+  id: string,
+  updateData: { status?: string; paid_amount?: number; balance_due?: number; total_amount?: number; has_returns?: boolean }
+) {
+  const current = await db('purchase_invoices').where({ id }).first();
+  const updatePayload: Record<string, any> = { ...updateData, updated_at: new Date() };
+
+  if (updateData.paid_amount !== undefined && updateData.balance_due === undefined && current) {
+    const total = Number(current.total_amount || 0);
+    const hasBalanceDue = await db.schema.hasColumn('purchase_invoices', 'balance_due');
+    if (hasBalanceDue) {
+      updatePayload.balance_due = Math.round((total - updateData.paid_amount) * 100) / 100;
+    }
+  }
+
   const [updated] = await db('purchase_invoices')
     .where({ id })
-    .update({ ...updateData, updated_at: new Date() })
+    .update(updatePayload)
     .returning('*');
   return updated;
 }
@@ -1101,7 +1243,7 @@ export async function updateStockDcAndPrices(
       selling_price: number;
     }>;
   },
-  userId?: string
+  _userId?: string
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
     const invoice = await trx('purchase_invoices').where('id', purchaseId).forUpdate().first();
@@ -1120,49 +1262,17 @@ export async function updateStockDcAndPrices(
 
     const dcPerKg = totalKg > 0 ? (newDeliveryCharges / totalKg) : 0;
 
-    // 1. Sync Delivery Charges & Expense
-    if (newDeliveryCharges !== Number(invoice.delivery_charges || 0) || (newDeliveryCharges > 0 && !invoice.expense_id)) {
-      let expenseId = invoice.expense_id;
-
-      if (expenseId) {
-        if (newDeliveryCharges > 0) {
-          await trx('expenses').where('id', expenseId).update({
-            amount: newDeliveryCharges,
-            updated_at: new Date(),
-          });
-        } else {
-          await trx('expenses').where('id', expenseId).del();
-          expenseId = null;
-        }
-      } else if (newDeliveryCharges > 0) {
-        const supplier = await trx('suppliers').where('id', invoice.supplier_id).first();
-        const hasStatus = await trx.schema.hasColumn('expenses', 'status');
-        const hasPaidAmount = await trx.schema.hasColumn('expenses', 'paid_amount');
-        const hasPurchaseId = await trx.schema.hasColumn('expenses', 'purchase_id');
-
-        const expPayload: Record<string, any> = {
-          amount: newDeliveryCharges,
-          category: 'Logistics',
-          description: `Delivery Charges for Purchase ${invoice.invoice_number} (Party: ${supplier?.name || 'Party'})`,
-          expense_date: invoice.date ? new Date(invoice.date) : new Date(),
-          payment_method: 'UNPAID',
-          bank_account_id: null,
-          created_by: userId || null,
-        };
-        if (hasStatus) expPayload.status = 'PENDING';
-        if (hasPaidAmount) expPayload.paid_amount = 0;
-        if (hasPurchaseId) expPayload.purchase_id = purchaseId;
-
-        const [exp] = await trx('expenses').insert(expPayload).returning('*');
-        expenseId = exp?.id || null;
-      }
-
-      await trx('purchase_invoices').where('id', purchaseId).update({
-        delivery_charges: newDeliveryCharges,
-        expense_id: expenseId,
-        updated_at: new Date(),
-      });
+    // 1. Sever OPEX Bridge: Inbound freight is capitalized into inventory asset value, NOT in expenses.
+    // If a legacy OPEX record exists, delete it so it does not double-dip in OPEX.
+    if (invoice.expense_id) {
+      await trx('expenses').where('id', invoice.expense_id).del();
     }
+
+    await trx('purchase_invoices').where('id', purchaseId).update({
+      delivery_charges: newDeliveryCharges,
+      expense_id: null,
+      updated_at: new Date(),
+    });
 
     // 2. Update line items, inventory batches, and product rolling cost per kg
     for (const item of items) {
@@ -1178,16 +1288,23 @@ export async function updateStockDcAndPrices(
           updated_at: new Date(),
         });
 
-      // Update dedicated batch
+      // Update dedicated batch with landed cost
+      const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
+      const batchUpdate: Record<string, any> = {
+        updated_at: new Date(),
+      };
+      if (hasBatchBuyPriceCol) {
+        batchUpdate.batch_buy_price_per_kg = landedCost;
+      } else {
+        batchUpdate.buy_price_per_kg = landedCost;
+      }
+
       await trx('inventory_batches')
         .where({
           purchase_invoice_id: purchaseId,
           product_id: item.product_id,
         })
-        .update({
-          batch_buy_price_per_kg: landedCost,
-          updated_at: new Date(),
-        });
+        .update(batchUpdate);
 
       // Update product cost_price & rolling average cost
       const activeBatches = await trx('inventory_batches')

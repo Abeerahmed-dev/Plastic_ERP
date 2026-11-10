@@ -124,10 +124,9 @@ export const ProductFormModal = ({
   if (!isOpen) return null;
 
   const inputCls = (hasError: boolean) =>
-    `block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
-      hasError
-        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
+    `block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${hasError
+      ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+      : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
     }`;
 
   const handleFormSubmit = (data: ProductFormData) => {
@@ -159,7 +158,7 @@ export const ProductFormModal = ({
         </div>
 
         <div className="px-6 py-6 max-h-[70vh] overflow-y-auto">
-          <form id="product-form" onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
+          <form id="product-form" onSubmit={handleSubmit(handleFormSubmit)} autoComplete="off" className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -167,8 +166,11 @@ export const ProductFormModal = ({
                 </label>
                 <input
                   {...register('code')}
-                  placeholder="Leave blank to auto-generate"
-                  className={inputCls(!!errors.code)}
+                  disabled
+                  readOnly
+                  autoComplete="off"
+                  placeholder="Auto-generated upon saving"
+                  className="block w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-500 cursor-not-allowed"
                 />
                 {errors.code && <p className="mt-1 text-xs text-red-600">{errors.code.message}</p>}
               </div>
@@ -177,7 +179,12 @@ export const ProductFormModal = ({
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Product Name <span className="text-red-500">*</span>
                 </label>
-                <input {...register('name')} placeholder="e.g. Shopping Bag / 30/s Poly" className={inputCls(!!errors.name)} />
+                <input
+                  {...register('name')}
+                  autoComplete="off"
+                  placeholder="e.g. Shopping Bag / 30/s Poly"
+                  className={inputCls(!!errors.name)}
+                />
                 {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
               </div>
 
@@ -189,6 +196,7 @@ export const ProductFormModal = ({
                 <input
                   {...register('size', { required: 'Size/Variant is compulsory' })}
                   required
+                  autoComplete="off"
                   placeholder="e.g. 10x15 or Standard"
                   className={inputCls(!!errors.size)}
                 />
@@ -205,6 +213,7 @@ export const ProductFormModal = ({
                   step="any"
                   min="0"
                   {...register('low_stock_threshold')}
+                  autoComplete="off"
                   placeholder="e.g. 50"
                   className={inputCls(!!errors.low_stock_threshold)}
                 />
@@ -245,6 +254,7 @@ export const ProductFormModal = ({
                   value="Kilograms (KG)"
                   disabled
                   readOnly
+                  autoComplete="off"
                   className="block w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600 cursor-not-allowed"
                 />
                 <p className="mt-1 text-xs text-slate-400">Standard system-wide unit for all inventory & WAC calculations.</p>
@@ -272,6 +282,7 @@ export const ProductFormModal = ({
                       type="number"
                       step="0.01"
                       min="0"
+                      autoComplete="off"
                       placeholder="0"
                       className={inputCls(!!errors.opening_stock)}
                     />
@@ -290,12 +301,12 @@ export const ProductFormModal = ({
                       step="0.01"
                       min="0"
                       disabled={isZeroStock}
+                      autoComplete="off"
                       placeholder="0"
-                      className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
-                        isZeroStock
-                          ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                          : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-blue-500/20'
-                      }`}
+                      className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${isZeroStock
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-blue-500/20'
+                        }`}
                     />
                     {isZeroStock ? (
                       <p className="mt-1 text-[11px] text-slate-400">Disabled when Opening Stock is 0.</p>
@@ -312,6 +323,7 @@ export const ProductFormModal = ({
               <textarea
                 {...register('description')}
                 rows={3}
+                autoComplete="off"
                 className={inputCls(!!errors.description)}
               ></textarea>
             </div>

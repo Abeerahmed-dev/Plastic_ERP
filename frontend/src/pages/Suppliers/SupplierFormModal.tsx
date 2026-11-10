@@ -15,7 +15,7 @@ const PAKISTAN_CITIES = [
 
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
-  city: z.string().optional(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required').max(100),
   payment_terms: z.coerce.number().int().min(0).default(30),
   opening_payable: z.coerce.number().min(0).default(0),
   opening_advance: z.coerce.number().min(0).default(0),
@@ -86,30 +86,38 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
         </div>
 
         <div className="overflow-y-auto flex-1">
-          <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="px-6 py-5 space-y-4">
+          <form onSubmit={handleSubmit((d) => mutation.mutate(d))} autoComplete="off" className="px-6 py-5 space-y-4">
             {serverError && (
               <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{serverError}</div>
             )}
 
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">Name <span className="text-red-500">*</span></label>
-              <input {...register('name')} placeholder="e.g. Pak Polythene Supplies" className={inputCls(!!errors.name)} />
+              <input
+                {...register('name')}
+                autoComplete="off"
+                placeholder="e.g. Pak Polythene Supplies"
+                className={inputCls(!!errors.name)}
+              />
               {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">City <span className="text-red-500">*</span></label>
               <input
                 list="pakistan-cities"
                 {...register('city')}
+                required
+                autoComplete="off"
                 placeholder="e.g. Karachi, Lahore, Gujranwala"
-                className={inputCls(false)}
+                className={inputCls(!!errors.city)}
               />
               <datalist id="pakistan-cities">
                 {PAKISTAN_CITIES.map((c) => (
                   <option key={c} value={c} />
                 ))}
               </datalist>
+              {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
             </div>
 
             {!isEdit && (
@@ -123,6 +131,7 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
                     type="number"
                     step="any"
                     {...register('opening_payable')}
+                    autoComplete="off"
                     placeholder="0"
                     disabled={openingAdvance > 0}
                     className={`${inputCls(false)} ${
@@ -141,6 +150,7 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
                     type="number"
                     step="any"
                     {...register('opening_advance')}
+                    autoComplete="off"
                     placeholder="0"
                     disabled={openingPayable > 0}
                     className={`${inputCls(false)} ${
@@ -154,7 +164,13 @@ export default function SupplierFormModal({ supplier, onClose }: Props) {
 
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">Notes</label>
-              <textarea {...register('notes')} rows={2} placeholder="Any remarks…" className={`${inputCls(false)} resize-none`} />
+              <textarea
+                {...register('notes')}
+                rows={2}
+                autoComplete="off"
+                placeholder="Any remarks…"
+                className={`${inputCls(false)} resize-none`}
+              />
             </div>
 
             <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">

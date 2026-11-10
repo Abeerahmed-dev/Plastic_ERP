@@ -139,7 +139,9 @@ export async function processPOSCheckout(
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: effectiveUnitPrice,
           total_price: lineTotal,
+          actual_cogs: -lineCogs,
           name_urdu: product.name_urdu || null,
+          batchDepletions: [],
         });
 
         // Record inventory transaction
@@ -178,16 +180,22 @@ export async function processPOSCheckout(
         let kgToDeduct = sold_kg;
         let totalLineCogs = 0;
         let primaryBatchId: string | null = null;
+        const itemBatchDepletions: {
+          batch_id: string;
+          qty_deducted: number;
+          cogs_per_kg: number;
+        }[] = [];
 
         for (const bucket of activeBuckets) {
           if (kgToDeduct <= 0) break;
           if (!primaryBatchId) primaryBatchId = bucket.id;
 
           const available = Number(bucket.remaining_qty || 0);
-          const buyPrice = Number(bucket.batch_buy_price_per_kg || 0);
+          const buyPrice = Number(bucket.batch_buy_price_per_kg ?? bucket.buy_price_per_kg ?? 0);
 
           if (available >= kgToDeduct) {
-            const newRemaining = available - kgToDeduct;
+            const qtyToTake = kgToDeduct;
+            const newRemaining = available - qtyToTake;
             const newStatus = newRemaining <= 0 ? 'DEPLETED' : 'ACTIVE';
 
             await trx('inventory_batches')
@@ -198,11 +206,17 @@ export async function processPOSCheckout(
                 updated_at: new Date(),
               });
 
-            totalLineCogs += kgToDeduct * buyPrice;
+            totalLineCogs += qtyToTake * buyPrice;
+            itemBatchDepletions.push({
+              batch_id: bucket.id,
+              qty_deducted: qtyToTake,
+              cogs_per_kg: buyPrice,
+            });
             kgToDeduct = 0;
             break;
           } else {
             // Empty this bucket to 0
+            const qtyToTake = available;
             await trx('inventory_batches')
               .where('id', bucket.id)
               .update({
@@ -211,8 +225,13 @@ export async function processPOSCheckout(
                 updated_at: new Date(),
               });
 
-            totalLineCogs += available * buyPrice;
-            kgToDeduct -= available;
+            totalLineCogs += qtyToTake * buyPrice;
+            itemBatchDepletions.push({
+              batch_id: bucket.id,
+              qty_deducted: qtyToTake,
+              cogs_per_kg: buyPrice,
+            });
+            kgToDeduct -= qtyToTake;
           }
         }
 
@@ -251,7 +270,9 @@ export async function processPOSCheckout(
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: effectiveUnitPrice,
           total_price: lineTotal,
+          actual_cogs: -lineCogs,
           name_urdu: product.name_urdu || null,
+          batchDepletions: itemBatchDepletions,
         });
 
         // Record inventory transaction
@@ -371,11 +392,33 @@ export async function processPOSCheckout(
     (invoice as any).split_bank_amount = isSplit ? splitBankNet : (isBank ? effectiveAmountPaid : 0);
 
     // 3. Insert Sales Invoice Items
-    const finalItems = invoiceItemsToInsert.map((i) => ({
-      ...i,
-      invoice_id: invoice.id,
-    }));
-    await trx('sales_invoice_items').insert(finalItems);
+    const finalItems = invoiceItemsToInsert.map((i) => {
+      const rest = { ...(i as any) };
+      delete rest.batchDepletions;
+      return {
+        ...rest,
+        invoice_id: invoice.id,
+      };
+    });
+    const insertedDbItems = await trx('sales_invoice_items').insert(finalItems).returning('*');
+
+    // Record Strict Batch Lineage for POS sales
+    const posLineageRecords: any[] = [];
+    for (let i = 0; i < invoiceItemsToInsert.length; i++) {
+      const insertedItem = insertedDbItems[i];
+      const depletions = (invoiceItemsToInsert[i] as any).batchDepletions || [];
+      for (const dep of depletions) {
+        posLineageRecords.push({
+          sales_invoice_item_id: insertedItem.id,
+          inventory_batch_id: dep.batch_id,
+          qty_deducted: dep.qty_deducted,
+          cogs_per_kg: dep.cogs_per_kg,
+        });
+      }
+    }
+    if (posLineageRecords.length > 0) {
+      await trx('sales_invoice_item_batches').insert(posLineageRecords);
+    }
 
     // 4. Create Customer Payment & Liquidity Inflow (Cash in Drawer OR Bank Balance OR Split)
     if (effectiveAmountPaid > 0) {

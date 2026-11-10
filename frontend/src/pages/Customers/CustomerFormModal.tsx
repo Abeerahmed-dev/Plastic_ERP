@@ -13,7 +13,7 @@ const schema = z.object({
   phone: z.string().max(30).optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   address: z.string().optional(),
-  city: z.string().optional(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required').max(100),
   region: z.enum(['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other']).optional(),
   credit_limit: z.coerce.number().min(0).default(0),
   opening_balance: z.coerce.number().min(0).default(0),
@@ -42,22 +42,22 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
     resolver: zodResolver(schema),
     defaultValues: customer
       ? {
-          name: customer.name,
-          customer_type: (customer.customer_type === 'CASH' ? 'CASH' : 'CREDIT') as 'CASH' | 'CREDIT',
-          phone: customer.phone ?? '',
-          email: customer.email ?? '',
-          address: customer.address ?? '',
-          city: customer.city ?? '',
-          region: (customer.region as any) ?? undefined,
-          credit_limit: customer.credit_limit ?? 0,
-          notes: customer.notes ?? '',
-        }
+        name: customer.name,
+        customer_type: (customer.customer_type === 'CASH' ? 'CASH' : 'CREDIT') as 'CASH' | 'CREDIT',
+        phone: customer.phone ?? '',
+        email: customer.email ?? '',
+        address: customer.address ?? '',
+        city: customer.city ?? '',
+        region: (customer.region as any) ?? undefined,
+        credit_limit: customer.credit_limit ?? 0,
+        notes: customer.notes ?? '',
+      }
       : {
-          customer_type: 'CREDIT',
-          credit_limit: 0,
-          opening_balance: 0,
-          opening_advance: 0,
-        },
+        customer_type: 'CREDIT',
+        credit_limit: 0,
+        opening_balance: 0,
+        opening_advance: 0,
+      },
   });
 
   const openingBalance = Number(watch('opening_balance') || 0);
@@ -78,10 +78,9 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
   });
 
   const inputCls = (hasError: boolean) =>
-    `w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:ring-2 ${
-      hasError
-        ? 'border-red-400 focus:ring-red-200'
-        : 'border-gray-300 focus:border-blue-500 focus:ring-blue-100'
+    `w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:ring-2 ${hasError
+      ? 'border-red-400 focus:ring-red-200'
+      : 'border-gray-300 focus:border-blue-500 focus:ring-blue-100'
     }`;
 
   return (
@@ -101,7 +100,7 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
         </div>
 
         <div className="overflow-y-auto flex-1">
-          <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="px-6 py-5 space-y-4">
+          <form onSubmit={handleSubmit((d) => mutation.mutate(d))} autoComplete="off" className="px-6 py-5 space-y-4">
             {serverError && (
               <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
                 {serverError}
@@ -114,7 +113,12 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
                 <label className="mb-1.5 block text-sm font-medium text-gray-700">
                   Name <span className="text-red-500">*</span>
                 </label>
-                <input {...register('name')} placeholder="Ahmed Traders" className={inputCls(!!errors.name)} />
+                <input
+                  {...register('name')}
+                  autoComplete="off"
+                  placeholder="Ahmed Traders"
+                  className={inputCls(!!errors.name)}
+                />
                 {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
               </div>
               <div>
@@ -130,8 +134,17 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
 
             {/* City */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
-              <input {...register('city')} placeholder="Karachi" className={inputCls(false)} />
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                City <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('city')}
+                required
+                autoComplete="off"
+                placeholder="Karachi"
+                className={inputCls(!!errors.city)}
+              />
+              {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
             </div>
 
             {/* Day-Zero Dual Financial Inputs */}
@@ -146,11 +159,11 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
                     type="number"
                     step="any"
                     {...register('opening_balance')}
+                    autoComplete="off"
                     placeholder="0"
                     disabled={openingAdvance > 0}
-                    className={`${inputCls(!!errors.opening_balance)} ${
-                      openingAdvance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
-                    }`}
+                    className={`${inputCls(!!errors.opening_balance)} ${openingAdvance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                      }`}
                   />
                   <p className="mt-1 text-xs text-slate-500">Customer owes you (Udhaar)</p>
                 </div>
@@ -164,11 +177,11 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
                     type="number"
                     step="any"
                     {...register('opening_advance')}
+                    autoComplete="off"
                     placeholder="0"
                     disabled={openingBalance > 0}
-                    className={`${inputCls(!!errors.opening_advance)} ${
-                      openingBalance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
-                    }`}
+                    className={`${inputCls(!!errors.opening_advance)} ${openingBalance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                      }`}
                   />
                   <p className="mt-1 text-xs text-slate-500">Customer overpaid you (Wallet Liability)</p>
                 </div>
@@ -178,7 +191,13 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
             {/* Notes */}
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">Notes</label>
-              <textarea {...register('notes')} rows={2} placeholder="Any remarks..." className={`${inputCls(false)} resize-none`} />
+              <textarea
+                {...register('notes')}
+                rows={2}
+                autoComplete="off"
+                placeholder="Any remarks..."
+                className={`${inputCls(false)} resize-none`}
+              />
             </div>
 
             {/* Actions */}

@@ -163,6 +163,11 @@ export async function createInvoiceWithItems(
         let kgToDeduct = available_qty;
         let totalAvailableCogs = 0;
         let primaryBatchId: string | null = null;
+        const itemBatchDepletions: {
+          batch_id: string;
+          qty_deducted: number;
+          cogs_per_kg: number;
+        }[] = [];
 
         if (available_qty > 0) {
           // ── Auto-FIFO Price-Bucket Stock Deduction for available stock ──
@@ -176,10 +181,11 @@ export async function createInvoiceWithItems(
             if (!primaryBatchId) primaryBatchId = bucket.id;
 
             const available = Number(bucket.remaining_qty || 0);
-            const buyPrice = Number(bucket.batch_buy_price_per_kg || 0);
+            const buyPrice = Number(bucket.batch_buy_price_per_kg ?? bucket.buy_price_per_kg ?? 0);
 
             if (available >= kgToDeduct) {
-              const newRemaining = available - kgToDeduct;
+              const qtyToTake = kgToDeduct;
+              const newRemaining = available - qtyToTake;
               const newStatus = newRemaining <= 0 ? 'DEPLETED' : 'ACTIVE';
 
               await trx('inventory_batches')
@@ -190,11 +196,17 @@ export async function createInvoiceWithItems(
                   updated_at: new Date(),
                 });
 
-              totalAvailableCogs += kgToDeduct * buyPrice;
+              totalAvailableCogs += qtyToTake * buyPrice;
+              itemBatchDepletions.push({
+                batch_id: bucket.id,
+                qty_deducted: qtyToTake,
+                cogs_per_kg: buyPrice,
+              });
               kgToDeduct = 0;
               break;
             } else {
               // Empty this bucket to 0
+              const qtyToTake = available;
               await trx('inventory_batches')
                 .where('id', bucket.id)
                 .update({
@@ -203,8 +215,13 @@ export async function createInvoiceWithItems(
                   updated_at: new Date(),
                 });
 
-              totalAvailableCogs += available * buyPrice;
-              kgToDeduct -= available;
+              totalAvailableCogs += qtyToTake * buyPrice;
+              itemBatchDepletions.push({
+                batch_id: bucket.id,
+                qty_deducted: qtyToTake,
+                cogs_per_kg: buyPrice,
+              });
+              kgToDeduct -= qtyToTake;
             }
           }
 
@@ -282,6 +299,7 @@ export async function createInvoiceWithItems(
           actual_cogs,
           missing_qty,
           name_urdu: product.name_urdu || null,
+          batchDepletions: itemBatchDepletions,
         });
       }
     }
@@ -360,6 +378,25 @@ export async function createInvoiceWithItems(
     const insertedDbItems = await trx('sales_invoice_items')
       .insert(finalItems)
       .returning('*');
+
+    // Record Strict Batch Lineage for all fulfilled stock
+    const lineageRecordsToInsert: any[] = [];
+    for (let i = 0; i < itemsToInsert.length; i++) {
+      const insertedItem = insertedDbItems[i];
+      const depletions = (itemsToInsert[i] as any).batchDepletions || [];
+      for (const dep of depletions) {
+        lineageRecordsToInsert.push({
+          sales_invoice_item_id: insertedItem.id,
+          inventory_batch_id: dep.batch_id,
+          qty_deducted: dep.qty_deducted,
+          cogs_per_kg: dep.cogs_per_kg,
+        });
+      }
+    }
+
+    if (lineageRecordsToInsert.length > 0) {
+      await trx('sales_invoice_item_batches').insert(lineageRecordsToInsert);
+    }
 
     // Insert shortfall (missing_qty) into pending_deliveries queue
     for (let i = 0; i < itemsToInsert.length; i++) {
@@ -546,11 +583,13 @@ function ensureTxAdapter(tx: any) {
           if (Array.isArray(orderBy)) {
             for (const ob of orderBy) {
               const [col, dir] = Object.entries(ob)[0];
-              q = q.orderBy(col, dir);
+              const safeCol = col === 'created_date' ? 'created_at' : col;
+              q = q.orderBy(safeCol, dir);
             }
           } else {
             const [col, dir] = Object.entries(orderBy)[0];
-            q = q.orderBy(col, dir);
+            const safeCol = col === 'created_date' ? 'created_at' : col;
+            q = q.orderBy(safeCol, dir);
           }
         }
         return await q;
@@ -571,43 +610,193 @@ function ensureTxAdapter(tx: any) {
 }
 
 /**
- * Strict LIFO Restoration Loop
- * Iterates through eligible buckets newest first, applies capacity capping,
- * flips depleted buckets to ACTIVE, updates the database sequentially inside the transaction,
- * and cascades unallocated overflow to the newest bucket.
+ * Strict Lineage Restoration Engine (Targeted Reversal)
+ * Replaces generic LIFO guessing. Queries sales_invoice_item_batches for the returned
+ * sales_invoice_item_id, ordered by highest cogs_per_kg first (or created_at DESC to return newest stock first).
+ * Restores min(Returned Qty, qty_deducted) directly into that specific inventory_batch_id's remaining_qty.
+ * Reverses the COGS using the exact cogs_per_kg locked in the junction table.
+ * If a batch was DEPLETED, flips its status back to ACTIVE.
  */
 export async function restoreInventoryBucketsLifo(
   arg1: any,
   arg2: any,
-  arg3?: any
+  arg3?: any,
+  arg4?: any
 ): Promise<{ totalRestoredCogs: number; remainingUnallocated: number; primaryBatchId: string | null }> {
   let rawTx: any;
-  let returnedProductId: string | undefined;
+  let identifier: any;
   let returnedQuantity: number = 0;
-  let eligibleBuckets: any[] | undefined;
+  let extraOptions: any = {};
 
-  if (typeof arg1 === 'string') {
-    returnedProductId = arg1;
+  if (
+    typeof arg1 === 'string' ||
+    (typeof arg1 === 'object' &&
+      arg1 !== null &&
+      !arg1.raw &&
+      typeof arg1 !== 'function' &&
+      !Array.isArray(arg1) &&
+      !arg1.inventory_batch)
+  ) {
+    identifier = arg1;
     returnedQuantity = Number(arg2 || 0);
     rawTx = arg3;
+    extraOptions = arg4 || {};
   } else if (Array.isArray(arg1)) {
-    eligibleBuckets = arg1;
+    extraOptions = { eligibleBuckets: arg1 };
     returnedQuantity = Number(arg2 || 0);
     rawTx = arg3;
-  } else if (typeof arg2 === 'string') {
-    rawTx = arg1;
-    returnedProductId = arg2;
-    returnedQuantity = Number(arg3 || 0);
-  } else if (Array.isArray(arg2)) {
-    rawTx = arg1;
-    eligibleBuckets = arg2;
-    returnedQuantity = Number(arg3 || 0);
+    extraOptions = arg4 || {};
   } else {
     rawTx = arg1;
-    returnedQuantity = Number(arg2 || 0);
+    identifier = arg2;
+    returnedQuantity = Number(arg3 || 0);
+    extraOptions = arg4 || {};
+  }
+
+  const knexClient = (rawTx && typeof rawTx === 'function') || (rawTx && rawTx.raw) ? rawTx : db;
+
+  let salesInvoiceItemId: string | undefined;
+  let returnedProductId: string | undefined;
+  let previouslyReturned: number = 0;
+
+  if (typeof identifier === 'object' && identifier !== null && !Array.isArray(identifier)) {
+    salesInvoiceItemId = identifier.salesInvoiceItemId || identifier.sales_invoice_item_id || identifier.id;
+    returnedProductId = identifier.productId || identifier.product_id;
+    previouslyReturned = Number(identifier.previouslyReturned || identifier.previously_returned || 0);
+  } else if (typeof identifier === 'string') {
+    salesInvoiceItemId = identifier;
+  }
+
+  if (extraOptions.productId || extraOptions.product_id) {
+    returnedProductId = extraOptions.productId || extraOptions.product_id;
+  }
+  if (extraOptions.previouslyReturned !== undefined) {
+    previouslyReturned = Number(extraOptions.previouslyReturned || 0);
+  }
+
+  let qtyToRestore = Number(returnedQuantity);
+  let totalRestoredCogs = 0;
+  let primaryBatchId: string | null = null;
+
+  // 1. Query sales_invoice_item_batches for the returned sales_invoice_item_id
+  let lineageRecords: any[] = [];
+  if (salesInvoiceItemId) {
+    const hasJunctionTable = await knexClient.schema.hasTable('sales_invoice_item_batches');
+    if (hasJunctionTable) {
+      lineageRecords = await knexClient('sales_invoice_item_batches as siib')
+        .join('inventory_batches as ib', 'siib.inventory_batch_id', 'ib.id')
+        .where('siib.sales_invoice_item_id', salesInvoiceItemId)
+        .orderBy('siib.cogs_per_kg', 'desc')
+        .orderBy('siib.created_at', 'desc')
+        .select(
+          'siib.id as lineage_id',
+          'siib.sales_invoice_item_id',
+          'siib.inventory_batch_id',
+          'siib.qty_deducted',
+          'siib.cogs_per_kg',
+          'ib.id as batch_id',
+          'ib.original_qty',
+          'ib.remaining_qty',
+          'ib.status',
+          'ib.product_id'
+        );
+    }
+
+    // Direct Batch Link fallback if junction records do not exist
+    if ((!lineageRecords || lineageRecords.length === 0)) {
+      const itemRow = await knexClient('sales_invoice_items')
+        .where('id', salesInvoiceItemId)
+        .first();
+      if (itemRow) {
+        if (!returnedProductId) returnedProductId = itemRow.product_id;
+        const targetBatchId = itemRow.batch_id || extraOptions.batchId;
+        if (targetBatchId) {
+          const directBatch = await knexClient('inventory_batches')
+            .where('id', targetBatchId)
+            .first();
+          if (directBatch) {
+            lineageRecords = [{
+              lineage_id: null,
+              sales_invoice_item_id: salesInvoiceItemId,
+              inventory_batch_id: directBatch.id,
+              qty_deducted: Math.abs(Number(itemRow.quantity || 0)),
+              cogs_per_kg: Number(
+                directBatch.batch_buy_price_per_kg ??
+                directBatch.buy_price_per_kg ??
+                itemRow.applied_cogs_per_kg ??
+                0
+              ),
+              batch_id: directBatch.id,
+              original_qty: directBatch.original_qty,
+              remaining_qty: directBatch.remaining_qty,
+              status: directBatch.status,
+              product_id: directBatch.product_id,
+            }];
+          }
+        }
+      }
+    }
+  }
+
+  if (lineageRecords && lineageRecords.length > 0) {
+    // ── Targeted Restoration Engine (Strict Batch Lineage) ──
+    let prevRemaining = previouslyReturned;
+
+    for (const record of lineageRecords) {
+      if (qtyToRestore <= 0) break;
+      if (!primaryBatchId) primaryBatchId = record.inventory_batch_id;
+
+      const qtyDeducted = Number(record.qty_deducted || 0);
+      if (qtyDeducted <= 0) continue;
+
+      // Handle prior partial returns if any
+      const priorForThis = Math.min(prevRemaining, qtyDeducted);
+      prevRemaining = Math.max(0, prevRemaining - priorForThis);
+
+      const availableToRestore = qtyDeducted - priorForThis;
+      if (availableToRestore <= 0) continue;
+
+      const restoreAmount = Math.min(qtyToRestore, availableToRestore);
+      if (restoreAmount <= 0) continue;
+
+      const currentRemaining = Number(record.remaining_qty || 0);
+      const newRemaining = currentRemaining + restoreAmount;
+      const cogsPerKg = Number(record.cogs_per_kg || 0);
+
+      // Restore directly into that specific inventory_batch_id's remaining_qty
+      // If a batch was DEPLETED, flip its status back to ACTIVE
+      await knexClient('inventory_batches')
+        .where('id', record.inventory_batch_id)
+        .update({
+          remaining_qty: newRemaining,
+          status: 'ACTIVE',
+          updated_at: new Date(),
+        });
+
+      // Reverse COGS using the exact cogs_per_kg locked in the junction table
+      totalRestoredCogs += restoreAmount * cogsPerKg;
+      qtyToRestore -= restoreAmount;
+    }
+
+    return {
+      totalRestoredCogs: Math.round(totalRestoredCogs * 100) / 100,
+      remainingUnallocated: Math.round(qtyToRestore * 10000) / 10000,
+      primaryBatchId,
+    };
+  }
+
+  // ── Fallback for Legacy Invoices or Standalone Returns without Lineage Ledger ──
+  if (!returnedProductId && salesInvoiceItemId) {
+    const itemRow = await knexClient('sales_invoice_items')
+      .where('id', salesInvoiceItemId)
+      .first();
+    if (itemRow) {
+      returnedProductId = itemRow.product_id;
+    }
   }
 
   const tx = ensureTxAdapter(rawTx);
+  let eligibleBuckets: any[] = extraOptions.eligibleBuckets;
 
   if (!eligibleBuckets && returnedProductId) {
     eligibleBuckets = await tx.inventory_batch.findMany({
@@ -615,15 +804,11 @@ export async function restoreInventoryBucketsLifo(
         product_id: returnedProductId,
         remaining_qty: { lt: tx.inventory_batch.fields.original_qty },
       },
-      orderBy: { created_date: 'desc' }, // CRITICAL: LIFO order
+      orderBy: { created_at: 'desc' },
     });
   }
 
   eligibleBuckets = eligibleBuckets || [];
-
-  let qtyToRestore = Number(returnedQuantity);
-  let totalRestoredCogs = 0;
-  let primaryBatchId: string | null = null;
   const updatedRemainingMap = new Map<string, number>();
 
   for (const bucket of eligibleBuckets) {
@@ -638,14 +823,13 @@ export async function restoreInventoryBucketsLifo(
 
     const restoreAmount = Math.min(qtyToRestore, spaceAvailable);
     qtyToRestore -= restoreAmount;
-    totalRestoredCogs += (restoreAmount * Number(bucket.buy_price_per_kg ?? bucket.batch_buy_price_per_kg ?? 0));
+    totalRestoredCogs += restoreAmount * Number(bucket.buy_price_per_kg ?? bucket.batch_buy_price_per_kg ?? 0);
 
     const newRemaining = remaining + restoreAmount;
     const newStatus = newRemaining > 0 ? 'ACTIVE' : bucket.status;
 
     updatedRemainingMap.set(bucket.id, newRemaining);
 
-    // CRITICAL MISSING STEP: Actually update the database
     await tx.inventory_batch.update({
       where: { id: bucket.id },
       data: {
@@ -655,14 +839,13 @@ export async function restoreInventoryBucketsLifo(
     });
   }
 
-  // Handle Unallocated Overflow
+  // Handle Unallocated Overflow for legacy fallback
   if (qtyToRestore > 0) {
-    /* Force update the very first eligible bucket with the overflow */
     let targetBucket = eligibleBuckets[0];
     if (!targetBucket && returnedProductId) {
       const allBuckets = await tx.inventory_batch.findMany({
         where: { product_id: returnedProductId },
-        orderBy: { created_date: 'desc' },
+        orderBy: { created_at: 'desc' },
       });
       targetBucket = allBuckets[0];
     }
@@ -672,7 +855,7 @@ export async function restoreInventoryBucketsLifo(
       const currentRem = updatedRemainingMap.get(targetBucket.id) ?? Number(targetBucket.remaining_qty);
       const overflowRemaining = currentRem + qtyToRestore;
       const buyPrice = Number(targetBucket.buy_price_per_kg ?? targetBucket.batch_buy_price_per_kg ?? 0);
-      totalRestoredCogs += (qtyToRestore * buyPrice);
+      totalRestoredCogs += qtyToRestore * buyPrice;
 
       await tx.inventory_batch.update({
         where: { id: targetBucket.id },
@@ -685,7 +868,11 @@ export async function restoreInventoryBucketsLifo(
     }
   }
 
-  return { totalRestoredCogs, remainingUnallocated: qtyToRestore, primaryBatchId };
+  return {
+    totalRestoredCogs: Math.round(totalRestoredCogs * 100) / 100,
+    remainingUnallocated: Math.round(qtyToRestore * 10000) / 10000,
+    primaryBatchId,
+  };
 }
 
 export async function processSalesReturn(
@@ -754,11 +941,15 @@ export async function processSalesReturn(
           updated_at: new Date(),
         });
 
-      // ── LIFO Restoration Loop (Sales Return / Credit Note) ──
+      // ── Targeted Lineage Restoration Engine (Sales Return / Credit Note) ──
       const { totalRestoredCogs, primaryBatchId } = await restoreInventoryBucketsLifo(
         trx,
-        itemInput.product_id,
-        returnKg
+        parentItem.id,
+        returnKg,
+        {
+          productId: itemInput.product_id,
+          previouslyReturned: previouslyReturned * unitMultiplier,
+        }
       );
 
       // Unit COGS strictly derived from the restored buckets sum (NOT rolling WAC)
@@ -789,6 +980,7 @@ export async function processSalesReturn(
         applied_cogs_per_kg: restoredUnitCost,
         unit_price: unitPrice,
         total_price: -Math.abs(lineTotal),
+        actual_cogs: -Math.round(Math.abs(totalRestoredCogs) * 100) / 100,
       });
 
     }
@@ -826,6 +1018,49 @@ export async function processSalesReturn(
 
     await trx('sales_invoice_items').insert(finalItems);
 
+    // Ensure balance_due and has_returns columns exist on sales_invoices
+    const hasBalanceDue = await trx.schema.hasColumn('sales_invoices', 'balance_due');
+    if (!hasBalanceDue) {
+      await trx.schema.alterTable('sales_invoices', (table) => {
+        table.decimal('balance_due', 14, 2).nullable();
+      });
+      await trx.raw('UPDATE sales_invoices SET balance_due = GREATEST(0, total_amount - paid_amount)');
+    }
+
+    const hasReturnsCol = await trx.schema.hasColumn('sales_invoices', 'has_returns');
+    if (!hasReturnsCol) {
+      await trx.schema.alterTable('sales_invoices', (table) => {
+        table.boolean('has_returns').notNullable().defaultTo(false);
+      });
+    }
+
+    // Update Parent Invoice: Deduct total return value from both total_amount and balance_due
+    await trx.raw(
+      `UPDATE sales_invoices 
+       SET total_amount = total_amount - ?, 
+           balance_due = GREATEST(0, COALESCE(balance_due, total_amount - paid_amount) - ?)${hasReturnsCol ? ', has_returns = true' : ''},
+           updated_at = NOW() 
+       WHERE id = ?`,
+      [totalCreditAmount, totalCreditAmount, parentInvoiceId]
+    );
+
+    // Recalculate parent invoice status based on updated total_amount and balance_due
+    const updatedParent = await trx('sales_invoices').where('id', parentInvoiceId).first();
+    if (updatedParent && updatedParent.status !== 'CANCELLED') {
+      const pTotal = Number(updatedParent.total_amount || 0);
+      const pPaid = Number(updatedParent.paid_amount || 0);
+      const pBalance = Number(updatedParent.balance_due || 0);
+      let newStatus = updatedParent.status;
+      if (pTotal <= 0 || pBalance <= 0) {
+        newStatus = 'PAID';
+      } else if (pPaid > 0) {
+        newStatus = 'PARTIAL';
+      } else {
+        newStatus = 'UNPAID';
+      }
+      await trx('sales_invoices').where('id', parentInvoiceId).update({ status: newStatus });
+    }
+
     return creditNote;
   });
 }
@@ -847,30 +1082,37 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
     query.where('si.created_by', filter.created_by);
   }
 
+  const hasBalanceDue = await db.schema.hasColumn('sales_invoices', 'balance_due');
+  const hasReturnsCol = await db.schema.hasColumn('sales_invoices', 'has_returns');
+
+  const selectColumns = [
+    'si.id',
+    'si.invoice_number',
+    'si.date',
+    'si.due_date',
+    'si.subtotal',
+    'si.discount',
+    'si.delivery_charge',
+    'si.total_amount',
+    'si.paid_amount',
+    'si.status',
+    'si.invoice_type',
+    'si.parent_invoice_id',
+    'si.return_reason',
+    'si.created_by',
+    'c.id as customer_id',
+    'c.name as customer_name',
+    'c.code as customer_code',
+    'c.city as city',
+    'c.city as customer_city',
+    'u.name as created_by_name',
+    'r.name as created_by_role',
+  ];
+  if (hasBalanceDue) selectColumns.push('si.balance_due');
+  if (hasReturnsCol) selectColumns.push('si.has_returns');
+
   const rows = await query
-    .select(
-      'si.id',
-      'si.invoice_number',
-      'si.date',
-      'si.due_date',
-      'si.subtotal',
-      'si.discount',
-      'si.delivery_charge',
-      'si.total_amount',
-      'si.paid_amount',
-      'si.status',
-      'si.invoice_type',
-      'si.parent_invoice_id',
-      'si.return_reason',
-      'si.created_by',
-      'c.id as customer_id',
-      'c.name as customer_name',
-      'c.code as customer_code',
-      'c.city as city',
-      'c.city as customer_city',
-      'u.name as created_by_name',
-      'r.name as created_by_role'
-    )
+    .select(selectColumns)
     .orderBy('si.date', 'desc')
     .orderBy('si.created_at', 'desc');
 
@@ -982,12 +1224,19 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
   }
 
   return rows.map((r) => {
-    const original_total = Number(r.total_amount || 0);
+    const hasReturnsFlag = Boolean((r as any).has_returns);
     const returned_total = creditNotesTotalByInvoice.get(r.id) || 0;
-    const net_invoice_total = Math.round((original_total - returned_total) * 100) / 100;
+    const net_invoice_total = hasReturnsFlag
+      ? Number(r.total_amount || 0)
+      : Math.round((Number(r.total_amount || 0) - returned_total) * 100) / 100;
+    const original_total = hasReturnsFlag
+      ? Math.round((Number(r.total_amount || 0) + returned_total) * 100) / 100
+      : Number(r.total_amount || 0);
     const amount_paid = Number(r.paid_amount || r.amount_paid || 0);
     // CRITICAL: True net balance without Math.max(0, ...). Allow negative numbers for OVERPAID state.
-    const balance_due = Math.round((net_invoice_total - amount_paid) * 100) / 100;
+    const balance_due = (r.balance_due !== undefined && r.balance_due !== null)
+      ? Number(r.balance_due)
+      : Math.round((net_invoice_total - amount_paid) * 100) / 100;
     const payments = paymentsByInvoice.get(r.id) || [];
     const credit_notes = creditNotesByInvoice.get(r.id) || [];
 
@@ -997,8 +1246,10 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
 
     return {
       ...r,
+      has_returns: hasReturnsFlag || returned_total > 0,
       status: dynamicStatus,
-      total_amount: original_total,
+      total_amount: net_invoice_total,
+      original_total,
       linked_returns_total: returned_total,
       net_total: net_invoice_total,
       net_invoice_total: net_invoice_total,
@@ -1080,11 +1331,21 @@ export async function findInvoiceById(id: string) {
     (sum: number, cn: any) => sum + Math.abs(Number(cn.total_amount || 0)),
     0
   );
-  const net_invoice_total = Math.round((original_total - returned_total) * 100) / 100;
+  const hasReturnsFlag = Boolean((invoice as any).has_returns);
+  const net_invoice_total = hasReturnsFlag
+    ? Number(invoice.total_amount || 0)
+    : Math.round((Number(invoice.total_amount || 0) - returned_total) * 100) / 100;
+  const original_total_calc = hasReturnsFlag
+    ? Math.round((Number(invoice.total_amount || 0) + returned_total) * 100) / 100
+    : Number(invoice.total_amount || 0);
   // CRITICAL: Do NOT use Math.max(0, ...). Allow negative numbers for OVERPAID state.
-  const balance_due = Math.round((net_invoice_total - amount_paid) * 100) / 100;
+  const balance_due = (invoice.balance_due !== undefined && invoice.balance_due !== null)
+    ? Number(invoice.balance_due)
+    : Math.round((net_invoice_total - amount_paid) * 100) / 100;
 
-  invoice.total_amount = original_total;
+  invoice.has_returns = hasReturnsFlag || returned_total > 0;
+  invoice.total_amount = net_invoice_total;
+  invoice.original_total = original_total_calc;
   invoice.linked_returns_total = returned_total;
   invoice.net_total = net_invoice_total;
   invoice.net_invoice_total = net_invoice_total;
@@ -1228,5 +1489,281 @@ export async function getPendingDeliveries(query?: { status?: string; product_id
   }
 
   return await q;
+}
+
+/**
+ * Offline Sync & Overdraft Split Engine:
+ * Ingests chronologically ordered offline sales invoices, computes live physical stock,
+ * splits items into fulfilled vs deferred quantities, depletes FIFO batches for fulfilled stock,
+ * records liabilities in pending_deliveries, and calculates estimated/actual COGS.
+ */
+export async function processOfflineSyncInvoices(
+  rawInvoices: any[],
+  userId?: string
+): Promise<any[]> {
+  const invoicesList = Array.isArray(rawInvoices) ? rawInvoices : (rawInvoices as any)?.invoices || [rawInvoices];
+
+  // 1. Strict Chronological Ordering by Unix timestamp / created_at
+  const sortedInvoices = [...invoicesList].sort((a, b) => {
+    const tA = Number(a.timestamp || a.offline_timestamp || (a.date ? new Date(a.date).getTime() : 0));
+    const tB = Number(b.timestamp || b.offline_timestamp || (b.date ? new Date(b.date).getTime() : 0));
+    return tA - tB;
+  });
+
+  const results: any[] = [];
+
+  await db.transaction(async (trx) => {
+    for (const invPayload of sortedInvoices) {
+      // Ensure customer
+      let customerId = invPayload.customer_id;
+      if (!customerId) {
+        const defaultCust = await trx('customers').first();
+        customerId = defaultCust?.id;
+      }
+
+      const invoiceNumber = invPayload.invoice_number || `POS-OFFLINE-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
+      const invoiceDate = invPayload.date || new Date().toISOString().split('T')[0];
+
+      let invoiceTotal = 0;
+      let invoiceSubtotal = 0;
+      let invoiceRequestedTotal = 0;
+      let invoiceFulfilledTotal = 0;
+      let invoiceDeferredTotal = 0;
+
+      const processedItems: any[] = [];
+      const lineageRecords: any[] = [];
+      const pendingDeliveryRecords: any[] = [];
+
+      for (const item of (invPayload.items || [])) {
+        // Lock product row to prevent concurrent race conditions
+        const liveProduct = await trx('products')
+          .where({ id: item.product_id })
+          .forUpdate()
+          .first();
+
+        if (!liveProduct) {
+          throw new Error(`Product ${item.product_id} not found during offline sync`);
+        }
+
+        const liveStock = Math.max(0, Number(liveProduct.total_stock_kg || 0));
+        const requested_qty = Number(item.quantity ?? item.requested_qty ?? 0);
+        const fulfilled_qty = Math.min(liveStock, requested_qty);
+        const deferred_qty = Math.max(0, requested_qty - fulfilled_qty);
+        const is_deferred = deferred_qty > 0;
+
+        const previousWAC = Number(liveProduct.rolling_avg_cost_per_kg || liveProduct.cost_price || 0);
+
+        let kgToDeduct = fulfilled_qty;
+        let actual_cogs = 0;
+        let primaryBatchId: string | null = null;
+        const itemDepletions: { batch_id: string; qty: number; cost: number }[] = [];
+
+        // FIFO Depletion for physically available stock
+        if (fulfilled_qty > 0) {
+          const activeBatches = await trx('inventory_batches')
+            .where('product_id', item.product_id)
+            .andWhere('remaining_qty', '>', 0)
+            .orderBy('created_at', 'asc');
+
+          for (const batch of activeBatches) {
+            if (kgToDeduct <= 0) break;
+            if (!primaryBatchId) primaryBatchId = batch.id;
+
+            const remainingInBatch = Number(batch.remaining_qty || 0);
+            const batchCost = Number(batch.batch_buy_price_per_kg ?? batch.buy_price_per_kg ?? previousWAC);
+
+            if (remainingInBatch >= kgToDeduct) {
+              const qtyTaken = kgToDeduct;
+              const newRem = remainingInBatch - qtyTaken;
+              await trx('inventory_batches')
+                .where('id', batch.id)
+                .update({
+                  remaining_qty: newRem,
+                  status: newRem <= 0 ? 'DEPLETED' : 'ACTIVE',
+                  updated_at: new Date(),
+                });
+
+              actual_cogs += qtyTaken * batchCost;
+              itemDepletions.push({ batch_id: batch.id, qty: qtyTaken, cost: batchCost });
+              kgToDeduct = 0;
+              break;
+            } else {
+              const qtyTaken = remainingInBatch;
+              await trx('inventory_batches')
+                .where('id', batch.id)
+                .update({
+                  remaining_qty: 0,
+                  status: 'DEPLETED',
+                  updated_at: new Date(),
+                });
+
+              actual_cogs += qtyTaken * batchCost;
+              itemDepletions.push({ batch_id: batch.id, qty: qtyTaken, cost: batchCost });
+              kgToDeduct -= qtyTaken;
+            }
+          }
+
+          // Fallback if stock was in product total_stock_kg but no active batch was found
+          if (kgToDeduct > 0) {
+            actual_cogs += kgToDeduct * previousWAC;
+          }
+
+          // Decrement physical stock on product
+          await trx('products')
+            .where({ id: item.product_id })
+            .update({
+              total_stock_kg: trx.raw('GREATEST(0, total_stock_kg - ?)', [fulfilled_qty]),
+              updated_at: new Date(),
+            });
+
+          // Log physical inventory dispatch
+          await trx('inventory_transactions').insert({
+            product_id: item.product_id,
+            transaction_type: 'SALE',
+            quantity_kg: fulfilled_qty,
+            unit_cost: fulfilled_qty > 0 ? (actual_cogs / fulfilled_qty) : previousWAC,
+            total_asset_value: Math.round(actual_cogs * 100) / 100,
+            capital_equity_value: 0,
+            notes: `Offline Sync Sale ${invoiceNumber} (Fulfilled ${fulfilled_qty} KG${deferred_qty > 0 ? `, Deferred ${deferred_qty} KG` : ''})`,
+            created_by: userId || null,
+          });
+        }
+
+        // True Financial Costing:
+        // Estimated COGS = Actual COGS of fulfilled stock + (Deferred shortfall * previous WAC)
+        const missingEstimatedCost = Math.round(deferred_qty * previousWAC * 100) / 100;
+        const estimated_cogs = Math.round((actual_cogs + missingEstimatedCost) * 100) / 100;
+        const applied_cogs_per_kg = requested_qty > 0
+          ? Math.round((estimated_cogs / requested_qty) * 10000) / 10000
+          : previousWAC;
+
+        const unit_price = Number(item.unit_price || liveProduct.sale_price || 0);
+        const lineTotal = Math.round(requested_qty * unit_price * 100) / 100;
+
+        invoiceSubtotal += lineTotal;
+        invoiceRequestedTotal += requested_qty;
+        invoiceFulfilledTotal += fulfilled_qty;
+        invoiceDeferredTotal += deferred_qty;
+
+        processedItems.push({
+          product_id: item.product_id,
+          size: item.size || liveProduct.size || 'Standard',
+          batch_id: primaryBatchId,
+          quantity: requested_qty,
+          requested_qty,
+          fulfilled_qty,
+          deferred_qty,
+          selected_unit: item.selected_unit || 'KG',
+          unit_price,
+          total_price: lineTotal,
+          is_deferred,
+          estimated_cogs,
+          actual_cogs: Math.round(actual_cogs * 100) / 100,
+          applied_cogs_per_kg,
+          depletions: itemDepletions,
+        });
+      }
+
+      const discount = Number(invPayload.discount || 0);
+      invoiceTotal = Math.max(0, invoiceSubtotal - discount);
+      const paidAmount = Number(invPayload.paid_amount ?? invPayload.amount_paid ?? invoiceTotal);
+
+      // Save Invoice Header
+      const [savedInvoice] = await trx('sales_invoices')
+        .insert({
+          customer_id: customerId,
+          invoice_number: invoiceNumber,
+          invoice_type: 'SALE',
+          date: invoiceDate,
+          subtotal: invoiceSubtotal,
+          discount,
+          total_amount: invoiceTotal,
+          paid_amount: paidAmount,
+          requested_qty: invoiceRequestedTotal,
+          fulfilled_qty: invoiceFulfilledTotal,
+          deferred_qty: invoiceDeferredTotal,
+          status: paidAmount >= invoiceTotal ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID'),
+          offline_id: invPayload.id || invPayload.offline_id || null,
+          offline_timestamp: Number(invPayload.timestamp || invPayload.offline_timestamp || Date.now()),
+          created_by: userId || null,
+        })
+        .returning('*');
+
+      const savedItems: any[] = [];
+
+      for (const itemData of processedItems) {
+        const [savedItem] = await trx('sales_invoice_items')
+          .insert({
+            invoice_id: savedInvoice.id,
+            product_id: itemData.product_id,
+            size: itemData.size,
+            batch_id: itemData.batch_id,
+            quantity: itemData.requested_qty,
+            requested_qty: itemData.requested_qty,
+            fulfilled_qty: itemData.fulfilled_qty,
+            deferred_qty: itemData.deferred_qty,
+            selected_unit: itemData.selected_unit,
+            unit_price: itemData.unit_price,
+            total_price: itemData.total_price,
+            is_deferred: itemData.is_deferred,
+            estimated_cogs: itemData.estimated_cogs,
+            actual_cogs: itemData.actual_cogs,
+            applied_cogs_per_kg: itemData.applied_cogs_per_kg,
+          })
+          .returning('*');
+
+        savedItems.push(savedItem);
+
+        // Record lineage
+        for (const dep of itemData.depletions) {
+          lineageRecords.push({
+            sales_invoice_item_id: savedItem.id,
+            inventory_batch_id: dep.batch_id,
+            qty_deducted: dep.qty,
+            cogs_per_kg: dep.cost,
+          });
+        }
+
+        // Insert pending deliveries if overdraft occurs
+        if (itemData.deferred_qty > 0) {
+          await trx('pending_deliveries').insert({
+            sales_invoice_id: savedInvoice.id,
+            sales_invoice_item_id: savedItem.id,
+            product_id: itemData.product_id,
+            pending_qty: itemData.deferred_qty,
+            fulfilled_qty: 0,
+            status: 'PENDING',
+          });
+        }
+      }
+
+      if (lineageRecords.length > 0) {
+        await trx('sales_invoice_item_batches').insert(lineageRecords);
+      }
+
+      // Record direct customer payment if paidAmount > 0
+      if (paidAmount > 0) {
+        await trx('customer_payments').insert({
+          customer_id: customerId,
+          invoice_id: savedInvoice.id,
+          payment_number: `RCV-${invoiceNumber}`,
+          payment_date: invoiceDate,
+          amount: paidAmount,
+          payment_method: invPayload.payment_method || 'CASH',
+          created_by: userId || null,
+        });
+      }
+
+      results.push({
+        ...savedInvoice,
+        requested_qty: invoiceRequestedTotal,
+        fulfilled_qty: invoiceFulfilledTotal,
+        deferred_qty: invoiceDeferredTotal,
+        items: savedItems,
+      });
+    }
+  });
+
+  return results;
 }
 

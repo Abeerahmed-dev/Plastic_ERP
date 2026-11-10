@@ -17,6 +17,7 @@ export async function resetDatabaseController(
       'customer_payments',
       'supplier_payments',
       'expenses',
+      'sales_invoice_item_batches',
       'sales_invoice_items',
       'sales_invoices',
       'purchase_invoice_items',

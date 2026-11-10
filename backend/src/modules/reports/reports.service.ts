@@ -19,6 +19,9 @@ export const reportsService = {
   getLiquidityPayablesDetail: async () => {
     return repo.getLiquidityPayablesDetail();
   },
+  getLiquidityPendingExpensesDetail: async () => {
+    return repo.getLiquidityPendingExpensesDetail();
+  },
   getLiquiditySupplierAdvancesDetail: async () => {
     return repo.getLiquiditySupplierAdvancesDetail();
   },

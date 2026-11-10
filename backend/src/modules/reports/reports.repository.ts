@@ -80,7 +80,7 @@ export async function getInventoryLedgerReport() {
       'sii.product_id',
       db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity)) as total_kg_sold'),
       db.raw('SUM(sii.total_price) as total_revenue'),
-      db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity) * COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)) as total_cogs')
+      db.raw('SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as total_cogs')
     );
 
   const purchaseMap = new Map<string, number>();
@@ -98,6 +98,8 @@ export async function getInventoryLedgerReport() {
   }
 
   const allBatches = await db('inventory_batches')
+    .where('original_qty', '>', 0)
+    .andWhere('status', '!=', 'RETURNED')
     .orderBy('created_at', 'asc');
 
   const batchMap = new Map<string, any[]>();
@@ -208,9 +210,55 @@ export async function getLiquidityLedgerReport() {
     supplier_advances_asset += netDetails.advance_payable;
   }
 
+  // ── Pending OPEX Liability (Option B: Isolated Unpaid Operational Expenses) ──
+  // Check 'expense_records' or 'expenses' for unpaid/pending operational expenses
+  const expTable = (await db.schema.hasTable('expense_records'))
+    ? 'expense_records'
+    : ((await db.schema.hasTable('expenses')) ? 'expenses' : null);
+
+  let pending_expenses_liability = 0;
+  if (expTable) {
+    const hasStatus = await db.schema.hasColumn(expTable, 'status');
+    const hasPaidAmount = await db.schema.hasColumn(expTable, 'paid_amount');
+    const hasPurchaseId = await db.schema.hasColumn(expTable, 'purchase_id');
+
+    const pendingExpensesQuery = db(expTable);
+    if (hasPurchaseId) {
+      if (typeof (pendingExpensesQuery as any).whereNull === 'function') {
+        pendingExpensesQuery.whereNull('purchase_id');
+      } else {
+        pendingExpensesQuery.where('purchase_id', null);
+      }
+    }
+    if (hasStatus) {
+      pendingExpensesQuery.whereIn('status', ['PENDING', 'UNPAID', 'pending', 'unpaid']);
+    } else {
+      pendingExpensesQuery.where('payment_method', 'UNPAID');
+    }
+
+    if (hasPaidAmount) {
+      const res: any = await pendingExpensesQuery
+        .select(db.raw('COALESCE(SUM(GREATEST(0, amount - COALESCE(paid_amount, 0))), 0) as total'))
+        .first();
+      pending_expenses_liability = Number(res?.total || 0);
+    } else {
+      const res: any = await pendingExpensesQuery.sum('amount as total').first();
+      pending_expenses_liability = Number(res?.total || 0);
+    }
+  }
+
   const total_liquid = cash_drawer + bank_balances;
-  const total_assets = total_liquid + market_receivables + total_inventory_value + supplier_advances_asset;
-  const total_liabilities = total_accounts_payable + customer_advances_liability;
+  const total_assets =
+    total_liquid +
+    market_receivables +
+    total_inventory_value +
+    supplier_advances_asset +
+    post_dated_cheques;
+  const total_liabilities =
+    total_accounts_payable +
+    customer_advances_liability +
+    issued_post_dated_cheques +
+    pending_expenses_liability;
   const net_business_capital = total_assets - total_liabilities;
 
   return {
@@ -223,7 +271,11 @@ export async function getLiquidityLedgerReport() {
     total_accounts_payable: Math.round(total_accounts_payable * 100) / 100,
     customer_advances_liability: Math.round(customer_advances_liability * 100) / 100,
     supplier_advances_asset: Math.round(supplier_advances_asset * 100) / 100,
+    pending_expenses_liability: Math.round(pending_expenses_liability * 100) / 100,
+    pending_opex_liability: Math.round(pending_expenses_liability * 100) / 100,
     total_liquid: Math.round(total_liquid * 100) / 100,
+    total_assets: Math.round(total_assets * 100) / 100,
+    total_liabilities: Math.round(total_liabilities * 100) / 100,
     net_business_capital: Math.round(net_business_capital * 100) / 100,
     total_market_capital: Math.round((total_liquid + post_dated_cheques + market_receivables + supplier_advances_asset) * 100) / 100,
   };
@@ -317,6 +369,61 @@ export async function getLiquidityPayablesDetail() {
 }
 
 /**
+ * GET /api/reports/liquidity/pending-expenses
+ */
+export async function getLiquidityPendingExpensesDetail() {
+  const expTable = (await db.schema.hasTable('expense_records'))
+    ? 'expense_records'
+    : ((await db.schema.hasTable('expenses')) ? 'expenses' : null);
+
+  if (!expTable) return [];
+
+  const hasStatus = await db.schema.hasColumn(expTable, 'status');
+  const hasPaidAmount = await db.schema.hasColumn(expTable, 'paid_amount');
+  const hasPurchaseId = await db.schema.hasColumn(expTable, 'purchase_id');
+
+  let query = db(`${expTable} as e`);
+  if (hasPurchaseId) {
+    if (typeof (query as any).whereNull === 'function') {
+      query = query.whereNull('e.purchase_id');
+    } else {
+      query = query.where('e.purchase_id', null);
+    }
+  }
+  if (hasStatus) {
+    query = query.whereIn('e.status', ['PENDING', 'UNPAID', 'pending', 'unpaid']);
+  } else {
+    query = query.where('e.payment_method', 'UNPAID');
+  }
+
+  const rows = await query
+    .select(
+      'e.id',
+      'e.category',
+      'e.description',
+      'e.expense_date',
+      'e.amount',
+      hasPaidAmount ? 'e.paid_amount' : db.raw('0 as paid_amount'),
+      hasPaidAmount
+        ? db.raw('ROUND(CAST(e.amount - COALESCE(e.paid_amount, 0) AS numeric), 2) as remaining_amount')
+        : 'e.amount as remaining_amount',
+      hasStatus ? 'e.status' : db.raw("'PENDING' as status")
+    )
+    .orderBy('e.expense_date', 'desc');
+
+  return rows.map((r: any) => ({
+    id: r.id,
+    category: r.category,
+    description: r.description || 'Pending OPEX',
+    expense_date: r.expense_date,
+    amount: Number(r.amount || 0),
+    paid_amount: Number(r.paid_amount || 0),
+    remaining_amount: Number(r.remaining_amount !== undefined ? r.remaining_amount : r.amount || 0),
+    status: r.status,
+  }));
+}
+
+/**
  * GET /api/reports/liquidity/supplier-advances
  */
 export async function getLiquiditySupplierAdvancesDetail() {
@@ -372,7 +479,7 @@ export async function getLiquidityUnsoldStockDetail() {
 export async function getSalesMarginReport(productId?: string, timeFilter?: string) {
   const now = new Date();
   let startDate: Date | null = null;
-  let endDate: Date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const endDate: Date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
   if (timeFilter === 'today') {
     startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
@@ -398,6 +505,7 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
       'sii.total_price',
       'sii.net_kg_processed',
       'sii.applied_cogs_per_kg',
+      'sii.actual_cogs',
       'p.rolling_avg_cost_per_kg',
       'p.cost_price as product_cost_price'
     );
@@ -426,7 +534,8 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
 
     const kg = Number(r.net_kg_processed || r.quantity || 0);
     const appliedCogs = Number(r.applied_cogs_per_kg || r.rolling_avg_cost_per_kg || r.product_cost_price || 0);
-    total_cogs += kg * appliedCogs;
+    const itemCogs = (r.actual_cogs !== null && r.actual_cogs !== undefined) ? Number(r.actual_cogs) : (kg * appliedCogs);
+    total_cogs += itemCogs;
 
     if (!processedInvoices.has(r.invoice_id)) {
       processedInvoices.add(r.invoice_id);
@@ -509,54 +618,49 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
       .whereNot('si.status', 'CANCELLED')
       .select(db.raw('SUM(CAST(si.total_amount AS NUMERIC)) as total'));
 
-    let cogsQuery = db('sales_invoice_items as sii')
-      .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
-      .leftJoin('products as p', 'sii.product_id', 'p.id')
-      .whereNot('si.status', 'CANCELLED')
-      .select(db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'));
+    const cogsQuery = db('sales_invoice_items as sii')
+      .whereIn('sii.invoice_id', function () {
+        this.select('si.id')
+          .from('sales_invoices as si')
+          .whereNot('si.status', 'CANCELLED')
+          .modify((qb: any) => {
+            if (sDateObj) {
+              qb.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
+            }
+            if (eDateObj) {
+              qb.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+            }
+          });
+      })
+      .select(db.raw('SUM(CAST(COALESCE(sii.actual_cogs, 0) AS NUMERIC)) as total_cogs'));
 
+    const hasPurchaseIdCol = await db.schema.hasColumn('expenses', 'purchase_id');
     let expensesQuery = db('expenses as e')
       .select(db.raw('SUM(CAST(e.amount AS NUMERIC)) as total'));
 
-    let purchaseDcQuery = db('expenses as e')
-      .whereNotNull('e.purchase_id')
-      .select(db.raw('SUM(CAST(e.amount AS NUMERIC)) as total'));
+    if (hasPurchaseIdCol) {
+      expensesQuery = expensesQuery.whereNull('e.purchase_id');
+    }
 
     if (sDateObj) {
       salesQuery = salesQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
-      cogsQuery = cogsQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
       expensesQuery = expensesQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj]);
-      purchaseDcQuery = purchaseDcQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj]);
     }
 
     if (eDateObj) {
       salesQuery = salesQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
-      cogsQuery = cogsQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
       expensesQuery = expensesQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
-      purchaseDcQuery = purchaseDcQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
     }
 
-    console.log('[DEBUG Knex] Sales Query SQL:', salesQuery.toSQL().toNative());
-    console.log('[DEBUG Knex] Expenses Query SQL:', expensesQuery.toSQL().toNative());
-
-    const [salesRes, cogsRes, expRes, purchaseDcRes] = await Promise.all([
+    const [salesRes, cogsRes, expRes] = await Promise.all([
       salesQuery.first(),
       cogsQuery.first(),
       expensesQuery.first(),
-      purchaseDcQuery.first(),
     ]);
 
-    console.log('[DEBUG Knex] Sales Res:', salesRes);
-    console.log('[DEBUG Knex] Expenses Res:', expRes);
-
     const total_sales = Math.round(Number((salesRes as any)?.total || 0) * 100) / 100;
-    const landed_cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
+    const total_cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
     const total_expenses = Math.round(Number((expRes as any)?.total || 0) * 100) / 100;
-    const purchase_dc = Math.round(Number((purchaseDcRes as any)?.total || 0) * 100) / 100;
-
-    // Prevent double-counting purchase delivery charges if already tracked in total_expenses
-    const dc_offset = Math.min(purchase_dc, landed_cogs);
-    const total_cogs = Math.round((landed_cogs - dc_offset) * 100) / 100;
 
     const gross_profit = Math.round((total_sales - total_cogs) * 100) / 100;
     const net_profit = Math.round((gross_profit - total_expenses) * 100) / 100;
@@ -997,7 +1101,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
     const eDateOnly = toDateOnlyString(eDateObj);
 
     // 1. Gross Sales & Delivery Revenue Query
-    let salesQuery = db('sales_invoices as si')
+    const salesQuery = db('sales_invoices as si')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
         this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
@@ -1010,7 +1114,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
     // 2. Sales Returns Query
-    let returnsQuery = db('sales_invoices as si')
+    const returnsQuery = db('sales_invoices as si')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
         this.where('si.invoice_type', 'CREDIT_NOTE')
@@ -1021,26 +1125,28 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
-    // 3. COGS Query (aggregates sales COGS and reduces by exact restored COGS from credit notes / returns)
-    let cogsQuery = db('sales_invoice_items as sii')
-      .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
-      .leftJoin('products as p', 'sii.product_id', 'p.id')
-      .whereNot('si.status', 'CANCELLED')
-      .where(function () {
-        this.whereNull('si.invoice_type')
-          .orWhere('si.invoice_type', 'SALE')
-          .orWhere('si.invoice_type', 'CREDIT_NOTE')
-          .orWhere('si.invoice_type', 'RETURN');
+    // 3. COGS Query (strictly sums sales_invoice_items.actual_cogs for invoices in the current period)
+    const cogsQuery = db('sales_invoice_items as sii')
+      .whereIn('sii.invoice_id', function () {
+        this.select('si.id')
+          .from('sales_invoices as si')
+          .whereNot('si.status', 'CANCELLED')
+          .where(function () {
+            this.whereNull('si.invoice_type')
+              .orWhere('si.invoice_type', 'SALE')
+              .orWhere('si.invoice_type', 'CREDIT_NOTE')
+              .orWhere('si.invoice_type', 'RETURN');
+          })
+          .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
+          .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
       })
       .select(
-        db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
-        )
-      )
-      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
-      .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+        db.raw('SUM(CAST(COALESCE(sii.actual_cogs, 0) AS NUMERIC)) as total_cogs')
+      );
 
-    // 4. Operating Expenses Query
+    // 4. Operating Expenses Query (Inbound freight is capitalized into inventory/COGS and excluded from OPEX)
+    const hasPurchaseIdCol = await db.schema.hasColumn('expenses', 'purchase_id');
+
     let expensesQuery = db('expenses as e')
       .select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total_expenses'))
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
@@ -1054,19 +1160,17 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .groupBy('category')
       .orderBy('total', 'desc');
 
-    let purchaseDcQuery = db('expenses as e')
-      .whereNotNull('e.purchase_id')
-      .select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total'))
-      .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
-      .whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
+    if (hasPurchaseIdCol) {
+      expensesQuery = expensesQuery.whereNull('e.purchase_id');
+      expensesBreakdownQuery = expensesBreakdownQuery.whereNull('e.purchase_id');
+    }
 
-    const [salesRes, returnsRes, cogsRes, expRes, breakdownRes, purchaseDcRes] = await Promise.all([
+    const [salesRes, returnsRes, cogsRes, expRes, breakdownRes] = await Promise.all([
       salesQuery.first(),
       returnsQuery.first(),
       cogsQuery.first(),
       expensesQuery.first(),
       expensesBreakdownQuery,
-      purchaseDcQuery.first(),
     ]);
 
     const gross_sales = Math.round(Number((salesRes as any)?.gross_sales || 0) * 100) / 100;
@@ -1074,11 +1178,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
     const sales_returns = Math.round(Number((returnsRes as any)?.total_returns || 0) * 100) / 100;
     const net_revenue = Math.round((gross_sales + delivery_revenue - sales_returns) * 100) / 100;
 
-    const landed_cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
-    const purchase_dc = Math.round(Number((purchaseDcRes as any)?.total || 0) * 100) / 100;
-    const dc_offset = Math.min(purchase_dc, landed_cogs);
-    const cogs = Math.round((landed_cogs - dc_offset) * 100) / 100;
-
+    const cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
     const gross_profit = Math.round((net_revenue - cogs) * 100) / 100;
     const gross_margin_pct = net_revenue > 0 ? Math.round(((gross_profit / net_revenue) * 100) * 100) / 100 : 0;
 
@@ -1122,7 +1222,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
     const sDateObj = filter.startDate || defaultStart;
     const eDateObj = filter.endDate || defaultEnd;
 
-    let query = db('sales_invoices as si')
+    const query = db('sales_invoices as si')
       .innerJoin('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
       .leftJoin('customers as c', 'si.customer_id', 'c.id')
       .leftJoin('products as p', 'sii.product_id', 'p.id')
@@ -1200,7 +1300,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_kg_sold'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as total_cogs'
         )
       );
 
@@ -1223,7 +1323,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_volume_kg'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as total_cogs'
         )
       );
 
@@ -1243,7 +1343,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('COALESCE(si.date, si.created_at::date) as date'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as daily_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as daily_cogs'
+          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as daily_cogs'
         )
       )
       .orderByRaw('COALESCE(si.date, si.created_at::date) ASC');
@@ -1359,12 +1459,14 @@ export async function getInventoryValuationReport() {
       )
       .orderBy('p.name', 'asc');
 
-    // Fetch inventory batches / FIFO price buckets
+    // Fetch inventory batches / FIFO price buckets (strictly excluding fully returned batches)
     let batchesRaw: any[] = [];
     const hasBatchesTable = await db.schema.hasTable('inventory_batches');
     if (hasBatchesTable) {
       batchesRaw = await db('inventory_batches as ib')
         .leftJoin('purchase_invoices as pi', 'ib.purchase_invoice_id', 'pi.id')
+        .where('ib.original_qty', '>', 0)
+        .andWhere('ib.status', '!=', 'RETURNED')
         .select(
           'ib.id as bucket_id',
           'ib.product_id',
@@ -1413,7 +1515,7 @@ export async function getInventoryValuationReport() {
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as lifetime_kg_sold'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as lifetime_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, 0) AS NUMERIC)) as lifetime_cogs'
+          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, 0) AS NUMERIC)) AS NUMERIC)) as lifetime_cogs'
         )
       );
 
@@ -1439,6 +1541,23 @@ export async function getInventoryValuationReport() {
     const purchasesMap = new Map<string, number>();
     for (const p of purchasesAgg) {
       purchasesMap.set(p.product_id, Math.round(Number(p.lifetime_kg_acquired || 0) * 100) / 100);
+    }
+
+    // Fetch Lifetime Acquired stock strictly from non-returned batches (WHERE original_qty > 0 AND status != 'RETURNED')
+    const batchAcquiredMap = new Map<string, number>();
+    if (hasBatchesTable) {
+      const batchAcquiredAgg = await db('inventory_batches')
+        .where('original_qty', '>', 0)
+        .andWhere('status', '!=', 'RETURNED')
+        .groupBy('product_id')
+        .select(
+          'product_id',
+          db.raw('SUM(CAST(original_qty AS NUMERIC)) as lifetime_batch_acquired')
+        );
+
+      for (const b of batchAcquiredAgg) {
+        batchAcquiredMap.set(b.product_id, Math.round(Number(b.lifetime_batch_acquired || 0) * 100) / 100);
+      }
     }
 
     let total_warehouse_capital = 0;
@@ -1467,7 +1586,10 @@ export async function getInventoryValuationReport() {
 
       const salesData = salesMap.get(r.id) || { kgSold: 0, revenue: 0, cogs: 0 };
       const acquiredFromPurchases = purchasesMap.get(r.id) || 0;
-      const lifetime_kg_acquired = acquiredFromPurchases > 0 ? acquiredFromPurchases : Math.round((stock_on_hand + salesData.kgSold) * 100) / 100;
+      const acquiredFromBatches = batchAcquiredMap.get(r.id);
+      const lifetime_kg_acquired = acquiredFromBatches !== undefined && acquiredFromBatches > 0
+        ? acquiredFromBatches
+        : (acquiredFromPurchases > 0 ? acquiredFromPurchases : Math.round((stock_on_hand + salesData.kgSold) * 100) / 100);
       const lifetime_kg_sold = salesData.kgSold;
 
       const profit = salesData.revenue - salesData.cogs;

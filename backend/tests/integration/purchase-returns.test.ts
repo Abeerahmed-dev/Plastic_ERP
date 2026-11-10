@@ -11,6 +11,7 @@ let supplierId: string;
 let productId: string;
 let categoryId: string;
 let purchaseInvoiceId: string;
+let liquidityCustomerId: string;
 
 beforeAll(async () => {
   const loginRes = await request(app)
@@ -53,6 +54,7 @@ beforeAll(async () => {
     .send({
       name: 'HDPE Granules ' + Date.now(),
       category_id: categoryId,
+      size: 'Standard',
       cost_price: 200,
       sale_price: 250,
       total_stock_kg: 0,
@@ -81,6 +83,10 @@ afterAll(async () => {
     await db('inventory_transactions').where('product_id', productId).delete();
     await db('inventory_batches').where('product_id', productId).delete();
     await db('products').where('id', productId).delete();
+  }
+  if (liquidityCustomerId) {
+    await db('customer_payments').where('customer_id', liquidityCustomerId).delete();
+    await db('customers').where('id', liquidityCustomerId).delete();
   }
   await db.destroy();
 });
@@ -211,21 +217,42 @@ describe('Phase 1 & Phase 2: Purchase Returns / Debit Notes', () => {
 
     expect(Number(batch.original_qty)).toBe(0);
     expect(Number(batch.remaining_qty)).toBe(0);
-    expect(batch.status).toBe('DEPLETED');
+    expect(batch.status).toBe('RETURNED');
   });
 
   it('Supplier Global Netting: total_billed_liability = SUM(PURCHASE_INVOICE) - SUM(DEBIT_NOTE)', async () => {
-    // Record a payment of 20,000 against supplier
+    // Ensure liquidity in cash drawer for test
+    const custRes = await request(app)
+      .post('/api/v1/customers')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        name: 'Liquidity Customer ' + Date.now(),
+        phone: '03001112233',
+        opening_balance: 0,
+      });
+    liquidityCustomerId = custRes.body.data.id;
+
     await request(app)
+      .post('/api/v1/customer-payments')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        customer_id: liquidityCustomerId,
+        amount: 50000,
+        payment_method: 'CASH',
+        payment_date: new Date().toISOString().split('T')[0],
+      });
+
+    // Record a payment of 20,000 against supplier (general wallet payment)
+    const payRes = await request(app)
       .post('/api/v1/supplier-payments')
       .set('Authorization', `Bearer ${ownerToken}`)
       .send({
         supplier_id: supplierId,
-        purchase_invoice_id: purchaseInvoiceId,
         payment_date: new Date().toISOString().split('T')[0],
         amount: 20000,
         payment_method: 'CASH',
       });
+    expect(payRes.status).toBe(201);
 
     // Check GET /api/suppliers
     const suppRes = await request(app)

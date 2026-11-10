@@ -12,6 +12,8 @@
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "test": "jest --forceExit --detectOpenHandles",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration --runInBand",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage --forceExit",
     "migrate:latest": "knex migrate:latest --knexfile knexfile.ts",

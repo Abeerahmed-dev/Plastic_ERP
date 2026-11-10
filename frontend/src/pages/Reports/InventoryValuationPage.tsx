@@ -16,6 +16,7 @@ import {
   History,
   CheckCircle2,
   CircleDot,
+  RotateCcw,
 } from 'lucide-react';
 import { reportsService, InventoryValuationData, InventoryValuationItem, FifoBucketItem } from '../../services/reports.service';
 import { useAuthStore } from '../../store/auth.store';
@@ -632,14 +633,15 @@ export default function InventoryValuationPage() {
                                           </thead>
                                           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
                                             {buckets.map((bucket, idx) => {
-                                              const orig =
-                                                bucket.original_stock > 0 ? bucket.original_stock : 1;
-                                              const rem = bucket.remaining_stock || 0;
+                                              const originalQty = Number(bucket.original_stock ?? (bucket as any).original_qty ?? 0);
+                                              const remainingQty = Number(bucket.remaining_stock ?? (bucket as any).remaining_qty ?? 0);
+                                              const progress = originalQty > 0 ? ((originalQty - remainingQty) / originalQty) * 100 : 0;
                                               const depPct = Math.min(
                                                 100,
-                                                Math.max(0, Math.round(((orig - rem) / orig) * 100))
+                                                Math.max(0, Math.round(progress))
                                               );
-                                              const isActive = rem > 0;
+                                              const isReturned = bucket.status === 'RETURNED' || originalQty === 0;
+                                              const isActive = remainingQty > 0 && !isReturned;
 
                                               return (
                                                 <tr key={bucket.bucket_id || idx} className="hover:bg-slate-50/80 hover:dark:bg-[#1a1f33]">
@@ -665,11 +667,11 @@ export default function InventoryValuationPage() {
                                                   {/* Stock Remaining / Original */}
                                                   <td className="py-2.5 px-4 text-right font-mono tabular-nums text-slate-700">
                                                     <span className="font-bold text-slate-900 dark:text-white">
-                                                      {rem.toLocaleString()}
+                                                      {remainingQty.toLocaleString()}
                                                     </span>
                                                     <span className="text-slate-400 dark:text-slate-500">
                                                       {' '}
-                                                      / {bucket.original_stock.toLocaleString()} KG
+                                                      / {originalQty.toLocaleString()} KG
                                                     </span>
                                                   </td>
 
@@ -679,7 +681,7 @@ export default function InventoryValuationPage() {
                                                       <div className="flex-1 bg-slate-200 dark:bg-slate-700/60 rounded-full h-2.5 overflow-hidden">
                                                         <div
                                                           className={`h-2.5 rounded-full transition-all ${
-                                                            isActive ? 'bg-emerald-500' : 'bg-slate-400'
+                                                            isReturned ? 'bg-amber-400' : (isActive ? 'bg-emerald-500' : 'bg-slate-400')
                                                           }`}
                                                           style={{ width: `${depPct}%` }}
                                                         />
@@ -692,7 +694,11 @@ export default function InventoryValuationPage() {
 
                                                   {/* Status Badge */}
                                                   <td className="py-2.5 px-4 text-center">
-                                                    {isActive ? (
+                                                    {isReturned ? (
+                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/60">
+                                                        <RotateCcw className="w-2.5 h-2.5 text-amber-600" /> RETURNED
+                                                      </span>
+                                                    ) : isActive ? (
                                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/60">
                                                         <CircleDot className="w-2.5 h-2.5 text-emerald-600" /> ACTIVE
                                                       </span>
