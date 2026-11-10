@@ -85,9 +85,7 @@ export async function createCustomerRefund(
       }
       bankAccountId = bank.id;
       paymentMethod = 'BANK_TRANSFER';
-      const bankBalance = bank.current_balance !== undefined
-        ? Number(bank.current_balance)
-        : await getBankAccountBalance(bank.id, trx);
+      const bankBalance = await getBankAccountBalance(bank.id, trx);
       if (bankBalance < refundAmount) {
         throw new InsufficientLiquidityError(
           'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.'
@@ -228,9 +226,7 @@ export async function createSupplierRefund(
       }
       bankAccountId = bank.id;
       paymentMethod = 'BANK_TRANSFER';
-      const bankBalance = bank.current_balance !== undefined
-        ? Number(bank.current_balance)
-        : await getBankAccountBalance(bank.id, trx);
+      const bankBalance = await getBankAccountBalance(bank.id, trx);
       if (bankBalance < refundAmount) {
         throw new InsufficientLiquidityError(
           'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.'

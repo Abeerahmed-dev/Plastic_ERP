@@ -414,17 +414,24 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     let deliveryExpenseId: string | null = null;
     if (delivery_charges > 0) {
       const supplier = await trx('suppliers').where('id', data.supplier_id).select('name').first();
-      const [expense] = await trx('expenses').insert({
+      const hasStatus = await trx.schema.hasColumn('expenses', 'status');
+      const hasPaidAmount = await trx.schema.hasColumn('expenses', 'paid_amount');
+      const hasPurchaseId = await trx.schema.hasColumn('expenses', 'purchase_id');
+
+      const expPayload: Record<string, any> = {
         amount: delivery_charges,
         category: 'Logistics',
         description: `Delivery Charges for Purchase ${invoice_number} (Party: ${supplier?.name || 'Party'})`,
         expense_date: data.date ? new Date(data.date) : new Date(),
         payment_method: 'UNPAID',
-        status: 'PENDING',
-        paid_amount: 0,
         bank_account_id: null,
         created_by: createdBy || null,
-      }).returning('*');
+      };
+      if (hasStatus) expPayload.status = 'PENDING';
+      if (hasPaidAmount) expPayload.paid_amount = 0;
+      if (hasPurchaseId) expPayload.purchase_id = null;
+
+      const [expense] = await trx('expenses').insert(expPayload).returning('*');
       deliveryExpenseId = expense?.id || null;
     }
 
@@ -448,9 +455,12 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
       .returning('*');
 
     if (deliveryExpenseId && invoice?.id) {
-      await trx('expenses').where('id', deliveryExpenseId).update({
-        purchase_id: invoice.id,
-      });
+      const hasPurchaseId = await trx.schema.hasColumn('expenses', 'purchase_id');
+      if (hasPurchaseId) {
+        await trx('expenses').where('id', deliveryExpenseId).update({
+          purchase_id: invoice.id,
+        });
+      }
     }
 
     const itemsToInsert = [];
@@ -1126,18 +1136,24 @@ export async function updateStockDcAndPrices(
         }
       } else if (newDeliveryCharges > 0) {
         const supplier = await trx('suppliers').where('id', invoice.supplier_id).first();
-        const [exp] = await trx('expenses').insert({
+        const hasStatus = await trx.schema.hasColumn('expenses', 'status');
+        const hasPaidAmount = await trx.schema.hasColumn('expenses', 'paid_amount');
+        const hasPurchaseId = await trx.schema.hasColumn('expenses', 'purchase_id');
+
+        const expPayload: Record<string, any> = {
           amount: newDeliveryCharges,
           category: 'Logistics',
           description: `Delivery Charges for Purchase ${invoice.invoice_number} (Party: ${supplier?.name || 'Party'})`,
           expense_date: invoice.date ? new Date(invoice.date) : new Date(),
           payment_method: 'UNPAID',
-          status: 'PENDING',
-          paid_amount: 0,
           bank_account_id: null,
-          purchase_id: purchaseId,
           created_by: userId || null,
-        }).returning('*');
+        };
+        if (hasStatus) expPayload.status = 'PENDING';
+        if (hasPaidAmount) expPayload.paid_amount = 0;
+        if (hasPurchaseId) expPayload.purchase_id = purchaseId;
+
+        const [exp] = await trx('expenses').insert(expPayload).returning('*');
         expenseId = exp?.id || null;
       }
 

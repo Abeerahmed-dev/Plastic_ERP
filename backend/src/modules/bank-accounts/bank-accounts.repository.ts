@@ -10,7 +10,8 @@ export interface BankAccountRow {
   account_number: string;
   iban_details: string | null;
   initial_balance: number;
-  current_balance?: number;
+  opening_balance?: number;
+  current_balance: number;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -19,6 +20,7 @@ export interface BankAccountRow {
 export interface BankAccountWithBalance extends BankAccountRow {
   name?: string;
   current_balance: number;
+  opening_balance?: number;
   total_in: number;
   total_out: number;
 }
@@ -26,7 +28,7 @@ export interface BankAccountWithBalance extends BankAccountRow {
 export async function getBankAccountBalanceDetail(
   accountId: string,
   trx: Knex.Transaction | Knex = db
-): Promise<{ current_balance: number; total_in: number; total_out: number; initial_balance: number }> {
+): Promise<{ current_balance: number; total_in: number; total_out: number; initial_balance: number; opening_balance: number }> {
   const account = await trx('bank_accounts').where('id', accountId).first();
   if (!account) {
     throw new NotFoundError('Bank account');
@@ -108,27 +110,34 @@ export async function getBankAccountBalanceDetail(
 
   let manualInflow = 0;
   let manualOutflow = 0;
-  let hasOpeningInjection = false;
 
   for (const m of (manualRows as any[])) {
+    const isOpening = m.description && (
+      m.description.includes('Opening Balance') ||
+      m.description.includes('Day Zero')
+    );
+    if (isOpening) {
+      // Opening balance is explicitly injected from account entity, avoid double counting
+      continue;
+    }
     const t = String(m.type || '').toUpperCase();
     if (t === 'INFLOW' || t === 'DEPOSIT') {
       manualInflow += Number(m.amount || 0);
     } else if (t === 'OUTFLOW' || t === 'WITHDRAWAL') {
       manualOutflow += Number(m.amount || 0);
     }
-    if (m.description && (m.description.includes('Opening Balance') || m.description.includes('Day Zero'))) {
-      hasOpeningInjection = true;
-    }
   }
 
-  const baseBalance = hasOpeningInjection ? 0 : Number(account.initial_balance || 0);
+  // Explicit Opening Balance Injection: Total Liquidity = (opening_balance || 0) + SUM(inflows) - SUM(outflows)
+  const openingBalance = Number(account.opening_balance ?? account.initial_balance ?? 0);
   const totalIn = Number(custRes?.total || 0) + manualInflow;
   const totalOut = Number(suppRes?.total || 0) + Number(expRes?.total || 0) + manualOutflow;
+  const currentBalance = Math.round((openingBalance + totalIn - totalOut) * 100) / 100;
 
   return {
-    initial_balance: Number(account.initial_balance || 0),
-    current_balance: Math.round((baseBalance + totalIn - totalOut) * 100) / 100,
+    initial_balance: openingBalance,
+    opening_balance: openingBalance,
+    current_balance: currentBalance,
     total_in: Math.round(totalIn * 100) / 100,
     total_out: Math.round(totalOut * 100) / 100,
   };
@@ -197,11 +206,15 @@ export async function getCashDrawerBalance(trx: Knex.Transaction | Knex = db): P
       .first();
     expTotal = Number(expRes?.total || 0);
   } else {
-    const expRes = await trx('expenses')
-      .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
-      .whereIn('status', ['PAID', 'PARTIAL'])
-      .andWhere('paid_amount', '>', 0)
-      .sum('paid_amount as total')
+    const hasStatus = await trx.schema.hasColumn('expenses', 'status');
+    let expQuery = trx('expenses')
+      .whereIn('payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER']);
+    if (hasStatus) {
+      expQuery = expQuery.whereIn('status', ['PAID', 'PARTIAL']);
+    }
+    const expRes = await expQuery
+      .andWhere('amount', '>', 0)
+      .sum('amount as total')
       .first();
     expTotal = Number(expRes?.total || 0);
   }
@@ -214,7 +227,10 @@ export async function getCashDrawerBalance(trx: Knex.Transaction | Knex = db): P
     const transferRows = await trx('cash_drawer_ledger')
       .where(function() {
         this.whereNull('reference_id')
-          .orWhereILike('description', '%transfer%');
+          .orWhereILike('description', '%transfer%')
+          .orWhereILike('description', '%opening%')
+          .orWhereILike('description', '%capital%')
+          .orWhereILike('description', '%float%');
       })
       .select('type', 'amount');
 
@@ -269,6 +285,7 @@ export async function findAllBankAccounts(): Promise<BankAccountWithBalance[]> {
         ...acc,
         name: acc.account_title || `${acc.bank_name} - ${acc.account_number}`,
         initial_balance: detail.initial_balance,
+        opening_balance: detail.opening_balance,
         current_balance: detail.current_balance,
         total_in: detail.total_in,
         total_out: detail.total_out,
@@ -284,21 +301,25 @@ export async function findBankAccountById(id: string): Promise<BankAccountWithBa
 }
 
 export async function createBankAccount(data: CreateBankAccountInput, userId?: string | null): Promise<BankAccountRow> {
-  const openingBalance = data.opening_balance !== undefined
-    ? Number(data.opening_balance)
-    : Number(data.initial_balance || 0);
+  const openingBalance = Number(data.opening_balance ?? data.initial_balance ?? 0);
 
   return await db.transaction(async (trx: Knex.Transaction) => {
+    const hasOpeningCol = await trx.schema.hasColumn('bank_accounts', 'opening_balance');
+    const insertData: Record<string, any> = {
+      account_title: data.account_title.trim(),
+      bank_name: data.bank_name.trim(),
+      account_number: data.account_number.trim(),
+      iban_details: data.iban_details ? data.iban_details.trim() : null,
+      initial_balance: openingBalance,
+      current_balance: openingBalance,
+      is_active: true,
+    };
+    if (hasOpeningCol) {
+      insertData.opening_balance = openingBalance;
+    }
+
     const [row] = await trx('bank_accounts')
-      .insert({
-        account_title: data.account_title.trim(),
-        bank_name: data.bank_name.trim(),
-        account_number: data.account_number.trim(),
-        iban_details: data.iban_details ? data.iban_details.trim() : null,
-        initial_balance: openingBalance,
-        current_balance: openingBalance,
-        is_active: true,
-      })
+      .insert(insertData)
       .returning('*');
 
     // Day Zero Capital Injection / Opening Balance (Owner Equity)
@@ -340,6 +361,10 @@ export async function updateBankAccount(
     if (hasNewInitial) {
       const newInitial = Number(data.initial_balance !== undefined ? data.initial_balance : (data as any).opening_balance) || 0;
       updateData.initial_balance = newInitial;
+      const hasOpeningCol = await trx.schema.hasColumn('bank_accounts', 'opening_balance');
+      if (hasOpeningCol) {
+        updateData.opening_balance = newInitial;
+      }
     }
 
     await trx('bank_accounts')
@@ -574,11 +599,12 @@ export async function getBankAccountTransactions(
   // Sort ascending chronologically to compute running balance sequentially
   rawTxList.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime());
 
-  const hasOpeningInjection = (manualRows as any[]).some((m: any) =>
-    m.description && (m.description.includes('Opening Balance') || m.description.includes('Day Zero'))
+  const openingBalance = Number(account.opening_balance ?? account.initial_balance ?? 0);
+  let currBalance = openingBalance;
+  const operationalTxList = rawTxList.filter((tx) =>
+    !(tx.description && (tx.description.includes('Opening Balance') || tx.description.includes('Day Zero')))
   );
-  let currBalance = hasOpeningInjection ? 0 : Number(account.initial_balance || 0);
-  const withRunningBalance = rawTxList.map((tx) => {
+  const withRunningBalance = operationalTxList.map((tx) => {
     if (tx.type === 'INFLOW') {
       currBalance += tx.amount;
     } else {
@@ -646,7 +672,7 @@ export async function transferFunds(
         );
       }
     } else {
-      fromAccount = await trx('bank_accounts').where('id', from_account_id).first();
+      fromAccount = await trx('bank_accounts').where('id', from_account_id).forUpdate().first();
       if (!fromAccount) {
         throw new NotFoundError('Source bank account');
       }
@@ -663,7 +689,7 @@ export async function transferFunds(
 
     // Validate to_account
     if (!isToCash) {
-      toAccount = await trx('bank_accounts').where('id', to_account_id).first();
+      toAccount = await trx('bank_accounts').where('id', to_account_id).forUpdate().first();
       if (!toAccount) {
         throw new NotFoundError('Destination bank account');
       }
@@ -690,9 +716,13 @@ export async function transferFunds(
         });
       }
     } else {
+      const newFromBal = Math.round((fromBalance - amount) * 100) / 100;
       await trx('bank_accounts')
         .where('id', from_account_id)
-        .decrement('current_balance', amount);
+        .update({
+          current_balance: newFromBal,
+          updated_at: new Date(),
+        });
 
       await trx('bank_transactions').insert({
         bank_account_id: from_account_id,
@@ -719,9 +749,14 @@ export async function transferFunds(
         });
       }
     } else {
+      const toBalance = await getBankAccountBalance(to_account_id, trx);
+      const newToBal = Math.round((toBalance + amount) * 100) / 100;
       await trx('bank_accounts')
         .where('id', to_account_id)
-        .increment('current_balance', amount);
+        .update({
+          current_balance: newToBal,
+          updated_at: new Date(),
+        });
 
       await trx('bank_transactions').insert({
         bank_account_id: to_account_id,

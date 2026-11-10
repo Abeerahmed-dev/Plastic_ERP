@@ -16,7 +16,7 @@ export const createExpenseSchema = z.object({
   category: z.string().min(1, 'Category is required').default('Other'),
   description: z.string().optional().nullable(),
   expense_date: z.string().optional().default(() => new Date().toISOString().split('T')[0]),
-  payment_method: z.string().optional().default('CASH'),
+  payment_method: z.string().optional(),
   bank_account_id: z.string().optional().nullable(),
   status: z.enum(['PENDING', 'PAID', 'UNPAID']).optional().default('PAID'),
   purchase_id: z.string().optional().nullable(),

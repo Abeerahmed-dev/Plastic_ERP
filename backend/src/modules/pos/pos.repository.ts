@@ -614,15 +614,19 @@ export async function getTodayCashTally(_userId?: string) {
       .first();
     totalExpensesCash = Number(expensesResult?.total_expenses || 0);
   } else {
-    const expensesResult = await db('expenses')
+    const hasStatus = await db.schema.hasColumn('expenses', 'status');
+    let expQuery = db('expenses')
       .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
-      .whereIn('status', ['PAID', 'PARTIAL'])
       .where(function() {
         this.whereRaw('expense_date::text = ?', [todayStr])
           .orWhereBetween('expense_date', [startOfDay, endOfDay])
           .orWhereBetween('created_at', [startOfDay, endOfDay]);
-      })
-      .sum('paid_amount as total_expenses')
+      });
+    if (hasStatus) {
+      expQuery = expQuery.whereIn('status', ['PAID', 'PARTIAL']);
+    }
+    const expensesResult = await expQuery
+      .sum('amount as total_expenses')
       .first();
     totalExpensesCash = Number(expensesResult?.total_expenses || 0);
   }

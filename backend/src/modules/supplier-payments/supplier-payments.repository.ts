@@ -200,7 +200,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
           throw new Error('VALIDATION_ERROR: No bank_account_id provided for the bank transfer portion.');
         }
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.bank_account_id);
-        const account = isUuid ? await trx('bank_accounts').where('id', data.bank_account_id).first() : null;
+        const account = isUuid ? await trx('bank_accounts').where('id', data.bank_account_id).forUpdate().first() : null;
         if (!account) {
           throw new Error(`NOT_FOUND: Bank account with ID ${data.bank_account_id} does not exist.`);
         }
@@ -343,7 +343,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
       }
     } else if (data.bank_account_id) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.bank_account_id);
-      const account = isUuid ? await trx('bank_accounts').where('id', data.bank_account_id).first() : null;
+      const account = isUuid ? await trx('bank_accounts').where('id', data.bank_account_id).forUpdate().first() : null;
 
       if (!account) {
         throw new Error(`NOT_FOUND: Bank account with ID ${data.bank_account_id} does not exist.`);

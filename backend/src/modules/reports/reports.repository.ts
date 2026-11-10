@@ -639,6 +639,13 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
     .orderBy('sp.created_at', 'desc');
 
   const hasExpPay = await db.schema.hasTable('expense_payments');
+  const hasStatus = await db.schema.hasColumn('expenses', 'status');
+  let expQueryBuilder = db('expenses as e')
+    .whereIn('e.payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER']);
+  if (hasStatus) {
+    expQueryBuilder = expQueryBuilder.whereIn('e.status', ['PAID', 'PARTIAL']);
+  }
+
   let expQuery = hasExpPay
     ? db('expense_payments as ep')
         .join('expenses as e', 'ep.expense_id', 'e.id')
@@ -652,16 +659,14 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
           'ep.amount'
         )
         .orderBy('ep.created_at', 'desc')
-    : db('expenses as e')
-        .whereIn('e.payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
-        .whereIn('e.status', ['PAID', 'PARTIAL'])
+    : expQueryBuilder
         .select(
           'e.id',
           'e.expense_date as date',
           'e.created_at',
           'e.category',
           'e.description',
-          'e.paid_amount as amount'
+          'e.amount as amount'
         )
         .orderBy('e.created_at', 'desc');
 

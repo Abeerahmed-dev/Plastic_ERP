@@ -8,7 +8,7 @@ import {
 import { ok } from '../../shared/apiResponse';
 import { ValidationError, InsufficientLiquidityError } from '../../shared/errors';
 import db from '../../db/knex';
-import { getCashDrawerBalance } from '../bank-accounts/bank-accounts.repository';
+import { getCashDrawerBalance, getBankAccountBalance } from '../bank-accounts/bank-accounts.repository';
 
 export async function createCustomerRefundController(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -24,7 +24,8 @@ export async function createCustomerRefundController(req: Request, res: Response
 
     if (!isCashDrawer) {
       const account = await db('bank_accounts').where('id', source).first();
-      if (!account || Number(account.current_balance) < refundAmount) {
+      const bankBalance = account ? await getBankAccountBalance(account.id) : 0;
+      if (!account || bankBalance < refundAmount) {
         throw new InsufficientLiquidityError('INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.');
       }
     } else {
@@ -56,7 +57,8 @@ export async function createSupplierRefundController(req: Request, res: Response
 
     if (!isCashDrawer) {
       const account = await db('bank_accounts').where('id', source).first();
-      if (!account || Number(account.current_balance) < refundAmount) {
+      const bankBalance = account ? await getBankAccountBalance(account.id) : 0;
+      if (!account || bankBalance < refundAmount) {
         throw new InsufficientLiquidityError('INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.');
       }
     } else {
