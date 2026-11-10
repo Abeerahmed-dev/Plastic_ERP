@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
+import { verifyRole } from '../../middleware/requireRole';
 import {
   createCustomerAdvanceController,
   createSupplierAdvanceController,
@@ -9,8 +10,8 @@ import {
 const router = Router();
 router.use(requireAuth);
 
-router.post('/customer', createCustomerAdvanceController);
-router.post('/supplier', createSupplierAdvanceController);
-router.post('/', createGeneralAdvanceController);
+router.post('/customer', verifyRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'CASHIER']), createCustomerAdvanceController);
+router.post('/supplier', verifyRole(['OWNER', 'ADMIN', 'ACCOUNTANT']), createSupplierAdvanceController);
+router.post('/', verifyRole(['OWNER', 'ADMIN', 'ACCOUNTANT']), createGeneralAdvanceController);
 
 export default router;

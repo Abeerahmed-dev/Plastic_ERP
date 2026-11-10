@@ -264,12 +264,12 @@ export const PaymentFormModal = ({
                     <>
                       <optgroup label="Credit Accounts">
                         {customersResponse.data.filter((c) => c.customer_type !== 'CASH').map((c) => (
-                          <option key={c.id} value={c.id}>{c.name} ({c.code || 'Credit'})</option>
+                          <option key={c.id} value={c.id}>{c.name} {c.city ? `(${c.city})` : ''}</option>
                         ))}
                       </optgroup>
                       <optgroup label="Cash Customers">
                         {customersResponse.data.filter((c) => c.customer_type === 'CASH').map((c) => (
-                          <option key={c.id} value={c.id}>{c.name} ({c.code || 'Cash'})</option>
+                          <option key={c.id} value={c.id}>{c.name} {c.city ? `(${c.city})` : ''}</option>
                         ))}
                       </optgroup>
                     </>
@@ -334,7 +334,7 @@ export const PaymentFormModal = ({
                     <option value="">Select Target Supplier...</option>
                     {(suppliersResponse?.data || []).map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} ({s.code}) — Balance: Rs. {(Number(s?.outstanding_payable ?? (s as any)?.outstanding_balance) || 0).toLocaleString()}
+                        {s.name} {s.city ? `(${s.city})` : ''} — Balance: Rs. {(Number(s?.outstanding_payable ?? (s as any)?.outstanding_balance) || 0).toLocaleString()}
                       </option>
                     ))}
                   </select>

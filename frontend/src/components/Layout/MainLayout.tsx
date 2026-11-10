@@ -361,7 +361,7 @@ export const MainLayout = () => {
       console.error('Logout error:', error);
     } finally {
       clearAuth();
-      navigate('/login');
+      navigate('/login', { replace: true, state: null });
     }
   };
 

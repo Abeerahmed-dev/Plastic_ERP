@@ -261,7 +261,7 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
                 ) : (
                   availableCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.code}) — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
+                      {c.name} {c.city ? `(${c.city})` : ''} — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
                     </option>
                   ))
                 )}

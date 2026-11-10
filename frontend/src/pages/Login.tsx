@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation } from '@tanstack/react-query';
-import { Lock, Mail, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../services/auth.service';
 import { useAuthStore } from '../store/auth.store';
 import type { LoginRequest } from '../types/auth.types';
@@ -17,11 +17,18 @@ const loginSchema = z.object({
 
 export const Login = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const setAuth = useAuthStore((state) => state.setAuth);
+  const { isAuthenticated, user, setAuth } = useAuthStore();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const from = location.state?.from?.pathname || '/dashboard';
+  // If already authenticated, redirect straight to role's designated landing page
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      const role = (user?.roleName || user?.role || '').toUpperCase();
+      const defaultDest = role === 'CASHIER' ? '/pos' : role === 'ACCOUNTANT' ? '/customers' : '/dashboard';
+      navigate(defaultDest, { replace: true });
+    }
+  }, [isAuthenticated, user, navigate]);
 
   const {
     register,
@@ -37,8 +44,7 @@ export const Login = () => {
       setAuth(data.user, data.access_token, data.refresh_token);
       const role = (data.user?.roleName || data.user?.role || '').toUpperCase();
       const defaultDest = role === 'CASHIER' ? '/pos' : role === 'ACCOUNTANT' ? '/customers' : '/dashboard';
-      const target = location.state?.from?.pathname || defaultDest;
-      navigate(target, { replace: true });
+      navigate(defaultDest, { replace: true });
     },
     onError: (error: import('axios').AxiosError<{message: string}>) => {
       setServerError(
@@ -128,14 +134,27 @@ export const Login = () => {
                 </div>
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
-                  className={`block w-full pl-10 pr-3.5 py-2.5 border ${
+                  className={`block w-full pl-10 pr-11 py-2.5 border ${
                     errors.password ? 'border-red-400 focus:ring-red-400' : 'border-white/30 focus:border-white/80'
                   } rounded-xl bg-white/15 focus:bg-white/25 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-md sm:text-sm transition-all duration-200`}
                   placeholder="••••••••"
                   {...register('password')}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-white/60 hover:text-white transition-colors cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-5 w-5" aria-hidden="true" />
+                  ) : (
+                    <Eye className="h-5 w-5" aria-hidden="true" />
+                  )}
+                </button>
               </div>
               {errors.password && (
                 <p className="mt-1 text-xs font-medium text-red-300">{errors.password.message}</p>
@@ -159,12 +178,12 @@ export const Login = () => {
               </div>
 
               <div className="text-sm">
-                <a
-                  href="#"
-                  className="font-medium text-blue-300 hover:text-white transition-colors drop-shadow"
+                <Link
+                  to="/forgot-password"
+                  className="font-medium text-blue-300 hover:text-white transition-colors drop-shadow cursor-pointer"
                 >
                   Forgot your password?
-                </a>
+                </Link>
               </div>
             </div>
 

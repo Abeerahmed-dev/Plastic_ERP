@@ -19,14 +19,23 @@ export interface RefreshTokenRow {
   revoked_at: Date | null;
 }
 
+export interface PasswordResetTokenRow {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: Date;
+  used_at: Date | null;
+  created_at: Date;
+}
+
 /**
  * Find a user by email, joining their role name.
  * Permissions are loaded separately via findUserPermissions.
  */
 export async function findUserByEmail(email: string): Promise<UserRow | undefined> {
   const row = await db('users as u')
-    .join('roles as r', 'u.role_id', 'r.id')
-    .where('u.email', email.toLowerCase().trim())
+    .leftJoin('roles as r', 'u.role_id', 'r.id')
+    .whereRaw('LOWER(TRIM(u.email)) = ?', [email.toLowerCase().trim()])
     .select(
       'u.id',
       'u.name',
@@ -40,7 +49,7 @@ export async function findUserByEmail(email: string): Promise<UserRow | undefine
 
   if (!row) return undefined;
 
-  const permissions = await findUserPermissions(row.role_id);
+  const permissions = row.role_id ? await findUserPermissions(row.role_id) : [];
   return { ...row, permissions };
 }
 
@@ -123,4 +132,61 @@ export async function revokeAllUserRefreshTokens(userId: string): Promise<void> 
     .where({ user_id: userId })
     .whereNull('revoked_at')
     .update({ revoked_at: new Date() });
+}
+
+// ─── Password Reset Helpers ──────────────────────────────────────────
+
+/**
+ * Save a password reset token for a user.
+ * Automatically clears previous unused tokens for that user.
+ */
+export async function savePasswordResetToken(
+  userId: string,
+  tokenHash: string,
+  expiresAt: Date,
+): Promise<void> {
+  await db('password_reset_tokens')
+    .where({ user_id: userId })
+    .whereNull('used_at')
+    .delete();
+
+  await db('password_reset_tokens').insert({
+    user_id: userId,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
+  });
+}
+
+/**
+ * Find a valid password reset token by hash.
+ */
+export async function findPasswordResetToken(
+  tokenHash: string,
+): Promise<PasswordResetTokenRow | undefined> {
+  return db('password_reset_tokens')
+    .where({ token_hash: tokenHash })
+    .whereNull('used_at')
+    .where('expires_at', '>', new Date())
+    .first();
+}
+
+/**
+ * Mark a password reset token as used.
+ */
+export async function markPasswordResetTokenUsed(tokenHash: string): Promise<void> {
+  await db('password_reset_tokens')
+    .where({ token_hash: tokenHash })
+    .update({ used_at: new Date() });
+}
+
+/**
+ * Update user's password hash.
+ */
+export async function updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+  await db('users')
+    .where({ id: userId })
+    .update({
+      password_hash: passwordHash,
+      updated_at: new Date(),
+    });
 }

@@ -15,4 +15,14 @@ export const authService = {
     const response = await api.get<{ success: boolean; data: AuthUser }>('/auth/me');
     return response.data.data;
   },
+
+  forgotPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post<{ success: boolean; data: { success: boolean; message: string } }>('/auth/forgot-password', { email });
+    return response.data.data;
+  },
+
+  resetPassword: async (token: string, new_password: string): Promise<{ success: boolean; message: string }> => {
+    const response = await api.post<{ success: boolean; data: { success: boolean; message: string } }>('/auth/reset-password', { token, new_password });
+    return response.data.data;
+  },
 };

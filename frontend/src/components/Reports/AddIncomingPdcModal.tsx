@@ -216,7 +216,7 @@ export const AddIncomingPdcModal: React.FC<AddIncomingPdcModalProps> = ({
                 <option value="">-- Select Customer --</option>
                 {customersList.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} {c.code ? `(${c.code})` : ''}
+                    {c.name} {c.city ? `(${c.city})` : ''}
                   </option>
                 ))}
               </select>

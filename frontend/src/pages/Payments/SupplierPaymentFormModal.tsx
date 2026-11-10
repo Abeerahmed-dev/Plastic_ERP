@@ -178,7 +178,7 @@ export const SupplierPaymentFormModal = ({
               <select {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
                 <option value="">Select a party...</option>
                 {suppliersResponse?.data.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{c.name} {c.city ? `(${c.city})` : ''}</option>
                 ))}
               </select>
               {errors.supplier_id && <p className="mt-1 text-xs text-red-600">{errors.supplier_id.message}</p>}

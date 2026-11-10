@@ -128,5 +128,8 @@ export async function deleteUser(id: string): Promise<void> {
 }
 
 export async function findAllRoles(): Promise<{ id: string; name: string }[]> {
-  return db('roles').select('id', 'name').orderBy('name', 'asc');
+  return db('roles')
+    .whereRaw('LOWER(name) != ?', ['warehouse'])
+    .select('id', 'name')
+    .orderBy('name', 'asc');
 }

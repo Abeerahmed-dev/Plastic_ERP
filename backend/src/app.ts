@@ -3,6 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { logger } from './config/logger';
+import { env } from './config/env';
+import { apiRateLimiter } from './middleware/rateLimiter';
 import { errorHandler } from './middleware/errorHandler';
 import healthRouter from './modules/health/health.router';
 import authRouter from './modules/auth/auth.router';
@@ -36,6 +38,9 @@ import { fail, ok } from './shared/apiResponse';
 export function createApp(): Application {
   const app = express();
 
+  // ─── Trust proxy (for rate limiting & client IP behind Nginx/Cloudflare/VPS) ───
+  app.set('trust proxy', 1);
+
   // ─── Disable ETag & Cache for JSON APIs ───────
   app.disable('etag');
   app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -47,9 +52,34 @@ export function createApp(): Application {
 
   // ─── Security & parsing ────────────────────────
   app.use(helmet());
-  app.use(cors());
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+
+  const allowedOrigins = [
+    env.FRONTEND_URL.replace(/\/$/, ''),
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3000',
+  ];
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Allow mobile apps, curl, server-to-server or development
+        if (!origin || env.NODE_ENV !== 'production' || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(new Error(`Blocked by CORS policy for origin: ${origin}`));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }),
+  );
+
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // ─── Rate limiting ─────────────────────────────
+  app.use('/api', apiRateLimiter);
 
   // ─── HTTP request logging ──────────────────────
   app.use(pinoHttp({ logger }));
@@ -111,8 +141,11 @@ export function createApp(): Application {
   app.use('/api/v1/settings', settingsRouter);
   app.use('/api/settings', settingsRouter);
   app.use('/api/v1/onboarding', onboardingRouter);
-  app.use('/api/dev', devRouter);
-  app.use('/api/v1/dev', devRouter);
+  // ─── Development only routes ───────────────────
+  if (env.NODE_ENV !== 'production') {
+    app.use('/api/dev', devRouter);
+    app.use('/api/v1/dev', devRouter);
+  }
 
   // ─── 404 handler ─────────────────────────────
   app.use((_req: Request, res: Response, _next: NextFunction) => {
