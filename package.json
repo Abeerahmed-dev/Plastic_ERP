@@ -6,12 +6,21 @@
   "scripts": {
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "lint:backend": "npm --prefix backend run lint",
+    "lint:frontend": "npm --prefix frontend run lint",
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:fix": "npm --prefix backend run lint:fix && npm --prefix frontend run lint:fix",
+    "type-check:backend": "npm --prefix backend run type-check",
+    "type-check:frontend": "npm --prefix frontend run type-check",
+    "type-check": "npm run type-check:backend && npm run type-check:frontend",
     "test:backend": "npm --prefix backend test",
     "test:unit": "npm --prefix backend run test:unit",
     "test:integration": "npm --prefix backend run test:integration",
-    "type-check:backend": "npm --prefix backend run type-check",
-    "type-check:frontend": "npm --prefix frontend run type-check",
     "migrate:latest": "npm --prefix backend run migrate:latest",
+    "seed:run": "npm --prefix backend run seed:run",
     "db:clean": "npm --prefix backend run db:clean"
   }
 }
