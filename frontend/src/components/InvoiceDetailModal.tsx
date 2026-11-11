@@ -24,6 +24,7 @@ export interface InvoiceDetailItem {
   batch_selected_unit?: string;
   quantity: number;
   returned_quantity?: number;
+  return_quantity?: number;
   selected_unit?: string;
   net_kg_processed?: number;
   unit_price: number;

@@ -1,4 +1,6 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
+import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
@@ -51,7 +53,7 @@ export function createApp(): Application {
   });
 
   // ─── Security & parsing ────────────────────────
-  app.use(helmet());
+  app.use(helmet({ contentSecurityPolicy: false }));
 
   const allowedOrigins = [
     env.FRONTEND_URL.replace(/\/$/, ''),
@@ -85,70 +87,70 @@ export function createApp(): Application {
   app.use(pinoHttp({ logger }));
 
   // ─── API routes ───────────────────────────────
-  app.use('/api/v1/health', healthRouter);
-  app.use('/api/v1/auth', authRouter);
-  app.use('/api/v1/users', usersRouter);
-  app.use('/api/v1/customers', customersRouter);
-  app.use('/api/customers', customersRouter);
-  app.use('/api/v1/suppliers', suppliersRouter);
-  app.use('/api/suppliers', suppliersRouter);
-  app.use('/api/v1/categories', categoriesRouter);
-  app.use('/api/v1/uom', (_req: Request, res: Response) => res.json(ok([]))); // Deprecated fallback
-  app.use('/api/v1/products', productsRouter);
-  app.use('/api/products', productsRouter);
-  app.use('/api/v1/inventory', inventoryRouter);
-  app.use('/api/inventory', inventoryRouter);
-  app.use('/api/v1/invoices', invoicesRouter);
-  app.use('/api/invoices', invoicesRouter);
-  app.post('/api/v1/sync-offline', syncOfflineInvoices);
-  app.post('/api/sync-offline', syncOfflineInvoices);
-  app.use('/api/v1/sales', invoicesRouter);
-  app.use('/api/sales', invoicesRouter);
-  app.use('/api/v1/purchases', purchasesRouter);
-  app.use('/api/purchases', purchasesRouter);
-  app.use('/api/v1/purchase-invoices', purchasesRouter);
-  app.use('/api/purchase-invoices', purchasesRouter);
-  app.use('/api/v1/purchase-returns', purchaseReturnsRouter);
-  app.use('/api/purchase-returns', purchaseReturnsRouter);
-  app.use('/api/v1/supplier-payments', supplierPaymentsRouter);
-  app.use('/api/supplier-payments', supplierPaymentsRouter);
-  app.use('/api/v1/customer-payments', paymentsRouter);
-  app.use('/api/customer-payments', paymentsRouter);
-  app.use('/api/v1/payments', paymentsRouter);
-  app.use('/api/payments', paymentsRouter);
-  app.use('/api/v1/advances', advancesRouter);
-  app.use('/api/advances', advancesRouter);
-  app.use('/api/v1/refunds', refundsRouter);
-  app.use('/api/refunds', refundsRouter);
-  app.use('/api/v1/expenses', expensesRouter);
-  app.use('/api/expenses', expensesRouter);
-  app.use('/api/v1/pos', posRouter);
-  app.use('/api/pos', posRouter);
-  app.use('/api/v1/reports', reportsRouter);
-  app.use('/api/reports', reportsRouter);
-  app.use('/api/v1/bank-accounts', bankAccountsRouter);
-  app.use('/api/bank-accounts', bankAccountsRouter);
-  app.use('/api/v1/banks', bankAccountsRouter);
-  app.use('/api/banks', bankAccountsRouter);
-  app.use('/api/v1/incoming-pdcs', incomingPdcsRouter);
-  app.use('/api/incoming-pdcs', incomingPdcsRouter);
-  app.use('/api/v1/customer-refunds', customerRefundsRouter);
-  app.use('/api/customer-refunds', customerRefundsRouter);
-  app.use('/api/v1/employees', employeesRouter);
-  app.use('/api/employees', employeesRouter);
-  app.use('/api/v1/exchanges', exchangesRouter);
-  app.use('/api/exchanges', exchangesRouter);
-  app.use('/api/v1/settings', settingsRouter);
-  app.use('/api/settings', settingsRouter);
-  app.use('/api/v1/onboarding', onboardingRouter);
+  const v1Router = express.Router();
+
+  v1Router.use('/health', healthRouter);
+  v1Router.use('/auth', authRouter);
+  v1Router.use('/users', usersRouter);
+  v1Router.use('/customers', customersRouter);
+  v1Router.use('/suppliers', suppliersRouter);
+  v1Router.use('/categories', categoriesRouter);
+  v1Router.use('/uom', (_req: Request, res: Response) => res.json(ok([]))); // Deprecated fallback
+  v1Router.use('/products', productsRouter);
+  v1Router.use('/inventory', inventoryRouter);
+  v1Router.use('/invoices', invoicesRouter);
+  v1Router.post('/sync-offline', syncOfflineInvoices);
+  v1Router.use('/sales', invoicesRouter);
+  v1Router.use('/purchases', purchasesRouter);
+  v1Router.use('/purchase-invoices', purchasesRouter);
+  v1Router.use('/purchase-returns', purchaseReturnsRouter);
+  v1Router.use('/supplier-payments', supplierPaymentsRouter);
+  v1Router.use('/customer-payments', paymentsRouter);
+  v1Router.use('/payments', paymentsRouter);
+  v1Router.use('/advances', advancesRouter);
+  v1Router.use('/refunds', refundsRouter);
+  v1Router.use('/expenses', expensesRouter);
+  v1Router.use('/pos', posRouter);
+  v1Router.use('/reports', reportsRouter);
+  v1Router.use('/bank-accounts', bankAccountsRouter);
+  v1Router.use('/banks', bankAccountsRouter);
+  v1Router.use('/incoming-pdcs', incomingPdcsRouter);
+  v1Router.use('/customer-refunds', customerRefundsRouter);
+  v1Router.use('/employees', employeesRouter);
+  v1Router.use('/exchanges', exchangesRouter);
+  v1Router.use('/settings', settingsRouter);
+  v1Router.use('/onboarding', onboardingRouter);
+
   // ─── Development only routes ───────────────────
   if (env.NODE_ENV !== 'production') {
-    app.use('/api/dev', devRouter);
-    app.use('/api/v1/dev', devRouter);
+    v1Router.use('/dev', devRouter);
   }
 
-  // ─── 404 handler ─────────────────────────────
-  app.use((_req: Request, res: Response, _next: NextFunction) => {
+  // Mount canonical API v1, plus unversioned /api fallback
+  app.use('/api/v1', v1Router);
+  app.use('/api', v1Router);
+
+  // ─── Monolith: Serve Compiled Frontend SPA ───
+  const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
+  if (fs.existsSync(frontendDistPath)) {
+    app.use(express.static(frontendDistPath));
+
+    // Handle React client-side SPA routing (serves index.html for all non-API paths)
+    app.get('*', (req: Request, res: Response, next: NextFunction) => {
+      if (req.url.startsWith('/api')) {
+        return next();
+      }
+      res.sendFile(path.join(frontendDistPath, 'index.html'));
+    });
+  }
+
+  // ─── 404 handler for unknown API routes ──────
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json(fail('API route not found'));
+  });
+
+  // Catch-all 404 handler
+  app.use((_req: Request, res: Response) => {
     res.status(404).json(fail('Route not found'));
   });
 
