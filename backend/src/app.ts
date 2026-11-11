@@ -1,4 +1,6 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
+import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
@@ -51,7 +53,7 @@ export function createApp(): Application {
   });
 
   // ─── Security & parsing ────────────────────────
-  app.use(helmet());
+  app.use(helmet({ contentSecurityPolicy: false }));
 
   const allowedOrigins = [
     env.FRONTEND_URL.replace(/\/$/, ''),
@@ -128,8 +130,27 @@ export function createApp(): Application {
   app.use('/api/v1', v1Router);
   app.use('/api', v1Router);
 
-  // ─── 404 handler ─────────────────────────────
-  app.use((_req: Request, res: Response, _next: NextFunction) => {
+  // ─── Monolith: Serve Compiled Frontend SPA ───
+  const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
+  if (fs.existsSync(frontendDistPath)) {
+    app.use(express.static(frontendDistPath));
+
+    // Handle React client-side SPA routing (serves index.html for all non-API paths)
+    app.get('*', (req: Request, res: Response, next: NextFunction) => {
+      if (req.url.startsWith('/api')) {
+        return next();
+      }
+      res.sendFile(path.join(frontendDistPath, 'index.html'));
+    });
+  }
+
+  // ─── 404 handler for unknown API routes ──────
+  app.use('/api', (_req: Request, res: Response) => {
+    res.status(404).json(fail('API route not found'));
+  });
+
+  // Catch-all 404 handler
+  app.use((_req: Request, res: Response) => {
     res.status(404).json(fail('Route not found'));
   });
 
