@@ -1,5 +1,6 @@
 import db from '../../db/knex';
 import { CreateInvoiceInput } from './invoices.schemas';
+import { estimateOverdraftCogs, getLatestMarketBatchPrice } from '../../shared/overdraftPricing';
 
 export interface InvoiceRow {
   id: string;
@@ -246,32 +247,16 @@ export async function createInvoiceWithItems(
           });
         }
 
-        // ── Fetch Last Known Purchase Price for Estimated COGS ──
-        let lastPurchasePrice = 0;
-        if (missing_qty > 0) {
-          const lastPurchaseItem = await trx('purchase_invoice_items as pii')
-            .join('purchase_invoices as pi', 'pii.purchase_invoice_id', 'pi.id')
-            .where('pii.product_id', item.product_id)
-            .whereNot('pi.status', 'CANCELLED')
-            .orderBy('pi.date', 'desc')
-            .orderBy('pii.created_at', 'desc')
-            .select('pii.unit_price')
-            .first();
+        // ── Shared Overdraft Split Engine: latest market batch price (with product base/cost fallback) ──
+        const { unitPrice: latestBatchPrice, estimatedCogs: missingEstimatedCogs } =
+          await estimateOverdraftCogs(trx, item.product_id, missing_qty, product);
 
-          if (lastPurchaseItem && Number(lastPurchaseItem.unit_price) > 0) {
-            lastPurchasePrice = Number(lastPurchaseItem.unit_price);
-          } else {
-            lastPurchasePrice = Number(product.rolling_avg_cost_per_kg || product.cost_price || 0);
-          }
-        }
-
-        const missingEstimatedCogs = Math.round(missing_qty * lastPurchasePrice * 100) / 100;
         const estimated_cogs = Math.round((totalAvailableCogs + missingEstimatedCogs) * 100) / 100;
         const actual_cogs = Math.round(totalAvailableCogs * 100) / 100;
 
         const appliedCogsPerKg = sold_kg > 0
           ? Math.round((estimated_cogs / sold_kg) * 10000) / 10000
-          : (lastPurchasePrice || Number(product.rolling_avg_cost_per_kg || 0));
+          : (latestBatchPrice || Number(product.rolling_avg_cost_per_kg || product.cost_price || 0));
 
         // Price Floor Check against rolling average cost / estimated cost
         const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
@@ -1605,7 +1590,12 @@ export async function processOfflineSyncInvoices(
 
           // Fallback if stock was in product total_stock_kg but no active batch was found
           if (kgToDeduct > 0) {
-            actual_cogs += kgToDeduct * previousWAC;
+            const { unitPrice: latestFallbackPrice } = await getLatestMarketBatchPrice(
+              trx,
+              item.product_id,
+              liveProduct
+            );
+            actual_cogs += kgToDeduct * latestFallbackPrice;
           }
 
           // Decrement physical stock on product
@@ -1629,13 +1619,14 @@ export async function processOfflineSyncInvoices(
           });
         }
 
-        // True Financial Costing:
-        // Estimated COGS = Actual COGS of fulfilled stock + (Deferred shortfall * previous WAC)
-        const missingEstimatedCost = Math.round(deferred_qty * previousWAC * 100) / 100;
+        // True Financial Costing via Shared Overdraft Split Engine:
+        // Estimated COGS = Actual COGS of fulfilled stock + (deferred_qty * latest_batch_price)
+        const { unitPrice: latestBatchPrice, estimatedCogs: missingEstimatedCost } =
+          await estimateOverdraftCogs(trx, item.product_id, deferred_qty, liveProduct);
         const estimated_cogs = Math.round((actual_cogs + missingEstimatedCost) * 100) / 100;
         const applied_cogs_per_kg = requested_qty > 0
           ? Math.round((estimated_cogs / requested_qty) * 10000) / 10000
-          : previousWAC;
+          : (latestBatchPrice || previousWAC);
 
         const unit_price = Number(item.unit_price || liveProduct.sale_price || 0);
         const lineTotal = Math.round(requested_qty * unit_price * 100) / 100;

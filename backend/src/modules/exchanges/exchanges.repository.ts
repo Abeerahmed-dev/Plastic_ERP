@@ -3,6 +3,7 @@ import db from '../../db/knex';
 import { CreateExchangeInput, ExchangeQuery } from './exchanges.schemas';
 import { NotFoundError, ValidationError, InsufficientStockError } from '../../shared/errors';
 import { restoreInventoryBucketsLifo } from '../invoices/invoices.repository';
+import { estimateOverdraftCogs } from '../../shared/overdraftPricing';
 
 export interface ProductExchangeRow {
   id: string;
@@ -403,27 +404,10 @@ async function executeInvoiceExchange(
     created_by: userId || null,
   });
 
-  // Calculate estimated COGS for any missing shortfall
-  let lastPurchasePrice = 0;
-  if (missingQty > 0) {
-    const lastPurchaseItem = await trx('purchase_invoice_items as pii')
-      .join('purchase_invoices as pi', 'pii.purchase_invoice_id', 'pi.id')
-      .where('pii.product_id', newProductId)
-      .whereNot('pi.status', 'CANCELLED')
-      .orderBy('pi.date', 'desc')
-      .orderBy('pii.created_at', 'desc')
-      .select('pii.unit_price')
-      .first();
+  // Calculate estimated COGS for any missing shortfall via shared Overdraft Split Engine
+  const { unitPrice: lastPurchasePrice, estimatedCogs: missingEstimatedCogs } =
+    await estimateOverdraftCogs(trx, newProductId, missingQty, newProduct);
 
-    lastPurchasePrice = Number(
-      lastPurchaseItem?.unit_price ||
-      newProduct.rolling_avg_cost_per_kg ||
-      newProduct.cost_price ||
-      0,
-    );
-  }
-
-  const missingEstimatedCogs = Math.round(missingQty * lastPurchasePrice * 100) / 100;
   const estimatedCogs = Math.round((totalDepletedCogs + missingEstimatedCogs) * 100) / 100;
   const lockedActualCogs = Math.round(totalDepletedCogs * 100) / 100;
 

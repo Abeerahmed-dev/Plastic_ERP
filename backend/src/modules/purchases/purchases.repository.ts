@@ -407,7 +407,8 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     // Map through the incoming array and force truncation to 2 decimal places
     const sanitizedItems = (data.items || []).map((item: any) => {
       const quantity_kg = Number((item.quantity_kg ?? item.quantity) || 0);
-      const unit_price = Math.round(Number(item.price_per_kg ?? item.unit_price ?? 0) * 100) / 100;
+      const rawUnitPrice = item.price_per_kg ?? item.unit_price ?? item.price ?? 0;
+      const unit_price = Math.round(Number(rawUnitPrice) * 100) / 100;
       const total_price = item.total_price !== undefined || item.total !== undefined
         ? Math.round(Number(item.total_price ?? item.total) * 100) / 100
         : Math.round((quantity_kg * unit_price) * 100) / 100;
@@ -664,7 +665,7 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
       const itemSize = (item.size && String(item.size).trim().length > 0)
         ? String(item.size).trim()
         : (productWithCat.size && String(productWithCat.size).trim().length > 0 ? String(productWithCat.size).trim() : 'Standard');
-      const batchNum = `PB-${invoice.invoice_number || invoice.id.slice(0, 8)}-${item.product_id.slice(0, 4)}-${Date.now()}`;
+      const batchNum = `PB-${invoice.invoice_number || invoice.id.slice(0, 8)}-${item.product_id.slice(0, 4)}-${Date.now()}-${i + 1}`;
 
       const batchData: Record<string, any> = {
         product_id: item.product_id,
@@ -1255,6 +1256,20 @@ export async function updateStockDcAndPrices(
       .where('purchase_invoice_id', purchaseId)
       .forUpdate();
 
+    const invoiceBatches = await trx('inventory_batches')
+      .where('purchase_invoice_id', purchaseId)
+      .forUpdate();
+    const sortedInvoiceBatches = Array.isArray(invoiceBatches)
+      ? [...invoiceBatches].sort((a: any, b: any) => {
+          const timeA = a?.created_at ? new Date(a.created_at).getTime() : 0;
+          const timeB = b?.created_at ? new Date(b.created_at).getTime() : 0;
+          if (timeA !== timeB) return timeA - timeB;
+          return String(a?.batch_number || '').localeCompare(String(b?.batch_number || ''));
+        })
+      : [];
+    const usedBatchIds = new Set<string>();
+    const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
+
     const totalKg = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     const newDeliveryCharges = payload.delivery_charges !== undefined
       ? Math.round(Number(payload.delivery_charges) * 100) / 100
@@ -1288,8 +1303,7 @@ export async function updateStockDcAndPrices(
           updated_at: new Date(),
         });
 
-      // Update dedicated batch with landed cost
-      const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
+      // Update only this line item's dedicated batch to prevent overwriting sibling rows for the same product
       const batchUpdate: Record<string, any> = {
         updated_at: new Date(),
       };
@@ -1299,12 +1313,33 @@ export async function updateStockDcAndPrices(
         batchUpdate.buy_price_per_kg = landedCost;
       }
 
-      await trx('inventory_batches')
-        .where({
-          purchase_invoice_id: purchaseId,
-          product_id: item.product_id,
-        })
-        .update(batchUpdate);
+      const itemQty = Number(item.net_kg_processed ?? item.quantity ?? 0);
+      const prevItemLandedCost = Number(item.landed_cost_per_kg ?? item.unit_price ?? 0);
+      const candidateBatches = sortedInvoiceBatches.filter(
+        (b: any) => b && b.id && !usedBatchIds.has(b.id) && b.product_id === item.product_id
+      );
+      const matchedBatch =
+        candidateBatches.find(
+          (b: any) =>
+            Math.abs(Number(b.original_qty || 0) - itemQty) < 0.0001 &&
+            Math.abs(Number(b.batch_buy_price_per_kg ?? b.buy_price_per_kg ?? 0) - prevItemLandedCost) < 0.01
+        ) ||
+        candidateBatches.find((b: any) => Math.abs(Number(b.original_qty || 0) - itemQty) < 0.0001) ||
+        candidateBatches[0];
+
+      if (matchedBatch) {
+        usedBatchIds.add(matchedBatch.id);
+        await trx('inventory_batches')
+          .where('id', matchedBatch.id)
+          .update(batchUpdate);
+      } else {
+        await trx('inventory_batches')
+          .where({
+            purchase_invoice_id: purchaseId,
+            product_id: item.product_id,
+          })
+          .update(batchUpdate);
+      }
 
       // Update product cost_price & rolling average cost
       const activeBatches = await trx('inventory_batches')
