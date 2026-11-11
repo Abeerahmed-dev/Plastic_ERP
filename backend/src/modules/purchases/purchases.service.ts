@@ -22,8 +22,8 @@ export async function updatePurchaseInvoiceStatus(id: string, updateData: { stat
 export async function processPurchaseReturn(
   input: {
     parent_invoice_id: string;
-    items?: { product_id: string; return_quantity?: number; quantity?: number }[];
-    line_items?: { product_id: string; return_quantity?: number; quantity?: number }[];
+    items?: repo.PurchaseReturnItemInput[];
+    line_items?: repo.PurchaseReturnItemInput[];
     return_reason?: string;
   },
   userId?: string
