@@ -116,6 +116,16 @@ export async function findRefreshToken(tokenHash: string): Promise<RefreshTokenR
 }
 
 /**
+ * Find a refresh token regardless of whether it was revoked or expired.
+ * Used for token reuse / replay attack detection.
+ */
+export async function findAnyRefreshToken(tokenHash: string): Promise<RefreshTokenRow | undefined> {
+  return db('refresh_tokens')
+    .where({ token_hash: tokenHash })
+    .first();
+}
+
+/**
  * Revoke a specific refresh token.
  */
 export async function revokeRefreshToken(tokenHash: string): Promise<void> {

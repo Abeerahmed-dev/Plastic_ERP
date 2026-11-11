@@ -17,7 +17,12 @@ router.get('/:id/returns/summary', requirePermission('sales:read'), invoicesCont
 router.post('/:id/returns', requirePermission('sales:write'), verifyRole(['OWNER', 'ADMIN', 'CASHIER']), invoicesController.createSalesReturn);
 router.post('/:id/exchange', requirePermission('sales:write'), verifyRole(['OWNER', 'ADMIN', 'CASHIER']), invoicesController.createInvoiceExchange);
 router.get('/:id', requirePermission('sales:read'), invoicesController.getInvoice);
-router.post('/sync-offline', invoicesController.syncOfflineInvoices);
+router.post(
+  '/sync-offline',
+  requirePermission('sales:write'),
+  verifyRole(['OWNER', 'ADMIN', 'CASHIER']),
+  invoicesController.syncOfflineInvoices
+);
 router.post('/', requirePermission('sales:write'), verifyRole(['OWNER', 'ADMIN', 'CASHIER']), invoicesController.createInvoice);
 router.put('/:id', verifyRole(['OWNER', 'ADMIN']), invoicesController.createInvoice);
 router.delete('/:id', verifyRole(['OWNER', 'ADMIN']), (_req, res) => res.json({ success: true, message: "Invoice deleted" }));

@@ -1274,7 +1274,6 @@ export async function findInvoiceById(id: string) {
 
   if (!invoice) return null;
 
-  const original_total = Number(invoice.total_amount || 0);
   const amount_paid = Number(invoice.paid_amount || invoice.amount_paid || 0);
 
   // Fetch child credit notes if any exist against this parent invoice
@@ -1517,7 +1516,6 @@ export async function processOfflineSyncInvoices(
 
       const processedItems: any[] = [];
       const lineageRecords: any[] = [];
-      const pendingDeliveryRecords: any[] = [];
 
       for (const item of (invPayload.items || [])) {
         // Lock product row to prevent concurrent race conditions

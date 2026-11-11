@@ -46,6 +46,8 @@ export const updateStockDcAndPricesSchema = z.object({
 });
 
 export const returnItemSchema = z.object({
+  id: z.string().optional(),
+  line_item_id: z.string().optional(),
   product_id: z.string().uuid('Invalid product ID'),
   return_quantity: z.number().min(0.0001, 'Return quantity must be greater than 0').optional(),
   quantity: z.number().min(0.0001, 'Quantity must be greater than 0').optional(),
