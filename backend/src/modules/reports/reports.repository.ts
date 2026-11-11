@@ -5,6 +5,18 @@ import { computeCustomerNetBalance } from '../customers/customers.repository';
 import { computeSupplierNetBalance } from '../suppliers/suppliers.repository';
 import { getCashDrawerBalance, findAllBankAccounts } from '../bank-accounts/bank-accounts.repository';
 
+// Include estimated overdraft placeholder delta (estimated - actual) on unfulfilled/partially fulfilled non-return rows
+// so deferred stock is costed at estimated WAC until retroactive purchase reconciliation overwrites actual_cogs.
+const OVERDRAFT_ESTIMATED_DELTA_SQL =
+  'CASE WHEN COALESCE(sii.quantity, 0) >= 0 AND COALESCE(sii.actual_cogs, 0) >= 0 AND COALESCE(sii.estimated_cogs, 0) > COALESCE(sii.actual_cogs, 0) THEN (COALESCE(sii.estimated_cogs, 0) - COALESCE(sii.actual_cogs, 0)) ELSE 0 END';
+
+function buildTotalCogsSumSql(actualFallbackUnitCostSql?: string, alias = 'total_cogs'): string {
+  const realizedExpr = actualFallbackUnitCostSql
+    ? `COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(${actualFallbackUnitCostSql} AS NUMERIC))`
+    : 'COALESCE(sii.actual_cogs, 0)';
+  return `COALESCE(SUM(CAST(${realizedExpr} AS NUMERIC)), 0) + COALESCE(SUM(CAST(${OVERDRAFT_ESTIMATED_DELTA_SQL} AS NUMERIC)), 0) as ${alias}`;
+}
+
 export async function getDashboardMetrics() {
   const walkin = await db('customers').where({ phone: WALKIN_CUSTOMER_PHONE }).first();
   if (!walkin) return { todaySales: 0, todayTransactions: 0, weeklySales: 0, monthlySales: 0 };
@@ -80,7 +92,7 @@ export async function getInventoryLedgerReport() {
       'sii.product_id',
       db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity)) as total_kg_sold'),
       db.raw('SUM(sii.total_price) as total_revenue'),
-      db.raw('SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as total_cogs')
+      db.raw(buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'total_cogs'))
     );
 
   const purchaseMap = new Map<string, number>();
@@ -505,6 +517,7 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
       'sii.total_price',
       'sii.net_kg_processed',
       'sii.applied_cogs_per_kg',
+      'sii.estimated_cogs',
       'sii.actual_cogs',
       'p.rolling_avg_cost_per_kg',
       'p.cost_price as product_cost_price'
@@ -534,7 +547,14 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
 
     const kg = Number(r.net_kg_processed || r.quantity || 0);
     const appliedCogs = Number(r.applied_cogs_per_kg || r.rolling_avg_cost_per_kg || r.product_cost_price || 0);
-    const itemCogs = (r.actual_cogs !== null && r.actual_cogs !== undefined) ? Number(r.actual_cogs) : (kg * appliedCogs);
+    const actualCogsVal = (r.actual_cogs !== null && r.actual_cogs !== undefined) ? Number(r.actual_cogs) : null;
+    const estimatedCogsVal = Number(r.estimated_cogs || 0);
+    const itemCogs =
+      Number(r.quantity || 0) >= 0 &&
+      (actualCogsVal ?? 0) >= 0 &&
+      estimatedCogsVal > (actualCogsVal ?? 0)
+        ? estimatedCogsVal
+        : (actualCogsVal !== null ? actualCogsVal : (kg * appliedCogs));
     total_cogs += itemCogs;
 
     if (!processedInvoices.has(r.invoice_id)) {
@@ -632,7 +652,7 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
             }
           });
       })
-      .select(db.raw('SUM(CAST(COALESCE(sii.actual_cogs, 0) AS NUMERIC)) as total_cogs'));
+      .select(db.raw(buildTotalCogsSumSql(undefined, 'total_cogs')));
 
     const hasPurchaseIdCol = await db.schema.hasColumn('expenses', 'purchase_id');
     let expensesQuery = db('expenses as e')
@@ -1125,7 +1145,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
-    // 3. COGS Query (strictly sums sales_invoice_items.actual_cogs for invoices in the current period)
+    // 3. COGS Query (sums realized actual_cogs plus remaining estimated overdraft COGS placeholders)
     const cogsQuery = db('sales_invoice_items as sii')
       .whereIn('sii.invoice_id', function () {
         this.select('si.id')
@@ -1141,7 +1161,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
           .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
       })
       .select(
-        db.raw('SUM(CAST(COALESCE(sii.actual_cogs, 0) AS NUMERIC)) as total_cogs')
+        db.raw(buildTotalCogsSumSql(undefined, 'total_cogs'))
       );
 
     // 4. Operating Expenses Query (Inbound freight is capitalized into inventory/COGS and excluded from OPEX)
@@ -1300,7 +1320,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_kg_sold'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as total_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'total_cogs')
         )
       );
 
@@ -1323,7 +1343,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_volume_kg'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as total_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'total_cogs')
         )
       );
 
@@ -1343,7 +1363,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('COALESCE(si.date, si.created_at::date) as date'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as daily_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) AS NUMERIC)) as daily_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'daily_cogs')
         )
       )
       .orderByRaw('COALESCE(si.date, si.created_at::date) ASC');
@@ -1516,7 +1536,7 @@ export async function getInventoryValuationReport() {
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as lifetime_kg_sold'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as lifetime_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, 0) AS NUMERIC)) AS NUMERIC)) as lifetime_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, 0)', 'lifetime_cogs')
         )
       );
 

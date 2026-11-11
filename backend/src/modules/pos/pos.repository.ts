@@ -7,6 +7,7 @@ export { restoreInventoryBucketsLifo };
 
 import { ForbiddenError, NotFoundError, InsufficientStockError } from '../../shared/errors';
 import { logger } from '../../config/logger';
+import { estimateOverdraftCogs } from '../../shared/overdraftPricing';
 
 export async function processPOSCheckout(
   userId: string,
@@ -69,6 +70,7 @@ export async function processPOSCheckout(
           'p.name',
           'p.name_urdu',
           'p.total_stock_kg',
+          'p.cost_price',
           'p.rolling_avg_cost_per_kg',
           'p.fixed_retail_price_per_kg',
           'p.sale_price',
@@ -139,6 +141,7 @@ export async function processPOSCheckout(
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: effectiveUnitPrice,
           total_price: lineTotal,
+          estimated_cogs: -lineCogs,
           actual_cogs: -lineCogs,
           name_urdu: product.name_urdu || null,
           batchDepletions: [],
@@ -235,10 +238,18 @@ export async function processPOSCheckout(
           }
         }
 
-        const appliedCogsPerKg = sold_kg > 0
-          ? Math.round((totalLineCogs / sold_kg) * 10000) / 10000
-          : Number(product.rolling_avg_cost_per_kg || 0);
+        const unbatchedShortfallQty = kgToDeduct > 0 ? kgToDeduct : 0;
+        const overdraftEstimate = unbatchedShortfallQty > 0
+          ? await estimateOverdraftCogs(trx, item.product_id, unbatchedShortfallQty, product)
+          : null;
+        const fallbackBatchPrice = overdraftEstimate?.unitPrice ?? Number(product.rolling_avg_cost_per_kg || product.cost_price || 0);
+
+        const unbatchedEstimatedCogs = overdraftEstimate?.estimatedCogs ?? 0;
         const lineCogs = Math.round(totalLineCogs * 100) / 100;
+        const estimatedLineCogs = Math.round((totalLineCogs + unbatchedEstimatedCogs) * 100) / 100;
+        const appliedCogsPerKg = sold_kg > 0
+          ? Math.round((estimatedLineCogs / sold_kg) * 10000) / 10000
+          : fallbackBatchPrice;
 
         // Advisory Price Floor Check against rolling average cost (non-blocking for POS)
         const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
@@ -270,7 +281,9 @@ export async function processPOSCheckout(
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: effectiveUnitPrice,
           total_price: lineTotal,
-          actual_cogs: -lineCogs,
+          is_deferred: kgToDeduct > 0,
+          estimated_cogs: estimatedLineCogs,
+          actual_cogs: lineCogs,
           name_urdu: product.name_urdu || null,
           batchDepletions: itemBatchDepletions,
         });
@@ -608,12 +621,12 @@ export async function getTodayCashTally(_userId?: string) {
   const salesCashResult = await db('customer_payments')
     .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
     .andWhere('amount', '>', 0)
-    .where(function() {
+    .where(function () {
       this.whereRaw('payment_date::text = ?', [todayStr])
         .orWhereBetween('payment_date', [startOfDay, endOfDay])
         .orWhereBetween('created_at', [startOfDay, endOfDay]);
     })
-    .where(function() {
+    .where(function () {
       this.whereNull('cheque_status')
         .orWhereNotIn('cheque_status', ['BOUNCED', 'FAILED']);
     })
@@ -625,14 +638,14 @@ export async function getTodayCashTally(_userId?: string) {
 
   // 2. Total Cash Refunds paid out to customers today
   const refundsResult = await db('customer_payments')
-    .where(function() {
+    .where(function () {
       this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
-        .orWhere(function() {
+        .orWhere(function () {
           this.whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
             .andWhere('amount', '<', 0);
         });
     })
-    .where(function() {
+    .where(function () {
       this.whereRaw('payment_date::text = ?', [todayStr])
         .orWhereBetween('payment_date', [startOfDay, endOfDay])
         .orWhereBetween('created_at', [startOfDay, endOfDay]);
@@ -648,7 +661,7 @@ export async function getTodayCashTally(_userId?: string) {
   if (hasExpPay) {
     const expensesResult = await db('expense_payments')
       .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
-      .where(function() {
+      .where(function () {
         this.whereRaw('payment_date::text = ?', [todayStr])
           .orWhereBetween('payment_date', [startOfDay, endOfDay])
           .orWhereBetween('created_at', [startOfDay, endOfDay]);
@@ -660,7 +673,7 @@ export async function getTodayCashTally(_userId?: string) {
     const hasStatus = await db.schema.hasColumn('expenses', 'status');
     let expQuery = db('expenses')
       .whereIn('payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
-      .where(function() {
+      .where(function () {
         this.whereRaw('expense_date::text = ?', [todayStr])
           .orWhereBetween('expense_date', [startOfDay, endOfDay])
           .orWhereBetween('created_at', [startOfDay, endOfDay]);
@@ -698,7 +711,7 @@ export async function getCashierShiftAudit(userId: string) {
   // 1. Fetch Sales Invoices
   let invoiceQuery = db('sales_invoices as si')
     .join('customers as c', 'si.customer_id', 'c.id')
-    .where(function() {
+    .where(function () {
       this.whereRaw('si.date::text = ?', [todayStr])
         .orWhereBetween('si.date', [startOfDay, endOfDay])
         .orWhereBetween('si.created_at', [startOfDay, endOfDay]);
@@ -764,14 +777,14 @@ export async function getCashierShiftAudit(userId: string) {
   // 2. Fetch Customer Cash Refunds today
   let refundQuery = db('customer_payments as cp')
     .join('customers as c', 'cp.customer_id', 'c.id')
-    .where(function() {
+    .where(function () {
       this.whereRaw('cp.payment_date::text = ?', [todayStr])
         .orWhereBetween('cp.payment_date', [startOfDay, endOfDay])
         .orWhereBetween('cp.created_at', [startOfDay, endOfDay]);
     })
-    .where(function() {
+    .where(function () {
       this.whereIn('cp.payment_method', ['CASH_REFUND', 'cash_refund'])
-        .orWhere(function() {
+        .orWhere(function () {
           this.whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer'])
             .andWhere('cp.amount', '<', 0);
         });

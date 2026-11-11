@@ -7,6 +7,7 @@ export const purchaseItemSchema = z.object({
   selected_unit: z.string().optional().default('KG'),
   unit_price: z.number().min(0, 'Unit price cannot be negative').optional(),
   price_per_kg: z.number().min(0, 'Price per KG cannot be negative').optional(),
+  price: z.number().min(0, 'Price cannot be negative').optional(),
   actual_weight_per_unit: z.number().min(0).optional().nullable(),
   actual_kanta_wt: z.number().min(0).optional().nullable(),
   actual_weight_kg: z.number().min(0).optional().nullable(),
