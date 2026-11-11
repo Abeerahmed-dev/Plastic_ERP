@@ -776,11 +776,19 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
  * 5. Insert new row into purchase_invoices with invoice_type = 'DEBIT_NOTE', linked to parent_invoice_id.
  * 6. Save line items with negative quantities and negative totals.
  */
+export interface PurchaseReturnItemInput {
+  product_id: string;
+  return_quantity?: number;
+  quantity?: number;
+  id?: string;
+  line_item_id?: string;
+}
+
 export async function processPurchaseReturn(
   input: {
     parent_invoice_id: string;
-    items?: { product_id: string; return_quantity?: number; quantity?: number }[];
-    line_items?: { product_id: string; return_quantity?: number; quantity?: number }[];
+    items?: PurchaseReturnItemInput[];
+    line_items?: PurchaseReturnItemInput[];
     return_reason?: string;
   },
   userId?: string
