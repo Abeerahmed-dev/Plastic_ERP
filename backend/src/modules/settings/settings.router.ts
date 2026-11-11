@@ -8,8 +8,8 @@ import {
 
 const router = Router();
 
-// Publicly readable cashier feature flags (returns { customer_access, party_access })
-router.get('/feature-access', getFeatureAccessHandler);
+// Authenticated cashier feature flags (returns { customer_access, party_access })
+router.get('/feature-access', requireAuth, getFeatureAccessHandler);
 
 // Only Admin and Owner can update cashier feature access
 router.put('/feature-access', requireAuth, verifyRole(['ADMIN', 'OWNER']), updateFeatureAccessHandler);

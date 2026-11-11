@@ -779,8 +779,8 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
 export async function processPurchaseReturn(
   input: {
     parent_invoice_id: string;
-    items?: { product_id: string; return_quantity?: number; quantity?: number }[];
-    line_items?: { product_id: string; return_quantity?: number; quantity?: number }[];
+    items?: { id?: string; line_item_id?: string; product_id: string; return_quantity?: number; quantity?: number }[];
+    line_items?: { id?: string; line_item_id?: string; product_id: string; return_quantity?: number; quantity?: number }[];
     return_reason?: string;
   },
   userId?: string

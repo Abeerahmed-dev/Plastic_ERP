@@ -48,3 +48,19 @@ export const forgotPasswordRateLimiter = rateLimit({
   },
 });
 
+/**
+ * Token refresh rate limiter — prevents brute-force hash enumeration and session spamming.
+ * Max 30 attempts per 1 minute per IP.
+ */
+export const refreshRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Too many token refresh requests. Please wait 1 minute before trying again.',
+    message: 'Too many token refresh requests. Please wait 1 minute before trying again.',
+  },
+});
+

@@ -68,6 +68,18 @@ export function errorHandler(
     return;
   }
 
+  // Payload Too Large Wall: Catch body-parser entity.too.large (413)
+  if ((err as any)?.type === 'entity.too.large' || (err as any)?.status === 413 || (err as any)?.statusCode === 413) {
+    res.status(413).json(fail('Payload too large. Maximum request body size is 1MB.'));
+    return;
+  }
+
+  // Malformed JSON Syntax Wall
+  if ((err as any)?.type === 'entity.parse.failed' || ((err as any)?.status === 400 && err instanceof SyntaxError)) {
+    res.status(400).json(fail('Malformed JSON payload in request body.'));
+    return;
+  }
+
   // Zod validation error
   if (err instanceof ZodError) {
     const details: Record<string, string[]> = {};

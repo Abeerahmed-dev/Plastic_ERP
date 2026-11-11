@@ -3,12 +3,14 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
 import { ValidationError, UnauthorizedError } from '../../shared/errors';
+import { isValidPassword } from '../../shared/password.schema';
 import { sendPasswordResetEmail } from '../../services/mail.service';
 import {
   findUserByEmail,
   findUserById,
   saveRefreshToken,
   findRefreshToken,
+  findAnyRefreshToken,
   revokeRefreshToken,
   revokeAllUserRefreshTokens,
   savePasswordResetToken,
@@ -61,7 +63,7 @@ function buildAccessToken(user: {
       permissions: user.permissions,
     },
     env.JWT_SECRET,
-    { expiresIn: env.JWT_ACCESS_EXPIRES_IN } as jwt.SignOptions,
+    { expiresIn: env.JWT_ACCESS_EXPIRES_IN, algorithm: 'HS256' } as jwt.SignOptions,
   );
 }
 
@@ -113,15 +115,26 @@ export async function login(email: string, password: string): Promise<LoginResul
   };
 }
 
+export interface RefreshResult {
+  access_token: string;
+  refresh_token: string;
+}
+
 /**
- * Refresh — validate refresh token, issue new access token.
- * Does NOT rotate the refresh token to keep the UI simple.
+ * Refresh — validate refresh token, issue new access token, and rotate refresh token.
+ * Complies with OAuth 2.0 / RFC 6749 Refresh Token Rotation (RTR) & Reuse Detection.
  */
-export async function refresh(rawRefreshToken: string): Promise<{ access_token: string }> {
+export async function refresh(rawRefreshToken: string): Promise<RefreshResult> {
   const tokenHash = hashToken(rawRefreshToken);
   const stored = await findRefreshToken(tokenHash);
 
   if (!stored) {
+    // Check if an already-revoked token is being reused (Token Theft / Replay Attack)
+    const compromised = await findAnyRefreshToken(tokenHash);
+    if (compromised) {
+      // Replay Detection: Revoke all sessions for this user immediately
+      await revokeAllUserRefreshTokens(compromised.user_id);
+    }
     throw new UnauthorizedError('Refresh token invalid or expired');
   }
 
@@ -130,6 +143,17 @@ export async function refresh(rawRefreshToken: string): Promise<{ access_token: 
     throw new UnauthorizedError('User not found or inactive');
   }
 
+  // 1. Immediately revoke the consumed refresh token
+  await revokeRefreshToken(tokenHash);
+
+  // 2. Issue a brand new rotated refresh token
+  const newRawRefreshToken = crypto.randomUUID();
+  const newTokenHash = hashToken(newRawRefreshToken);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  await saveRefreshToken(user.id, newTokenHash, expiresAt);
+
+  // 3. Issue new access token
   const validUser = {
     id: user.id,
     name: user.name,
@@ -140,7 +164,11 @@ export async function refresh(rawRefreshToken: string): Promise<{ access_token: 
   };
 
   const accessToken = buildAccessToken(validUser);
-  return { access_token: accessToken };
+
+  return {
+    access_token: accessToken,
+    refresh_token: newRawRefreshToken,
+  };
 }
 
 /**
@@ -219,8 +247,8 @@ export async function resetPassword(
     throw new ValidationError('Password reset token is required');
   }
 
-  if (!newPassword || newPassword.length < 6) {
-    throw new ValidationError('New password must be at least 6 characters');
+  if (!newPassword || !isValidPassword(newPassword)) {
+    throw new ValidationError('New password must be at least 8 characters and contain at least one letter and one number');
   }
 
   const tokenHash = hashToken(token.trim());

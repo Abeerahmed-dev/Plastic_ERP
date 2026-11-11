@@ -56,8 +56,12 @@ api.interceptors.response.use(
               refresh_token: refreshToken,
             })
             .then((res) => {
-              const { access_token } = res.data.data;
-              useAuthStore.getState().setAccessToken(access_token);
+              const { access_token, refresh_token: newRefreshToken } = res.data.data;
+              if (newRefreshToken) {
+                useAuthStore.getState().setTokens(access_token, newRefreshToken);
+              } else {
+                useAuthStore.getState().setAccessToken(access_token);
+              }
               return access_token;
             })
             .finally(() => {
