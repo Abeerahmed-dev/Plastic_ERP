@@ -282,3 +282,4 @@ We added the `requireAuth` middleware to `GET /feature-access`. Now, only authen
 12. `frontend/src/store/auth.store.ts`: Added `setTokens` method to update rotated refresh tokens.
 13. `frontend/src/services/api.ts`: Updated 401 axios interceptor to store rotated refresh tokens dynamically.
 14. `backend/package-lock.json` & `frontend/package-lock.json`: Applied safe security updates via `npm audit fix`.
+
