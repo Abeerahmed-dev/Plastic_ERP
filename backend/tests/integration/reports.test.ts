@@ -1,4 +1,4 @@
-import db from '../../src/db/knex';
+
 import { getMarginAnalyticsReport, getIncomeStatementReport, getIncomeStatementReturnsDetail } from '../../src/modules/reports/reports.repository';
 
 describe('Reports Date Timestamp Safety', () => {

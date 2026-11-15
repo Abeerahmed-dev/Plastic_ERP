@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../../src/app';
-import db from '../../src/db/knex';
+
 
 const app = createApp();
 
