@@ -27,7 +27,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await db('products').whereILike('name', 'Test%').delete();
   await db('categories').whereILike('name', 'TestProdCat%').delete();
-  await db.destroy();
 });
 
 describe('POST /api/v1/products', () => {
@@ -38,6 +37,7 @@ describe('POST /api/v1/products', () => {
       .send({
         name: 'Test Plastic Bag',
         category_id: testCategoryId,
+        size: 'Standard',
         cost_price: 10,
         sale_price: 15,
         opening_stock: 100

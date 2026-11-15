@@ -13,6 +13,8 @@ export async function seed(knex: Knex): Promise<void> {
       name: WALKIN_CUSTOMER_NAME,
       phone: WALKIN_CUSTOMER_PHONE,
       address: 'POS Default Customer',
+      city: 'Lahore',
+      region: 'Punjab',
       opening_balance: 0,
     });
   }

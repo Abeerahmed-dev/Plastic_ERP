@@ -19,6 +19,7 @@ export interface CreateBankAccountInput {
   account_number: string;
   iban_details?: string;
   initial_balance?: number;
+  opening_balance?: number;
 }
 
 export interface UpdateBankAccountInput {
@@ -27,5 +28,6 @@ export interface UpdateBankAccountInput {
   account_number?: string;
   iban_details?: string;
   initial_balance?: number;
+  opening_balance?: number;
   is_active?: boolean;
 }

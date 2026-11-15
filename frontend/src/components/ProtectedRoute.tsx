@@ -1,4 +1,4 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Navigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
 
 interface ProtectedRouteProps {
@@ -7,11 +7,10 @@ interface ProtectedRouteProps {
 
 export const ProtectedRoute = ({ requiredPermission }: ProtectedRouteProps) => {
   const { isAuthenticated, hasPermission } = useAuthStore();
-  const location = useLocation();
 
   if (!isAuthenticated) {
-    // Redirect to login but save the attempted url
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    // Redirect to login cleanly without preserving prior session URL
+    return <Navigate to="/login" replace />;
   }
 
   if (requiredPermission && !hasPermission(requiredPermission)) {

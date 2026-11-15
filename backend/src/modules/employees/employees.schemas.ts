@@ -21,6 +21,17 @@ export const EmployeeQuerySchema = z.object({
   designation: z.string().optional(),
 });
 
+export const CreateEmployeeLedgerEntrySchema = z.object({
+  transaction_type: z.enum(['SALARY', 'ADVANCE', 'PAYMENT', 'BONUS', 'DEDUCTION']),
+  date: z.string().optional(),
+  reference_month: z.string().regex(/^\d{4}-\d{2}$/, 'Format must be YYYY-MM').optional(),
+  amount: z.coerce.number().positive('Amount must be greater than zero'),
+  payment_method: z.enum(['CASH', 'BANK_TRANSFER', 'CHEQUE']).default('CASH'),
+  bank_account_id: z.string().uuid().optional().nullable(),
+  description: z.string().trim().optional().nullable(),
+});
+
 export type CreateEmployeeInput = z.infer<typeof CreateEmployeeSchema>;
 export type UpdateEmployeeInput = z.infer<typeof UpdateEmployeeSchema>;
 export type EmployeeQuery = z.infer<typeof EmployeeQuerySchema>;
+export type CreateEmployeeLedgerEntryInput = z.infer<typeof CreateEmployeeLedgerEntrySchema>;

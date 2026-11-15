@@ -4,10 +4,6 @@ import db from '../../src/db/knex';
 
 const app = createApp();
 
-afterAll(async () => {
-  await db.destroy();
-});
-
 describe('GET /api/v1/health', () => {
   it('should return 200 with healthy status when DB is connected', async () => {
     const res = await request(app).get('/api/v1/health');
@@ -31,6 +27,6 @@ describe('Unknown route', () => {
     const res = await request(app).get('/api/v1/does-not-exist');
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe('Route not found');
+    expect(res.body.error).toBe('API route not found');
   });
 });

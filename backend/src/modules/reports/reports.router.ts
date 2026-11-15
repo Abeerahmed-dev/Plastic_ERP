@@ -6,7 +6,10 @@ import {
   getInventoryLedgerController,
   getLiquidityLedgerController,
   getLiquidityReceivablesController,
+  getLiquidityCustomerAdvancesController,
   getLiquidityPayablesController,
+  getLiquidityPendingExpensesController,
+  getLiquiditySupplierAdvancesController,
   getLiquidityUnsoldStockController,
   getProfitMatrixController,
   getCashierTallyController,
@@ -30,7 +33,10 @@ router.get('/inventory', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), getInventory
 
 // Restricted reports for OWNER and ADMIN only
 router.get('/liquidity/receivables', verifyRole(['OWNER', 'ADMIN']), getLiquidityReceivablesController);
+router.get('/liquidity/customer-advances', verifyRole(['OWNER', 'ADMIN']), getLiquidityCustomerAdvancesController);
 router.get('/liquidity/payables', verifyRole(['OWNER', 'ADMIN']), getLiquidityPayablesController);
+router.get('/liquidity/pending-expenses', verifyRole(['OWNER', 'ADMIN']), getLiquidityPendingExpensesController);
+router.get('/liquidity/supplier-advances', verifyRole(['OWNER', 'ADMIN']), getLiquiditySupplierAdvancesController);
 router.get('/liquidity/unsold-stock', verifyRole(['OWNER', 'ADMIN']), getLiquidityUnsoldStockController);
 router.get('/liquidity', verifyRole(['OWNER', 'ADMIN']), getLiquidityLedgerController);
 router.get('/pdc', verifyRole(['OWNER', 'ADMIN', 'CASHIER']), getPdcController);
@@ -39,7 +45,7 @@ router.get('/pnl', verifyRole(['OWNER', 'ADMIN']), getPnLController);
 router.get('/income-statement/returns-detail', verifyRole(['OWNER', 'ADMIN']), getIncomeStatementReturnsDetailController);
 router.get('/income-statement', verifyRole(['OWNER', 'ADMIN']), getIncomeStatementController);
 router.get('/margin-analytics', verifyRole(['OWNER', 'ADMIN']), getMarginAnalyticsController);
-router.get('/inventory-valuation', verifyRole(['OWNER', 'ADMIN']), getInventoryValuationController);
+router.get('/inventory-valuation', verifyRole(['OWNER', 'ADMIN', 'CASHIER', 'ACCOUNTANT']), getInventoryValuationController);
 router.get('/cash-ledger', verifyRole(['OWNER', 'ADMIN']), getCashLedgerController);
 router.get('/profit', verifyRole(['OWNER', 'ADMIN']), getProfitMatrixController);
 router.get('/sales-margin', verifyRole(['OWNER', 'ADMIN']), getMarginAnalyticsController);

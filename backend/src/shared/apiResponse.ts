@@ -22,6 +22,7 @@ export interface ApiSuccess<T = unknown> {
 export interface ApiError {
   success: false;
   error: string;
+  message?: string;
   details?: Record<string, string[]>;
 }
 
@@ -34,5 +35,7 @@ export function ok<T>(data: T, meta?: PaginationMeta): ApiSuccess<T> {
 
 /** Helper — build an error response */
 export function fail(error: string, details?: Record<string, string[]>): ApiError {
-  return details ? { success: false, error, details } : { success: false, error };
+  return details
+    ? { success: false, error, message: error, details }
+    : { success: false, error, message: error };
 }

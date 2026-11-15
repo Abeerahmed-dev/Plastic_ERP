@@ -7,7 +7,6 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [actualWeightPerUnit, setActualWeightPerUnit] = useState('');
   const [unitPrice, setUnitPrice] = useState(0);
   const [supplierId, setSupplierId] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
@@ -19,9 +18,6 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
     fetchProducts();
   }, [fetchProducts]);
 
-  const selectedProduct = products.find((p) => p.id === selectedProductId);
-  const stdBagWeight = selectedProduct && selectedProduct.bag_weight_kg ? Number(selectedProduct.bag_weight_kg) : 25.0;
-
   const handleProductChange = (e) => {
     const pId = e.target.value;
     setSelectedProductId(pId);
@@ -32,7 +28,8 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
   };
 
   const numQuantity = Number(quantity) || 0;
-  const calculatedStandardWeight = numQuantity * stdBagWeight;
+  const numUnitPrice = Number(unitPrice) || 0;
+  const totalAmount = numQuantity * numUnitPrice;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,7 +38,7 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
       return;
     }
     if (numQuantity <= 0) {
-      setErrorMessage('Quantity must be greater than 0.');
+      setErrorMessage('Quantity (KG) must be greater than 0.');
       return;
     }
 
@@ -56,9 +53,8 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
         {
           product_id: selectedProductId,
           quantity: numQuantity,
-          selected_unit: 'Bag',
-          unit_price: Number(unitPrice) || 0,
-          actual_weight_per_unit: actualWeightPerUnit !== '' ? Number(actualWeightPerUnit) : null,
+          selected_unit: 'KG',
+          unit_price: numUnitPrice,
         },
       ],
     };
@@ -81,7 +77,7 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} className="p-6 bg-white rounded-2xl shadow-lg border border-slate-100 max-w-xl mx-auto space-y-5">
-      <h2 className="text-xl font-bold text-slate-800">Purchase Item (Category Bag Weight)</h2>
+      <h2 className="text-xl font-bold text-slate-800">Purchase Item (Strict KG Wholesale Model)</h2>
 
       {errorMessage && (
         <div className="p-3 text-sm text-red-700 bg-red-50 rounded-xl border border-red-200">
@@ -103,55 +99,32 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
           <option value="">-- Choose Product --</option>
           {products.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} ({p.code}) — {Number(p.bag_weight_kg || 25).toFixed(2)} KG/Bag
+              {p.name} ({p.code})
             </option>
           ))}
         </select>
       </div>
 
-      {/* Quantity (Bags) */}
+      {/* Quantity (KG) */}
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-          Quantity (Bags)
+          Quantity (KG)
         </label>
         <input
           type="number"
-          step="0.0001"
-          min="0.0001"
+          step="0.01"
+          min="0.01"
           value={quantity}
           onChange={(e) => setQuantity(e.target.value)}
           className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           required
         />
-        {selectedProductId && (
-          <p className="mt-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 p-2 rounded-lg border border-emerald-100">
-            Calculated Standard Weight: {calculatedStandardWeight.toFixed(2)} KG
-          </p>
-        )}
       </div>
 
-      {/* Override Input */}
+      {/* Unit Price per KG */}
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-          Actual Kanta Wt of 1 Bag (KG) - Optional
-        </label>
-        <input
-          type="number"
-          step="0.01"
-          placeholder={`Std: ${stdBagWeight} KG`}
-          value={actualWeightPerUnit}
-          onChange={(e) => setActualWeightPerUnit(e.target.value)}
-          className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <p className="mt-1.5 text-xs text-slate-400">
-          Leave blank to use standard rate (Std: {stdBagWeight} KG)
-        </p>
-      </div>
-
-      {/* Unit Price */}
-      <div>
-        <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-          Unit Price (Per Bag)
+          Price / KG (Rs.)
         </label>
         <input
           type="number"
@@ -161,6 +134,12 @@ export default function PurchaseForm({ onSubmitSuccess, onCancel }) {
           className="w-full rounded-xl border border-slate-200 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           required
         />
+      </div>
+
+      {/* Total Amount */}
+      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center text-sm font-semibold text-slate-800">
+        <span>Line Total:</span>
+        <span className="font-mono text-emerald-600 text-base">Rs. {totalAmount.toLocaleString('en-PK', { minimumFractionDigits: 2 })}</span>
       </div>
 
       {/* Actions */}

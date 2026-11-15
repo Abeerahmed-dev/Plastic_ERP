@@ -36,10 +36,10 @@ export const SalesReturnsDetailModal: React.FC<SalesReturnsDetailModalProps> = (
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white dark:bg-[#161925] rounded-3xl shadow-2xl border border-slate-200 dark:border-[#23283B] w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
         
         {/* Modal Header */}
-        <div className="bg-slate-900 text-white p-6 border-b border-slate-800 flex items-center justify-between shrink-0">
+        <div className="bg-slate-900 dark:bg-[#0e111a] text-white p-6 border-b border-slate-800 dark:border-[#23283B] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/20 text-red-400 border border-red-500/30">
               <ArrowDownRight className="h-5 w-5" />
@@ -98,7 +98,7 @@ export const SalesReturnsDetailModal: React.FC<SalesReturnsDetailModalProps> = (
             <div className="overflow-x-auto rounded-2xl border border-slate-200 shadow-2xs">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-50 text-slate-600 font-semibold text-xs border-b border-slate-200 uppercase tracking-wider">
+                  <tr className="bg-slate-50 dark:bg-[#0F111A] text-slate-600 dark:text-slate-400 font-semibold text-xs border-b border-slate-200 dark:border-[#23283B] uppercase tracking-wider">
                     <th className="py-3 px-4">Date</th>
                     <th className="py-3 px-4">Customer</th>
                     <th className="py-3 px-4">Ref # (Credit Note)</th>
@@ -107,22 +107,22 @@ export const SalesReturnsDetailModal: React.FC<SalesReturnsDetailModalProps> = (
                     <th className="py-3 px-4 text-right">Refund Amount (PKR)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs sm:text-sm font-medium">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs sm:text-sm font-medium">
                   {items.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={idx} className="hover:bg-slate-50/80 hover:dark:bg-[#1a1f33] transition-colors">
                       {/* Date */}
                       <td className="py-3 px-4 text-slate-600 font-mono text-xs shrink-0 whitespace-nowrap">
                         {item.date}
                       </td>
 
                       {/* Customer */}
-                      <td className="py-3 px-4 text-slate-900 font-semibold">
+                      <td className="py-3 px-4 text-slate-900 dark:text-white font-semibold">
                         {item.customer_name}
                       </td>
 
                       {/* Ref # */}
                       <td className="py-3 px-4 font-mono text-xs text-slate-500">
-                        <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-700 dark:text-slate-300">
                           {item.credit_note_id}
                         </span>
                         {item.original_invoice_id && (
@@ -133,17 +133,17 @@ export const SalesReturnsDetailModal: React.FC<SalesReturnsDetailModalProps> = (
                       </td>
 
                       {/* Product */}
-                      <td className="py-3 px-4 text-slate-800">
+                      <td className="py-3 px-4 text-slate-800 dark:text-slate-200">
                         {item.product_name}
                       </td>
 
                       {/* Qty Returned (KG) */}
-                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
+                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 dark:text-slate-300">
                         {item.returned_kg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KG
                       </td>
 
                       {/* Refund Amount (PKR) */}
-                      <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-red-600">
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-red-600 dark:text-rose-400">
                         {formatMoney(item.refund_amount)}
                       </td>
                     </tr>
@@ -156,20 +156,20 @@ export const SalesReturnsDetailModal: React.FC<SalesReturnsDetailModalProps> = (
 
         {/* Modal Footer / Summary */}
         {!isLoading && items.length > 0 && (
-          <div className="bg-slate-50 border-t border-slate-200 p-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
+          <div className="bg-slate-50 dark:bg-[#0F111A] border-t border-slate-200 dark:border-[#23283B] p-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
             <div className="text-xs text-slate-500 font-medium">
               Showing <strong className="text-slate-900 font-mono">{items.length}</strong> itemized return record(s)
             </div>
 
             <div className="flex items-center gap-4 text-xs sm:text-sm font-mono">
-              <div className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl">
+              <div className="bg-white dark:bg-[#161925] border border-slate-200 dark:border-[#23283B] px-3 py-1.5 rounded-xl">
                 <span className="text-slate-500 text-xs mr-2">Total Returned Weight:</span>
-                <strong className="text-slate-900">{totalKg.toLocaleString(undefined, { minimumFractionDigits: 2 })} KG</strong>
+                <strong className="text-slate-900 dark:text-white">{totalKg.toLocaleString(undefined, { minimumFractionDigits: 2 })} KG</strong>
               </div>
 
-              <div className="bg-red-50 border border-red-200 px-3 py-1.5 rounded-xl">
+              <div className="bg-red-50 dark:bg-rose-950/40 border border-red-200 dark:border-rose-900/60 px-3 py-1.5 rounded-xl">
                 <span className="text-red-700 text-xs mr-2 font-sans font-semibold">Total Credit Refund:</span>
-                <strong className="text-red-600 font-bold">{formatMoney(totalRefund)}</strong>
+                <strong className="text-red-600 dark:text-rose-400 font-bold">{formatMoney(totalRefund)}</strong>
               </div>
             </div>
           </div>

@@ -1,5 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
-import { loginSchema, refreshSchema, logoutSchema } from './auth.schemas';
+import {
+  loginSchema,
+  refreshSchema,
+  logoutSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+} from './auth.schemas';
 import * as authService from './auth.service';
 import { ok } from '../../shared/apiResponse';
 
@@ -53,6 +59,34 @@ export async function meController(
 ): Promise<void> {
   try {
     const result = await authService.getMe(req.user!.id);
+    res.status(200).json(ok(result));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function forgotPasswordController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const input = forgotPasswordSchema.parse(req.body);
+    const result = await authService.forgotPassword(input.email);
+    res.status(200).json(ok(result));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPasswordController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const input = resetPasswordSchema.parse(req.body);
+    const result = await authService.resetPassword(input.token, input.new_password);
     res.status(200).json(ok(result));
   } catch (err) {
     next(err);

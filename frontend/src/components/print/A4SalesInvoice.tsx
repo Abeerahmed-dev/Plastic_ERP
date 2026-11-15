@@ -65,6 +65,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
   const entityName = isPurchase
     ? (data.supplier_name || data.supplier?.name || data.party_name || 'Party')
     : (data.customer_name || data.customer?.name || 'Walk-In Customer');
+  const entityCode = isPurchase ? (data.supplier_code || data.supplier?.code) : (data.customer_code || data.customer?.code);
   const entityPhone = isPurchase ? (data.supplier_phone || data.supplier?.phone) : (data.customer_phone || data.customer?.phone);
   const entityCity = isPurchase ? (data.supplier_city || data.city || data.supplier?.city) : (data.customer_city || data.customer?.city);
 
@@ -326,7 +327,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
             <div className="flex items-start">
               <span className="w-24 font-bold text-slate-800">{entityLabel}:</span>
               <span className="font-black text-black text-sm flex-1 break-words">
-                {entityName} {entityCity ? `(${entityCity})` : ''}
+                {entityName}{entityCode ? ` (${entityCode})` : ''} {entityCity ? `(${entityCity})` : ''}
               </span>
             </div>
             {entityPhone && (

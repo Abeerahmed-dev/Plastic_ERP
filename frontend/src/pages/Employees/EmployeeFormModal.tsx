@@ -11,16 +11,13 @@ interface EmployeeFormModalProps {
 }
 
 const COMMON_DESIGNATIONS = [
-  'Packer',
-  'Loader',
-  'Salesman',
-  'Floor Helper',
-  'Machine Operator',
+  'Cashier',
+  'Accountant',
+  'Labour',
   'Store Keeper',
-  'Delivery Boy / Driver',
-  'Security Guard',
+  'Gaurd',
   'Supervisor',
-  'Other',
+  'Others',
 ];
 
 const COMMON_TIMINGS = [
@@ -64,7 +61,7 @@ export const EmployeeFormModal = ({
           setDesignation(initialData.designation);
           setCustomDesignation('');
         } else {
-          setDesignation('Other');
+          setDesignation('Others');
           setCustomDesignation(initialData.designation || '');
         }
 
@@ -85,7 +82,7 @@ export const EmployeeFormModal = ({
         setEmployeeId('');
         setName('');
         setPhone('');
-        setDesignation('Packer');
+        setDesignation('Cashier');
         setCustomDesignation('');
         setStoreTiming('09:00 AM - 08:00 PM (Full Day)');
         setCustomTiming('');
@@ -107,7 +104,8 @@ export const EmployeeFormModal = ({
 
     if (!name.trim()) newErrors.name = 'Worker name is required';
     
-    const finalDesignation = designation === 'Other' ? customDesignation.trim() : designation;
+    const isOther = designation === 'Others' || designation === 'Other';
+    const finalDesignation = isOther ? customDesignation.trim() : designation;
     if (!finalDesignation) newErrors.designation = 'Designation is required';
 
     const finalTiming = storeTiming === 'Custom' ? customTiming.trim() : storeTiming;
@@ -186,9 +184,9 @@ export const EmployeeFormModal = ({
                 onChange={(e) => setStatus(e.target.value as EmployeeStatus)}
                 className="w-full rounded-xl border border-slate-300 py-2.5 px-3.5 text-sm font-semibold text-slate-800 bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
-                <option value="ACTIVE">🟢 Active on Duty</option>
-                <option value="ON_LEAVE">🟡 On Leave / Temporary</option>
-                <option value="INACTIVE">🔴 Inactive / Left</option>
+                <option value="ACTIVE">ðŸŸ¢ Active on Duty</option>
+                <option value="ON_LEAVE">ðŸŸ¡ On Leave / Temporary</option>
+                <option value="INACTIVE">ðŸ”´ Inactive / Left</option>
               </select>
             </div>
           </div>
@@ -255,7 +253,7 @@ export const EmployeeFormModal = ({
               </select>
             </div>
 
-            {designation === 'Other' ? (
+            {designation === 'Others' || designation === 'Other' ? (
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                   Specify Designation <span className="text-red-500">*</span>
@@ -284,6 +282,22 @@ export const EmployeeFormModal = ({
               </div>
             )}
           </div>
+
+          {(designation === 'Others' || designation === 'Other') && (
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                <Hash className="w-3.5 h-3.5 text-purple-600" />
+                CNIC Number (Optional)
+              </label>
+              <input
+                type="text"
+                value={cnic}
+                onChange={(e) => setCnic(e.target.value)}
+                placeholder="e.g. 42101-1234567-1"
+                className="w-full rounded-xl border border-slate-300 py-2.5 px-3.5 text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+          )}
 
           {/* Store Timing & Custom Timing */}
           <div>
@@ -393,11 +407,11 @@ export const EmployeeFormModal = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition active:scale-[0.98] disabled:bg-slate-300"
+              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50 transition cursor-pointer"
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-slate-950" />
                   Saving Worker...
                 </>
               ) : initialData ? (

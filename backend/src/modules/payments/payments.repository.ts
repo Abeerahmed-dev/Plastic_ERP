@@ -1,8 +1,9 @@
+import type { Knex } from 'knex';
 import db from '../../db/knex';
 import { CreatePaymentInput } from './payments.schemas';
 
-export async function generateNextPaymentNumber(): Promise<string> {
-  const rows = await db('customer_payments')
+export async function generateNextPaymentNumber(trx: Knex.Transaction | Knex = db): Promise<string> {
+  const rows = await trx('customer_payments')
     .where('payment_number', 'like', 'RCV-%')
     .select('payment_number');
 
@@ -20,12 +21,233 @@ export async function generateNextPaymentNumber(): Promise<string> {
   return `RCV-${(maxNum + 1).toString().padStart(5, '0')}`;
 }
 
+async function allocatePaymentToInvoices(
+  trx: Knex.Transaction,
+  paymentId: string,
+  amount: number,
+  customerId: string,
+  invoiceId?: string | null
+) {
+  if (amount <= 0) return;
+
+  if (invoiceId) {
+    const invoice = await trx('sales_invoices').where('id', invoiceId).first();
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+
+    const allocRes = await trx('payment_allocations')
+      .where('invoice_id', invoiceId)
+      .sum('allocated_amount as total_allocated')
+      .first();
+
+    const retRes = await trx('sales_invoices')
+      .where('parent_invoice_id', invoiceId)
+      .where(function() {
+        this.where('invoice_type', 'CREDIT_NOTE')
+          .orWhere('invoice_type', 'RETURN')
+          .orWhere('invoice_number', 'like', 'CN-%');
+      })
+      .whereNot('status', 'CANCELLED')
+      .sum('total_amount as total_returned')
+      .first();
+
+    const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
+    const currentAllocated = Number(allocRes?.total_allocated || 0);
+    const invTotal = Number(invoice.total_amount || 0);
+    const netInvoiceTotal = invTotal - returnedTotal;
+    const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
+
+    const allocatedAmount = Math.min(amount, remainingUnpaid > 0 ? remainingUnpaid : amount);
+    if (allocatedAmount > 0) {
+      await trx('payment_allocations').insert({
+        payment_id: paymentId,
+        invoice_id: invoiceId,
+        allocated_amount: allocatedAmount,
+      });
+    }
+
+    const newPaidAmount = currentAllocated + allocatedAmount;
+    let newStatus = 'UNPAID';
+    if (newPaidAmount >= invTotal) {
+      newStatus = 'PAID';
+    } else if (newPaidAmount > 0) {
+      newStatus = 'PARTIAL';
+    }
+
+    await trx('sales_invoices')
+      .where('id', invoiceId)
+      .update({
+        paid_amount: newPaidAmount,
+        status: newStatus,
+        updated_at: trx.fn.now(),
+      });
+  } else {
+    let remainingToAllocate = amount;
+
+    const unpaidInvoices = await trx('sales_invoices')
+      .where('customer_id', customerId)
+      .whereNot('status', 'CANCELLED')
+      .whereNot('status', 'PAID')
+      .where(function() {
+        this.whereNull('invoice_type')
+          .orWhere(function() {
+            this.whereNot('invoice_type', 'CREDIT_NOTE')
+              .whereNot('invoice_type', 'RETURN')
+              .whereNot('invoice_number', 'like', 'CN-%');
+          });
+      })
+      .orderBy('date', 'asc')
+      .orderBy('created_at', 'asc');
+
+    for (const inv of unpaidInvoices) {
+      if (remainingToAllocate <= 0) break;
+
+      const allocRes = await trx('payment_allocations')
+        .where('invoice_id', inv.id)
+        .sum('allocated_amount as total_allocated')
+        .first();
+
+      const retRes = await trx('sales_invoices')
+        .where('parent_invoice_id', inv.id)
+        .where(function() {
+          this.where('invoice_type', 'CREDIT_NOTE')
+            .orWhere('invoice_type', 'RETURN')
+            .orWhere('invoice_number', 'like', 'CN-%');
+        })
+        .whereNot('status', 'CANCELLED')
+        .sum('total_amount as total_returned')
+        .first();
+
+      const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
+      const currentAllocated = Number(allocRes?.total_allocated || 0);
+      const invTotal = Number(inv.total_amount || 0);
+      const netInvoiceTotal = invTotal - returnedTotal;
+      const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
+
+      if (remainingUnpaid > 0) {
+        const allocationForThisInv = Math.min(remainingToAllocate, remainingUnpaid);
+        await trx('payment_allocations').insert({
+          payment_id: paymentId,
+          invoice_id: inv.id,
+          allocated_amount: allocationForThisInv,
+        });
+
+        const newPaidAmount = currentAllocated + allocationForThisInv;
+        let newStatus = 'UNPAID';
+        if (newPaidAmount >= netInvoiceTotal) {
+          newStatus = 'PAID';
+        } else if (newPaidAmount > 0) {
+          newStatus = 'PARTIAL';
+        }
+
+        await trx('sales_invoices')
+          .where('id', inv.id)
+          .update({
+            paid_amount: newPaidAmount,
+            status: newStatus,
+            updated_at: trx.fn.now(),
+          });
+
+        remainingToAllocate = Math.round((remainingToAllocate - allocationForThisInv) * 100) / 100;
+      }
+    }
+  }
+}
+
 export async function createPayment(
   input: CreatePaymentInput,
   paymentNumber: string,
   userId?: string
 ): Promise<string> {
   return await db.transaction(async (trx) => {
+    // ── Handle Split Payment (Cash + Bank) ──
+    if (input.payment_method === 'SPLIT') {
+      const splitCash = Math.round(Number(input.split_cash_amount || 0) * 100) / 100;
+      const splitBank = Math.round(Number(input.split_bank_amount || 0) * 100) / 100;
+      let primaryPaymentId = '';
+
+      if (splitCash > 0) {
+        const [cashPayment] = await trx('customer_payments')
+          .insert({
+            customer_id: input.customer_id,
+            invoice_id: input.invoice_id || null,
+            payment_number: `${paymentNumber}-CASH`,
+            payment_date: input.payment_date,
+            amount: splitCash,
+            payment_method: 'CASH',
+            payment_type: input.invoice_id ? 'INVOICE_SETTLEMENT' : 'ADVANCE_DEPOSIT',
+            bank_account_id: null,
+            notes: input.notes ? `${input.notes} [Split Cash Portion]` : 'Split Payment - Cash Portion',
+            cheque_status: 'CLEARED',
+            created_by: userId || null,
+          })
+          .returning('*');
+
+        primaryPaymentId = cashPayment.id;
+
+        const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+        if (hasCdl) {
+          await trx('cash_drawer_ledger').insert({
+            type: 'INFLOW',
+            amount: splitCash,
+            reference_id: cashPayment.id,
+            description: `Customer Split Cash Payment (${paymentNumber})`,
+            created_by: userId || null,
+          });
+        }
+
+        await allocatePaymentToInvoices(trx, cashPayment.id, splitCash, input.customer_id, input.invoice_id);
+      }
+
+      if (splitBank > 0) {
+        const [bankPayment] = await trx('customer_payments')
+          .insert({
+            customer_id: input.customer_id,
+            invoice_id: input.invoice_id || null,
+            payment_number: `${paymentNumber}-BANK`,
+            payment_date: input.payment_date,
+            amount: splitBank,
+            payment_method: 'BANK_TRANSFER',
+            payment_type: input.invoice_id ? 'INVOICE_SETTLEMENT' : 'ADVANCE_DEPOSIT',
+            bank_account_id: input.bank_account_id || null,
+            notes: input.notes ? `${input.notes} [Split Bank Portion]` : 'Split Payment - Bank Portion',
+            cheque_status: 'CLEARED',
+            created_by: userId || null,
+          })
+          .returning('*');
+
+        if (!primaryPaymentId) primaryPaymentId = bankPayment.id;
+
+        if (input.bank_account_id) {
+          await trx('bank_accounts')
+            .where('id', input.bank_account_id)
+            .increment('current_balance', splitBank);
+
+          const hasBankTx = await trx.schema.hasTable('bank_transactions');
+          if (hasBankTx) {
+            await trx('bank_transactions').insert({
+              bank_account_id: input.bank_account_id,
+              transaction_type: 'DEPOSIT',
+              type: 'INFLOW',
+              amount: splitBank,
+              source_type: 'PAYMENT',
+              source: 'PAYMENT',
+              reference_id: bankPayment.id,
+              description: `Customer Split Bank Payment (${paymentNumber})`,
+              transaction_date: input.payment_date,
+              category: 'SALES',
+              created_by: userId || null,
+            });
+          }
+        }
+
+        await allocatePaymentToInvoices(trx, bankPayment.id, splitBank, input.customer_id, input.invoice_id);
+      }
+
+      return primaryPaymentId;
+    }
+
     const isCheque = input.payment_method === 'CHEQUE' || input.payment_method === 'PDC';
     const chequeStatus = isCheque ? (input.cheque_status || 'PENDING') : 'CLEARED';
 
@@ -38,6 +260,7 @@ export async function createPayment(
         payment_date: input.payment_date,
         amount: input.amount,
         payment_method: input.payment_method,
+        payment_type: input.invoice_id ? 'INVOICE_SETTLEMENT' : 'ADVANCE_DEPOSIT',
         bank_account_id: input.bank_account_id || null,
         notes: input.notes || null,
         cheque_number: input.cheque_number || null,
@@ -47,6 +270,60 @@ export async function createPayment(
         created_by: userId || null,
       })
       .returning('*');
+
+    // 1b. If PDC / Cheque, insert into incoming_pdcs table
+    if (isCheque) {
+      await trx('incoming_pdcs').insert({
+        payment_id: payment.id,
+        customer_id: input.customer_id,
+        destination_bank_account_id: input.bank_account_id || null,
+        cheque_number: input.cheque_number || 'CHQ-UNKNOWN',
+        cheque_bank_name: input.cheque_bank_name || 'Customer Bank',
+        cheque_due_date: input.cheque_due_date || input.payment_date,
+        amount: input.amount,
+        status: 'PENDING',
+        notes: input.notes || null,
+        created_by: userId || null,
+      });
+    }
+
+    // 1c. Cash Drawer Ledger / Bank Transactions Inflow
+    const isCash = (input.payment_method as string) === 'CASH' || (input.payment_method as string) === 'Cash';
+    const isBank = (input.payment_method as string) === 'BANK' || (input.payment_method as string) === 'BANK_TRANSFER' || (input.payment_method as string) === 'Bank Transfer';
+
+    if (isCash) {
+      const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+      if (hasCdl) {
+        await trx('cash_drawer_ledger').insert({
+          type: 'INFLOW',
+          amount: input.amount,
+          reference_id: payment.id,
+          description: `Customer Cash Payment (${paymentNumber})`,
+          created_by: userId || null,
+        });
+      }
+    } else if (isBank && input.bank_account_id) {
+      await trx('bank_accounts')
+        .where('id', input.bank_account_id)
+        .increment('current_balance', input.amount);
+
+      const hasBankTx = await trx.schema.hasTable('bank_transactions');
+      if (hasBankTx) {
+        await trx('bank_transactions').insert({
+          bank_account_id: input.bank_account_id,
+          transaction_type: 'DEPOSIT',
+          type: 'INFLOW',
+          amount: input.amount,
+          source_type: 'PAYMENT',
+          source: 'PAYMENT',
+          reference_id: payment.id,
+          description: `Customer Bank Payment (${paymentNumber})`,
+          transaction_date: input.payment_date,
+          category: 'SALES',
+          created_by: userId || null,
+        });
+      }
+    }
 
     // 2. If payment_method === 'DIRECT_TO_SUPPLIER' & supplier_id present, execute mirrored AP insert into supplier_payments
     if (input.payment_method === 'DIRECT_TO_SUPPLIER' && input.supplier_id) {
@@ -77,6 +354,7 @@ export async function createPayment(
         payment_date: input.payment_date,
         amount: input.amount,
         payment_method: 'CONTRA_CUSTOMER',
+        payment_type: 'INVOICE_SETTLEMENT',
         bank_account_id: null,
         notes: contraNotes,
         cheque_status: 'CLEARED',
@@ -84,27 +362,8 @@ export async function createPayment(
       });
     }
 
-    // 3. If it's linked to an invoice, update the invoice's paid_amount and status
-    if (input.invoice_id) {
-      const invoice = await trx('sales_invoices').where('id', input.invoice_id).first();
-      if (invoice) {
-        const newPaidAmount = Number(invoice.paid_amount) + Number(input.amount);
-        let newStatus = 'PARTIAL';
-        if (newPaidAmount >= Number(invoice.total_amount)) {
-          newStatus = 'PAID';
-        } else if (newPaidAmount === 0) {
-          newStatus = 'UNPAID';
-        }
-
-        await trx('sales_invoices')
-          .where('id', input.invoice_id)
-          .update({
-            paid_amount: newPaidAmount,
-            status: newStatus,
-            updated_at: trx.fn.now(),
-          });
-      }
-    }
+    // 3. Allocate Payment to Invoice or Auto-allocate
+    await allocatePaymentToInvoices(trx, payment.id, input.amount, input.customer_id, input.invoice_id);
 
     return payment.id;
   });
@@ -133,85 +392,343 @@ export async function clearCheque(paymentId: string): Promise<boolean> {
 export async function findAllPayments(query?: { search?: string; customer_id?: string; invoice_id?: string }) {
   const { search, customer_id, invoice_id } = query || {};
 
-  const baseQuery = db('customer_payments as p')
-    .join('customers as c', 'p.customer_id', 'c.id')
-    .leftJoin('sales_invoices as si', 'p.invoice_id', 'si.id')
+  // 1. Fetch Invoices with their linked payments
+  const invoicesQuery = db('sales_invoices as si')
+    .join('customers as c', 'si.customer_id', 'c.id')
+    .whereNot('si.status', 'CANCELLED')
     .modify((qb) => {
+      if (customer_id) qb.where('si.customer_id', customer_id);
+      if (invoice_id) qb.where('si.id', invoice_id);
       if (search) {
         qb.where((inner) => {
-          inner.whereILike('p.payment_number', `%${search}%`)
+          inner.whereILike('si.invoice_number', `%${search}%`)
                .orWhereILike('c.name', `%${search}%`)
-               .orWhereILike('si.invoice_number', `%${search}%`);
+               .orWhereILike('c.code', `%${search}%`);
         });
       }
-      if (customer_id) qb.where('p.customer_id', customer_id);
-      if (invoice_id) qb.where('p.invoice_id', invoice_id);
-    });
-
-  const rows = await baseQuery
+    })
     .select(
-      db.raw('COALESCE(p.invoice_id, p.id) as group_id'),
-      'p.customer_id',
+      'si.id as invoice_id',
+      'si.parent_invoice_id',
+      'si.invoice_number',
+      'si.invoice_type',
+      'si.total_amount',
+      'si.paid_amount',
+      'si.status as invoice_status',
+      'si.date as invoice_date',
+      'si.created_at',
+      'c.id as customer_id',
       'c.name as customer_name',
       'c.code as customer_code',
-      'p.invoice_id',
-      'si.invoice_number as sales_invoice_number',
-      db.raw('COALESCE(si.total_amount, SUM(p.amount)) as invoice_total_amount'),
-      db.raw('SUM(p.amount) as total_paid_against_invoice'),
-      'si.status as invoice_status',
-      db.raw(`
-        json_agg(
-          json_build_object(
-            'id', p.id,
-            'payment_no', p.payment_number,
-            'payment_number', p.payment_number,
-            'date', p.payment_date,
-            'payment_date', p.payment_date,
-            'method', p.payment_method,
-            'payment_method', p.payment_method,
-            'amount', p.amount,
-            'notes', p.notes,
-            'cheque_number', p.cheque_number,
-            'cheque_bank_name', p.cheque_bank_name,
-            'cheque_due_date', p.cheque_due_date,
-            'cheque_status', p.cheque_status
-          ) ORDER BY p.payment_date DESC, p.created_at DESC
-        ) as payment_history
-      `)
+      'c.city as city',
+      'c.city as customer_city'
     )
-    .groupByRaw('COALESCE(p.invoice_id, p.id), p.customer_id, c.name, c.code, p.invoice_id, si.invoice_number, si.total_amount, si.status')
-    .orderBy(db.raw('MAX(p.payment_date)'), 'desc');
+    .orderBy('si.created_at', 'desc');
 
-  return rows.map((r: any) => {
-    const totalPaid = Number(r.total_paid_against_invoice || 0);
-    const invoiceTotal = Number(r.invoice_total_amount || 0);
+  const invoices = await invoicesQuery;
+  const invoiceIds = invoices.map((inv: any) => inv.invoice_id);
 
-    let status = r.invoice_status;
-    if (!status) {
-      status = totalPaid >= invoiceTotal ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID';
+  // 1a. Fetch incoming positive payments linked to these invoices
+  const rawPayments = invoiceIds.length > 0
+    ? await db('customer_payments')
+        .whereIn('invoice_id', invoiceIds)
+        .where('amount', '>', 0)
+        .where('payment_method', '!=', 'CASH_REFUND')
+        .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+        .orderBy('created_at', 'asc')
+    : [];
+
+  const linkedPaymentsMap = new Map<string, any[]>();
+  for (const p of rawPayments) {
+    if (p.invoice_id) {
+      const list = linkedPaymentsMap.get(p.invoice_id) || [];
+      list.push({
+        id: p.id,
+        type: 'PAYMENT',
+        payment_no: p.payment_number,
+        payment_number: p.payment_number,
+        date: p.payment_date,
+        payment_date: p.payment_date,
+        method: p.payment_method,
+        payment_method: p.payment_method,
+        amount: Math.abs(Number(p.amount || 0)),
+        notes: p.notes,
+        cheque_number: p.cheque_number,
+        cheque_bank_name: p.cheque_bank_name,
+        cheque_due_date: p.cheque_due_date,
+        cheque_status: p.cheque_status,
+        polarity: 'POSITIVE',
+        display_type: 'Payment Received',
+        created_at: p.created_at,
+      });
+      linkedPaymentsMap.set(p.invoice_id, list);
     }
+  }
 
-    const rawHistory = typeof r.payment_history === 'string'
-      ? JSON.parse(r.payment_history)
-      : r.payment_history;
+  // 1b. Fetch linked Credit Notes (sales_invoices where parent_invoice_id IN invoiceIds)
+  const linkedCreditNotes = invoiceIds.length > 0
+    ? await db('sales_invoices')
+        .whereIn('parent_invoice_id', invoiceIds)
+        .where('invoice_type', 'CREDIT_NOTE')
+        .whereNot('status', 'CANCELLED')
+        .select(
+          'id',
+          'parent_invoice_id',
+          'invoice_number',
+          'date',
+          'total_amount',
+          'return_reason',
+          'notes',
+          'created_at'
+        )
+        .orderBy('created_at', 'asc')
+    : [];
+
+  const linkedCreditNotesMap = new Map<string, any[]>();
+  for (const cn of linkedCreditNotes) {
+    if (cn.parent_invoice_id) {
+      const list = linkedCreditNotesMap.get(cn.parent_invoice_id) || [];
+      list.push({
+        id: cn.id,
+        type: 'CREDIT_NOTE',
+        credit_note_number: cn.invoice_number,
+        payment_no: cn.invoice_number,
+        payment_number: cn.invoice_number,
+        invoice_number: cn.invoice_number,
+        date: cn.date,
+        payment_date: cn.date,
+        method: 'CREDIT_NOTE',
+        payment_method: 'CREDIT_NOTE',
+        amount: Math.abs(Number(cn.total_amount || 0)),
+        notes: cn.notes || cn.return_reason || 'Goods Returned',
+        return_reason: cn.return_reason,
+        polarity: 'NEGATIVE',
+        display_type: 'Goods Returned',
+        created_at: cn.created_at,
+      });
+      linkedCreditNotesMap.set(cn.parent_invoice_id, list);
+    }
+  }
+
+  // 1c. Fetch linked Cash Refunds (customer_payments linked to invoice via linked_invoice_id or invoice_id)
+  const linkedRefunds = invoiceIds.length > 0
+    ? await db('customer_payments')
+        .where((qb) => {
+          qb.whereIn('linked_invoice_id', invoiceIds)
+            .orWhereIn('invoice_id', invoiceIds);
+        })
+        .andWhere((qb) => {
+          qb.where('payment_method', 'CASH_REFUND')
+            .orWhere('amount', '<', 0);
+        })
+        .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+        .orderBy('created_at', 'asc')
+    : [];
+
+  const linkedRefundsMap = new Map<string, any[]>();
+  for (const rf of linkedRefunds) {
+    const parentId = rf.linked_invoice_id || rf.invoice_id;
+    if (parentId) {
+      const list = linkedRefundsMap.get(parentId) || [];
+      list.push({
+        id: rf.id,
+        type: 'REFUND',
+        payment_no: rf.payment_number,
+        payment_number: rf.payment_number,
+        date: rf.payment_date,
+        payment_date: rf.payment_date,
+        method: rf.payment_method || 'CASH_REFUND',
+        payment_method: rf.payment_method || 'CASH_REFUND',
+        amount: Math.abs(Number(rf.amount || 0)),
+        notes: rf.notes || 'Cash Refunded to Customer',
+        polarity: 'NEGATIVE',
+        display_type: 'Cash Refunded to Customer',
+        created_at: rf.created_at,
+      });
+      linkedRefundsMap.set(parentId, list);
+    }
+  }
+
+  // 1d. Fetch line items for these invoices
+  const rawLineItems = invoiceIds.length > 0
+    ? await db('sales_invoice_items as sii')
+        .join('products as p', 'sii.product_id', 'p.id')
+        .whereIn('sii.invoice_id', invoiceIds)
+        .select(
+          'sii.id',
+          'sii.invoice_id',
+          'sii.product_id',
+          'p.name as product_name',
+          'p.size as product_size',
+          'sii.quantity',
+          'sii.selected_unit',
+          'sii.actual_weight_per_unit',
+          'sii.net_kg_processed',
+          'sii.unit_price',
+          'sii.total_price'
+        )
+    : [];
+
+  const lineItemsMap = new Map<string, any[]>();
+  for (const item of rawLineItems) {
+    const list = lineItemsMap.get(item.invoice_id) || [];
+    list.push({
+      id: item.id,
+      product_id: item.product_id,
+      product_name: item.product_name,
+      product_size: item.product_size,
+      size: item.product_size,
+      quantity: Number(item.quantity || 0),
+      net_qty: Number(item.quantity || 0),
+      selected_unit: item.selected_unit,
+      actual_weight_per_unit: item.actual_weight_per_unit ? Number(item.actual_weight_per_unit) : null,
+      net_kg_processed: item.net_kg_processed ? Number(item.net_kg_processed) : null,
+      unit_price: Number(item.unit_price || 0),
+      total_price: Number(item.total_price || 0),
+      total: Number(item.total_price || 0),
+    });
+    lineItemsMap.set(item.invoice_id, list);
+  }
+
+  const invoiceResults = invoices.map((inv: any) => {
+    const payments = linkedPaymentsMap.get(inv.invoice_id) || [];
+    const creditNotes = linkedCreditNotesMap.get(inv.invoice_id) || [];
+    const refunds = linkedRefundsMap.get(inv.invoice_id) || [];
+    const lineItems = lineItemsMap.get(inv.invoice_id) || [];
+
+    const totalPaid = payments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const invoiceTotal = Math.abs(Number(inv.total_amount || 0));
+
+    // Combine mixed items into chronological timeline
+    const timeline = [...payments, ...creditNotes, ...refunds].sort((a, b) => {
+      const timeA = new Date(a.created_at || a.date || a.payment_date || 0).getTime();
+      const timeB = new Date(b.created_at || b.date || b.payment_date || 0).getTime();
+      return timeA - timeB;
+    });
 
     return {
-      id: r.group_id,
-      sales_id: r.invoice_id || r.group_id,
-      invoice_id: r.invoice_id,
-      invoice_number: r.sales_invoice_number || 'Account Payment',
-      customer_id: r.customer_id,
-      customer_name: r.customer_name,
-      customer_code: r.customer_code,
+      id: inv.invoice_id,
+      sales_id: inv.invoice_id,
+      invoice_id: inv.invoice_id,
+      parent_invoice_id: inv.parent_invoice_id || null,
+      invoice_number: inv.invoice_number,
+      invoice_type: inv.invoice_type || 'SALE',
+      type: inv.invoice_type || 'SALE',
+      customer_id: inv.customer_id,
+      customer_name: inv.customer_name,
+      customer_code: inv.customer_code,
+      city: inv.city || null,
+      customer_city: inv.customer_city || null,
+      original_total: Math.round(invoiceTotal * 100) / 100,
       invoice_total_amount: Math.round(invoiceTotal * 100) / 100,
+      total_paid: Math.round(totalPaid * 100) / 100,
       total_paid_against_invoice: Math.round(totalPaid * 100) / 100,
-      invoice_status: status,
-      payment_history: Array.isArray(rawHistory) ? rawHistory.map((item: any) => ({
-        ...item,
-        amount: Number(item.amount)
-      })) : []
+      invoice_status: inv.invoice_status || 'UNPAID',
+      line_items: lineItems,
+      linked_credit_notes: creditNotes,
+      linked_refunds: refunds,
+      payment_history: timeline,
+      created_at: inv.created_at,
     };
   });
+
+  // 2. Fetch standalone Account Payments (where invoice_id IS NULL AND linked_invoice_id IS NULL)
+  let standaloneResults: any[] = [];
+  if (!invoice_id) {
+    const standaloneQuery = db('customer_payments as p')
+      .join('customers as c', 'p.customer_id', 'c.id')
+      .whereNull('p.invoice_id')
+      .whereNull('p.linked_invoice_id')
+      .whereNotIn('p.cheque_status', ['BOUNCED', 'FAILED'])
+      .modify((qb) => {
+        if (customer_id) qb.where('p.customer_id', customer_id);
+        if (search) {
+          qb.where((inner) => {
+            inner.whereILike('p.payment_number', `%${search}%`)
+                 .orWhereILike('c.name', `%${search}%`)
+                 .orWhereILike('c.code', `%${search}%`);
+          });
+        }
+      })
+      .select(
+        'p.id',
+        'p.payment_number',
+        'p.payment_date',
+        'p.payment_method',
+        'p.amount',
+        'p.notes',
+        'p.cheque_number',
+        'p.cheque_bank_name',
+        'p.cheque_due_date',
+        'p.cheque_status',
+        'p.created_at',
+        'c.id as customer_id',
+        'c.name as customer_name',
+        'c.code as customer_code',
+        'c.city as city',
+        'c.city as customer_city'
+      )
+      .orderBy('p.created_at', 'desc');
+
+    const standalonePayments = await standaloneQuery;
+
+    standaloneResults = standalonePayments.map((p: any) => {
+      const amt = Number(p.amount || 0);
+      const isRefund = p.payment_method === 'CASH_REFUND' || amt < 0;
+      const historyItem = {
+        id: p.id,
+        type: isRefund ? 'REFUND' : 'PAYMENT',
+        payment_no: p.payment_number,
+        payment_number: p.payment_number,
+        date: p.payment_date,
+        payment_date: p.payment_date,
+        method: p.payment_method,
+        payment_method: p.payment_method,
+        amount: Math.abs(amt),
+        notes: p.notes,
+        cheque_number: p.cheque_number,
+        cheque_bank_name: p.cheque_bank_name,
+        cheque_due_date: p.cheque_due_date,
+        cheque_status: p.cheque_status,
+        polarity: isRefund ? 'NEGATIVE' : 'POSITIVE',
+        display_type: isRefund ? 'Cash Refunded to Customer' : 'Payment Received',
+        created_at: p.created_at,
+      };
+
+      return {
+        id: p.id,
+        sales_id: p.id,
+        invoice_id: null,
+        parent_invoice_id: null,
+        invoice_number: isRefund ? 'Cash Refund' : 'Account Payment',
+        invoice_type: isRefund ? 'CASH_REFUND' : 'ACCOUNT_PAYMENT',
+        type: isRefund ? 'CASH_REFUND' : 'ACCOUNT_PAYMENT',
+        payment_method: p.payment_method,
+        customer_id: p.customer_id,
+        customer_name: p.customer_name,
+        customer_code: p.customer_code,
+        city: p.city || null,
+        customer_city: p.customer_city || null,
+        original_total: 0,
+        invoice_total_amount: 0,
+        total_paid: Math.round(amt * 100) / 100,
+        total_paid_against_invoice: Math.round(amt * 100) / 100,
+        invoice_status: isRefund ? 'REFUND' : 'ACCOUNT_PAYMENT',
+        line_items: [],
+        linked_credit_notes: [],
+        linked_refunds: isRefund ? [historyItem] : [],
+        payment_history: [historyItem],
+        created_at: p.created_at,
+      };
+    });
+  }
+
+  // Combine invoices and standalone payments, sorted newest first
+  const combined = [...invoiceResults, ...standaloneResults].sort(
+    (a, b) => new Date(b.created_at || Date.now()).getTime() - new Date(a.created_at || Date.now()).getTime()
+  );
+
+  return combined;
 }
 
 export async function createRefund(data: { customer_id: string; amount: number; source: string; notes?: string; linked_invoice_id?: string | null }, userId?: string) {

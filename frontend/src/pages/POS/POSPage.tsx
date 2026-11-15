@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy } from 'lucide-react';
+import { toast } from 'sonner';
+import { Search, ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy, Clock, PauseCircle, Play } from 'lucide-react';
 import { productsService } from '../../services/products.service';
-import { posService } from '../../services/pos.service';
+import { posService, POSHeldOrder } from '../../services/pos.service';
+import { offlineVaultService } from '../../services/offline-vault.service';
 import { reportsService } from '../../services/reports.service';
 import { getCustomers } from '../../services/customers.service';
 import { useAuthStore } from '../../store/auth.store';
@@ -10,13 +12,15 @@ import { useReportStore } from '../../store/useReportStore';
 import { printThermalReceipt } from '../../utils/printThermal';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ShiftAuditModal } from './ShiftAuditModal';
+import { HeldOrdersModal } from './HeldOrdersModal';
+import { HoldConfirmModal } from './HoldConfirmModal';
 
 interface CartItem {
   product_id: string;
   productName: string;
   name_urdu?: string | null;
   category?: string;
-  quantity: number;
+  quantity: number | string;
   selected_unit: string;
   unit_price: number | string;
   fixed_retail_price_per_kg: number;
@@ -35,16 +39,45 @@ export default function POSPage() {
   const [discount, setDiscount] = useState<number>(0);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
+  const [splitCashAmount, setSplitCashAmount] = useState<number | ''>('');
+  const [splitBankAmount, setSplitBankAmount] = useState<number | ''>('');
   const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>('');
 
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isShiftAuditOpen, setIsShiftAuditOpen] = useState(false);
+  const [isHeldOrdersOpen, setIsHeldOrdersOpen] = useState(false);
+  const [isHoldConfirmOpen, setIsHoldConfirmOpen] = useState(false);
   const [slipMode, setSlipMode] = useState<'SINGLE' | 'DUPLICATE'>('SINGLE');
 
   const [lastInvoice, setLastInvoice] = useState<any>(null);
+  const [offlinePendingCount, setOfflinePendingCount] = useState<number>(0);
 
   const queryClient = useQueryClient();
   const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Track pending offline vault records & register auto-sync listener
+  useEffect(() => {
+    offlineVaultService.getPendingCount().then(setOfflinePendingCount);
+
+    const handleOnline = async () => {
+      try {
+        const count = await offlineVaultService.getPendingCount();
+        if (count > 0) {
+          toast.info('Connection restored. Syncing offline invoices...');
+          await offlineVaultService.syncOfflineInvoices();
+          const newCount = await offlineVaultService.getPendingCount();
+          setOfflinePendingCount(newCount);
+          toast.success('Offline invoices synchronized successfully!');
+          queryClient.invalidateQueries({ queryKey: ['posProducts'] });
+        }
+      } catch (err) {
+        console.error('Offline auto-sync error:', err);
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [queryClient]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -79,17 +112,23 @@ export default function POSPage() {
     queryFn: () => reportsService.getDashboardMetrics(),
   });
 
+  // Query Held Orders
+  const { data: heldOrders = [], isLoading: isLoadingHeldOrders } = useQuery({
+    queryKey: ['posHeldOrders'],
+    queryFn: () => posService.getHeldOrders(),
+  });
+
   const addToCart = (product: any) => {
+    const stockKg = Number(product.total_stock_kg ?? product.current_stock ?? 0);
+    if (stockKg <= 0) return;
+
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
-<<<<<<< Updated upstream
         const existing = prev[existingIndex];
-        if (existing.quantity >= stockKg) return prev;
-=======
->>>>>>> Stashed changes
+        if (Number(existing.quantity) >= stockKg) return prev;
         return prev.map((item, idx) =>
-          idx === existingIndex ? { ...item, quantity: item.quantity + 1 } : item,
+          idx === existingIndex ? { ...item, quantity: (Number(item.quantity) || 0) + 1 } : item,
         );
       }
 
@@ -152,35 +191,22 @@ export default function POSPage() {
   const hasCreditBalance = customerBalance < 0;
   const availableCredit = hasCreditBalance ? Math.abs(customerBalance) : 0;
 
-<<<<<<< Updated upstream
-  const subtotal = cart.reduce((acc, item) => acc + item.quantity * item.unit_price, 0);
+const subtotal = cart.reduce((acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0), 0);
   const effectiveDiscount = isCashier ? 0 : discount;
-=======
-  const subtotal = cart.reduce((acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0), 0);
-  const effectiveDiscount = discount || 0;
->>>>>>> Stashed changes
   const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
-  const effectiveAmountPaid = amountPaid === '' ? 0 : Number(amountPaid);
 
-  const hasPriceFloorViolation = !isCashier && cart.some((item) => {
-    const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
-      ? item.bag_weight_kg
-      : 1.0;
-    const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
-    const sellingPricePerKg = unitMultiplier > 0 ? (item.unit_price / unitMultiplier) : item.unit_price;
-    return sellingPricePerKg < floorPricePerKg - 0.01;
-  });
+  const isSplit = paymentMethod === 'SPLIT';
+  const effectiveSplitCash = splitCashAmount === '' ? 0 : Number(splitCashAmount);
+  const effectiveSplitBank = splitBankAmount === '' ? 0 : Number(splitBankAmount);
+  const effectiveAmountPaid = isSplit
+    ? (effectiveSplitCash + effectiveSplitBank)
+    : (amountPaid === '' ? total : Number(amountPaid));
 
   const isCartValid =
     cart.length > 0 &&
-<<<<<<< Updated upstream
-    cart.every((item) => item.quantity > 0) &&
-    !hasPriceFloorViolation;
-=======
-    cart.every((item) => Number(item.quantity) > 0 && item.unit_price !== '' && !isNaN(Number(item.unit_price)) && Number(item.unit_price) >= 0);
->>>>>>> Stashed changes
+cart.every((item) => Number(item.quantity) > 0);
 
   const checkoutMutation = useMutation({
     mutationFn: () =>
@@ -188,21 +214,27 @@ export default function POSPage() {
         customer_id: selectedCustomerId || undefined,
         items: cart.map((i) => ({
           product_id: i.product_id,
-          quantity: i.quantity,
+          quantity: Number(i.quantity) || 0,
           selected_unit: i.selected_unit,
           unit_price: Number(i.unit_price) || 0,
         })),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
-        payment_method: isCashier ? 'CASH' : paymentMethod,
-        bank_account_id: selectedBankAccountId || undefined,
+        payment_method: paymentMethod,
+        bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
+        split_cash_amount: isSplit ? effectiveSplitCash : undefined,
+        split_bank_amount: isSplit ? effectiveSplitBank : undefined,
       }),
     onSuccess: (invoice: any) => {
       const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
       const selectedBank = bankAccounts.find((b: any) => b.id === selectedBankAccountId);
-      const activeMethod = isCashier ? 'CASH' : paymentMethod;
-      const tendered = activeMethod === 'CASH' ? (invoice.cash_tendered ?? effectiveAmountPaid) : 0;
-      const returned = activeMethod === 'CASH' ? (invoice.change_returned ?? Math.max(0, effectiveAmountPaid - total)) : 0;
+      const activeMethod = paymentMethod;
+      const tendered = activeMethod === 'CASH'
+        ? (invoice.cash_tendered ?? effectiveAmountPaid)
+        : (activeMethod === 'SPLIT' ? effectiveSplitCash : 0);
+      const returned = activeMethod === 'BANK'
+        ? 0
+        : (invoice.change_returned ?? Math.max(0, (activeMethod === 'SPLIT' ? (effectiveSplitCash + effectiveSplitBank) : effectiveAmountPaid) - total));
       const balanceDue = Math.max(0, total - effectiveAmountPaid);
 
       const isDuplicateMode = slipMode === 'DUPLICATE';
@@ -210,11 +242,13 @@ export default function POSPage() {
         invoice: {
           ...invoice,
           payment_method: activeMethod,
-          bank_name: selectedBank ? selectedBank.bank_name : undefined,
+          bank_name: selectedBank ? selectedBank.bank_name : (invoice.bank_name || undefined),
           paid_amount: effectiveAmountPaid,
           cash_tendered: tendered,
           change_returned: returned,
           balance_due: balanceDue,
+          split_cash_amount: activeMethod === 'SPLIT' ? effectiveSplitCash : undefined,
+          split_bank_amount: activeMethod === 'SPLIT' ? effectiveSplitBank : undefined,
         },
         items: [...cart],
         cashierName: user?.name || 'Cashier',
@@ -226,9 +260,12 @@ export default function POSPage() {
       setCart([]);
       setDiscount(0);
       setAmountPaid('');
+      setSplitCashAmount('');
+      setSplitBankAmount('');
       setSelectedCustomerId('');
       setSelectedBankAccountId('');
       printThermalReceipt(receiptData);
+      toast.success('Sale completed successfully!');
 
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['posProducts'] });
@@ -238,17 +275,29 @@ export default function POSPage() {
       queryClient.invalidateQueries({ queryKey: ['pnlReport'] });
       queryClient.invalidateQueries({ queryKey: ['cashLedger'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
+      queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       useReportStore.getState().fetchLiquidityLedger();
       useReportStore.getState().fetchAllReports();
     },
-    onError: (err: any) => {
+    onError: async (err: any) => {
+      const isNetworkErr =
+        (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        err?.code === 'ERR_NETWORK' ||
+        err?.message?.includes('Network') ||
+        err?.message?.includes('Failed to fetch');
+
+      if (isNetworkErr) {
+        await handleOfflineCheckout();
+        return;
+      }
       alert(err?.response?.data?.error || err.message || 'Checkout failed');
     },
   });
 
-<<<<<<< Updated upstream
-=======
-  const handleOfflineCheckout = async () => {
+const handleOfflineCheckout = async () => {
     try {
       const orderData = {
         customer_id: selectedCustomerId || undefined,
@@ -256,7 +305,7 @@ export default function POSPage() {
           product_id: i.product_id,
           quantity: Number(i.quantity) || 0,
           selected_unit: i.selected_unit,
-          unit_price: Number(i.unit_price) || 0,
+          unit_price: i.unit_price,
         })),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
@@ -276,7 +325,7 @@ export default function POSPage() {
           if (!cartItem) return prod;
           const soldQty = Number(cartItem.quantity) || 0;
           const curStock = Number(prod.total_stock_kg ?? prod.current_stock ?? 0);
-          const nextStock = curStock - soldQty;
+          const nextStock = Math.max(0, curStock - soldQty);
           return {
             ...prod,
             total_stock_kg: nextStock,
@@ -370,37 +419,80 @@ export default function POSPage() {
     setIsHeldOrdersOpen(false);
   };
 
->>>>>>> Stashed changes
-  return (
+return (
     <>
-      <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden">
+      <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden dark:bg-[#0b0d14]">
         {/* LEFT: Product Search & Customer Selection */}
-        <div className="flex-1 flex flex-col p-3.5 sm:p-4 border-r border-slate-200 overflow-hidden">
-          {/* Reprint Slip Bar (if last invoice exists) */}
-          {lastInvoice && (
-            <div className="flex items-center justify-end gap-1.5 mb-2 shrink-0">
+        <div className="flex-1 flex flex-col p-3.5 sm:p-4 border-r border-slate-200 overflow-hidden dark:border-[#1e2235]">
+          {/* Top Actions Bar: Held Orders & Reprint Slips */}
+          <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => {
-                  if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: false });
-                }}
-                className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs"
-                title="Reprint Single Original Slip"
+                onClick={() => setIsHeldOrdersOpen(true)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all shadow-2xs border cursor-pointer ${
+                  heldOrders.length > 0
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 dark:bg-[#161925] dark:hover:bg-[#1c2030] dark:text-slate-200 dark:border-[#23283B]'
+                }`}
+                title="View and resume held transactions"
               >
-                <Printer className="w-3 h-3 text-blue-600" />
-                <span>Reprint Original (1 Slip)</span>
+                <Clock className="w-3.5 h-3.5" />
+                <span>Held Bills</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  heldOrders.length > 0 ? 'bg-white text-amber-900' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                }`}>
+                  {heldOrders.length}
+                </span>
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: true });
-                }}
-                className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs"
-                title="Reprint Both Slips: Original + Duplicate"
-              >
-                <Copy className="w-3 h-3 text-amber-600" />
-                <span>Reprint Both (2 Slips)</span>
-              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {lastInvoice && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: false });
+                    }}
+                    className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer dark:bg-[#161925] dark:hover:bg-[#1c2030] dark:text-slate-200 dark:border-[#23283B]"
+                    title="Reprint Single Original Slip"
+                  >
+                    <Printer className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                    <span>Reprint Original (1 Slip)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: true });
+                    }}
+                    className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer dark:bg-amber-950/40 dark:hover:bg-amber-900/50 dark:text-amber-300 dark:border-amber-800/60"
+                    title="Reprint Both Slips: Original + Duplicate"
+                  >
+                    <Copy className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                    <span>Reprint Both (2 Slips)</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Offline Sync Pending Warning Banner */}
+          {offlinePendingCount > 0 && (
+            <div
+              data-testid="offline-sync-banner"
+              className="mb-2 px-3.5 py-2.5 bg-amber-500/15 border border-amber-500/80 rounded-xl text-amber-500 flex items-center justify-between shadow-2xs shrink-0 animate-pulse"
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="font-bold text-xs uppercase tracking-wide">Offline Sync Pending</span>
+                <span className="text-[11px] text-amber-400 font-medium">
+                  ({offlinePendingCount} invoice{offlinePendingCount > 1 ? 's' : ''} stored locally in vault)
+                </span>
+              </div>
+              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 uppercase">
+                Vault Active
+              </span>
             </div>
           )}
 
@@ -415,21 +507,21 @@ export default function POSPage() {
                 <select
                   value={selectedCustomerId}
                   onChange={(e) => setSelectedCustomerId(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-none truncate"
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-none truncate dark:bg-[#161925] dark:border-[#23283B] dark:text-white"
                   title="Select Customer for Habit Tracking"
                 >
                   <option value="">Walk-In Customer (Default)</option>
-                  <optgroup label="Cash Customers">
+                  <optgroup label="Cash Customers" className="dark:bg-[#161925] dark:text-slate-200">
                     {customers.filter((c) => c.customer_type === 'CASH').map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.code || c.phone || 'Cash Customer'})
+                      <option key={c.id} value={c.id} className="dark:bg-[#161925] dark:text-white">
+                        {c.name} {c.city ? `(${c.city})` : ''}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="Credit Accounts (Udhaar)">
+                  <optgroup label="Credit Accounts (Udhaar)" className="dark:bg-[#161925] dark:text-slate-200">
                     {customers.filter((c) => c.customer_type === 'CREDIT').map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.code || c.phone || 'Credit Account'})
+                      <option key={c.id} value={c.id} className="dark:bg-[#161925] dark:text-white">
+                        {c.name} {c.city ? `(${c.city})` : ''}
                       </option>
                     ))}
                   </optgroup>
@@ -439,10 +531,10 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setIsAddCustomerOpen(true)}
-                className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-lg border border-blue-200 transition-all shrink-0 flex items-center gap-1 shadow-2xs"
+                className="px-2.5 py-1.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs rounded-lg transition-all shrink-0 flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer dark:from-amber-500 dark:to-amber-600 dark:text-slate-950"
                 title="Register New Customer"
               >
-                <UserPlus className="w-3.5 h-3.5" />
+                <UserPlus className="w-3.5 h-3.5 text-slate-950" />
                 <span>+ New</span>
               </button>
             </div>
@@ -455,7 +547,7 @@ export default function POSPage() {
               <input
                 type="text"
                 placeholder="Search products by name or category..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-none text-xs font-medium"
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 focus:outline-none text-xs font-medium dark:bg-[#161925] dark:border-[#23283B] dark:text-white dark:placeholder-slate-500"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -478,13 +570,8 @@ export default function POSPage() {
                     onClick={() => addToCart(p)}
                     className={`border rounded-xl p-2.5 flex flex-col justify-between text-left transition-all duration-150 group relative min-h-[105px] max-h-[120px] overflow-hidden cursor-pointer ${
                       isOutOfStock
-<<<<<<< Updated upstream
-                        ? 'border-red-300 bg-red-50/80 shadow-[0_4px_14px_rgba(239,68,68,0.18)] cursor-not-allowed opacity-90'
-                        : 'bg-white border-slate-300/80 shadow-[0_6px_16px_rgba(15,23,42,0.22),0_2px_6px_rgba(15,23,42,0.12)] hover:border-blue-500 hover:shadow-[0_10px_24px_rgba(15,23,42,0.30),0_4px_10px_rgba(37,99,235,0.20)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]'
-=======
-                        ? 'border-amber-300/80 bg-amber-50/40 hover:border-amber-500 shadow-[0_4px_12px_rgba(245,158,11,0.12)] hover:-translate-y-0.5 active:scale-[0.98] dark:bg-amber-950/20 dark:border-amber-900/40 hover:dark:border-amber-500/60'
+? 'border-red-300 bg-red-50/80 shadow-[0_4px_14px_rgba(239,68,68,0.18)] cursor-not-allowed opacity-90 dark:bg-red-950/30 dark:border-red-900/50'
                         : 'bg-white border-slate-300/80 shadow-[0_6px_16px_rgba(15,23,42,0.22),0_2px_6px_rgba(15,23,42,0.12)] hover:border-blue-500 hover:shadow-[0_10px_24px_rgba(15,23,42,0.30),0_4px_10px_rgba(37,99,235,0.20)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] dark:bg-[#121520] dark:border-[#23283B] hover:dark:border-blue-500/80 dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)]'
->>>>>>> Stashed changes
                     }`}
                     title={
                       isOutOfStock
@@ -496,11 +583,7 @@ export default function POSPage() {
                     <div className="flex items-center justify-between gap-1 w-full mb-0.5">
                       <span
                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded truncate max-w-[50%] ${
-<<<<<<< Updated upstream
-                          isOutOfStock ? 'text-red-700 bg-red-100/80' : 'text-slate-500 bg-slate-100'
-=======
-                          isOutOfStock ? 'text-amber-800 bg-amber-100/80 dark:bg-amber-900/40 dark:text-amber-300' : 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400'
->>>>>>> Stashed changes
+isOutOfStock ? 'text-red-700 bg-red-100/80 dark:bg-red-900/40 dark:text-red-300' : 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400'
                         }`}
                       >
                         {p.category || p.category_name || 'Item'}
@@ -513,8 +596,8 @@ export default function POSPage() {
                         <span
                           className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
                             stockKg > 10
-                              ? 'text-emerald-700 bg-emerald-50'
-                              : 'text-amber-700 bg-amber-50'
+                              ? 'text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border dark:border-emerald-800/40'
+                              : 'text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400 dark:border dark:border-amber-800/40'
                           }`}
                         >
                           {stockKg} KG
@@ -526,11 +609,7 @@ export default function POSPage() {
                     <div className="my-auto py-0.5">
                       <p
                         className={`font-bold text-xs line-clamp-2 leading-snug transition-colors ${
-<<<<<<< Updated upstream
-                          isOutOfStock ? 'text-red-950/80' : 'text-slate-800 group-hover:text-blue-600'
-=======
-                          isOutOfStock ? 'text-slate-800 group-hover:text-amber-600 dark:text-slate-100 group-hover:dark:text-amber-400' : 'text-slate-800 group-hover:text-blue-600 dark:text-slate-100 group-hover:dark:text-blue-400'
->>>>>>> Stashed changes
+isOutOfStock ? 'text-red-950/80 dark:text-red-300' : 'text-slate-800 group-hover:text-blue-600 dark:text-slate-100 group-hover:dark:text-blue-400'
                         }`}
                       >
                         {p.size ? `${p.name} - ${p.size}` : p.name}
@@ -548,67 +627,41 @@ export default function POSPage() {
                     {/* Bottom: Price & Quick Add */}
                     <div
                       className={`flex items-end justify-between pt-1 border-t mt-0.5 w-full ${
-<<<<<<< Updated upstream
-                        isOutOfStock ? 'border-red-200' : 'border-slate-100'
-=======
-                        isOutOfStock ? 'border-amber-200/80 dark:border-amber-900/40' : 'border-slate-100 dark:border-[#1e2235]'
->>>>>>> Stashed changes
+isOutOfStock ? 'border-red-200 dark:border-red-900/40' : 'border-slate-100 dark:border-[#1e2235]'
                       }`}
                     >
                       <div>
                         <span
-<<<<<<< Updated upstream
-                          className={`text-[8px] font-semibold uppercase block leading-none ${
-                            isOutOfStock ? 'text-red-400' : 'text-slate-400'
+className={`text-[8px] font-semibold uppercase block leading-none ${
+                            isOutOfStock ? 'text-red-400' : 'text-slate-400 dark:text-slate-500'
                           }`}
-=======
-                          className="text-[8px] font-semibold uppercase block leading-none text-slate-400 dark:text-slate-500"
->>>>>>> Stashed changes
                         >
                           Rate
                         </span>
                         <span
                           className={`font-black text-xs leading-tight ${
-<<<<<<< Updated upstream
-                            isOutOfStock ? 'text-red-700' : 'text-blue-600'
-=======
-                            isOutOfStock ? 'text-slate-800 dark:text-slate-100' : 'text-blue-600 dark:text-blue-400'
->>>>>>> Stashed changes
+isOutOfStock ? 'text-red-700 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
                           }`}
                         >
                           Rs. {displayPrice}
                           <span
-<<<<<<< Updated upstream
-                            className={`text-[9px] font-medium ml-0.5 ${
-                              isOutOfStock ? 'text-red-400' : 'text-slate-500'
+className={`text-[9px] font-medium ml-0.5 ${
+                              isOutOfStock ? 'text-red-400' : 'text-slate-500 dark:text-slate-400'
                             }`}
-=======
-                            className="text-[9px] font-medium ml-0.5 text-slate-500 dark:text-slate-400"
->>>>>>> Stashed changes
                           >
                             /KG
                           </span>
                         </span>
                       </div>
-<<<<<<< Updated upstream
-                      {isOutOfStock ? (
-                        <div className="px-1.5 py-0.5 rounded bg-red-100 border border-red-200 text-red-700 text-[9px] font-extrabold uppercase shadow-2xs">
+{isOutOfStock ? (
+                        <div className="px-1.5 py-0.5 rounded bg-red-100 border border-red-200 text-red-700 text-[9px] font-extrabold uppercase shadow-2xs dark:bg-red-950/50 dark:border-red-800 dark:text-red-300">
                           0 KG
                         </div>
                       ) : (
-                        <div className="w-5 h-5 rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center text-[11px] font-black transition-colors shadow-2xs">
+                        <div className="w-5 h-5 rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center text-[11px] font-black transition-colors shadow-2xs dark:bg-blue-950/50 dark:text-blue-400 dark:border dark:border-blue-800/50 group-hover:dark:bg-blue-600 group-hover:dark:text-white">
                           +
                         </div>
                       )}
-=======
-                      <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[11px] font-black transition-colors shadow-2xs ${
-                        isOutOfStock
-                          ? 'bg-amber-100 text-amber-700 group-hover:bg-amber-600 group-hover:text-white dark:bg-amber-950/50 dark:text-amber-400 dark:border dark:border-amber-800/50 group-hover:dark:bg-amber-600 group-hover:dark:text-white'
-                          : 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white dark:bg-blue-950/50 dark:text-blue-400 dark:border dark:border-blue-800/50 group-hover:dark:bg-blue-600 group-hover:dark:text-white'
-                      }`}>
-                        +
-                      </div>
->>>>>>> Stashed changes
                     </div>
                   </button>
                 );
@@ -616,39 +669,39 @@ export default function POSPage() {
             </div>
 
             {products.length === 0 && !isSearchLoading && (
-              <div className="py-8 text-center text-slate-400 text-xs font-medium bg-white rounded-xl border border-dashed border-slate-200 mt-2">
+              <div className="py-8 text-center text-slate-400 text-xs font-medium bg-white rounded-xl border border-dashed border-slate-200 mt-2 dark:bg-[#121520] dark:border-[#23283B] dark:text-slate-400">
                 No products found matching "{searchTerm}"
               </div>
             )}
             {isSearchLoading && (
-              <div className="py-8 text-center text-slate-400 text-xs font-medium mt-2">Loading inventory...</div>
+              <div className="py-8 text-center text-slate-400 text-xs font-medium mt-2 dark:text-slate-400">Loading inventory...</div>
             )}
           </div>
 
           {/* BOTTOM: Summary Metric Cards (Compact) */}
-          <div className="pt-2 border-t border-slate-200 shrink-0">
+          <div className="pt-2 border-t border-slate-200 shrink-0 dark:border-[#1e2235]">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200">
-                <p className="text-[10px] font-medium text-slate-500 mb-0.5">Today's Sales</p>
-                <p className="text-sm font-bold text-slate-900 leading-tight">
+              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200 dark:bg-[#121520] dark:border-[#23283B]">
+                <p className="text-[10px] font-medium text-slate-500 mb-0.5 dark:text-slate-400">Today's Sales</p>
+                <p className="text-sm font-bold text-slate-900 leading-tight dark:text-white">
                   Rs. {Number(metrics?.todaySales || 0).toLocaleString()}
                 </p>
               </div>
-              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200">
-                <p className="text-[10px] font-medium text-slate-500 mb-0.5">Today's Transactions</p>
-                <p className="text-sm font-bold text-slate-900 leading-tight">
+              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200 dark:bg-[#121520] dark:border-[#23283B]">
+                <p className="text-[10px] font-medium text-slate-500 mb-0.5 dark:text-slate-400">Today's Transactions</p>
+                <p className="text-sm font-bold text-slate-900 leading-tight dark:text-white">
                   {Number(metrics?.todayTransactions || 0).toLocaleString()}
                 </p>
               </div>
-              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200">
-                <p className="text-[10px] font-medium text-slate-500 mb-0.5">This Week's Sales</p>
-                <p className="text-sm font-bold text-slate-900 leading-tight">
+              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200 dark:bg-[#121520] dark:border-[#23283B]">
+                <p className="text-[10px] font-medium text-slate-500 mb-0.5 dark:text-slate-400">This Week's Sales</p>
+                <p className="text-sm font-bold text-slate-900 leading-tight dark:text-white">
                   Rs. {Number(metrics?.weeklySales || 0).toLocaleString()}
                 </p>
               </div>
-              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200">
-                <p className="text-[10px] font-medium text-slate-500 mb-0.5">This Month's Sales</p>
-                <p className="text-sm font-bold text-slate-900 leading-tight">
+              <div className="bg-white p-2 rounded-lg shadow-2xs border border-slate-200 dark:bg-[#121520] dark:border-[#23283B]">
+                <p className="text-[10px] font-medium text-slate-500 mb-0.5 dark:text-slate-400">This Month's Sales</p>
+                <p className="text-sm font-bold text-slate-900 leading-tight dark:text-white">
                   Rs. {Number(metrics?.monthlySales || 0).toLocaleString()}
                 </p>
               </div>
@@ -657,90 +710,63 @@ export default function POSPage() {
         </div>
 
       {/* RIGHT: Cart & Locked Payment Panel (Compact Width w-[350px]) */}
-      <div className="w-[340px] xl:w-[350px] flex flex-col bg-white shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] z-10 shrink-0">
-        <div className="p-3 border-b border-slate-100 bg-blue-50/40 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg">
-              <ShoppingCart className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 leading-tight">Current Sale Cart</h2>
-              <span className="text-[11px] text-slate-500 font-medium">
-                {selectedCustomerId ? customers.find(c => c.id === selectedCustomerId)?.name : 'Walk-In Customer'}
-              </span>
-            </div>
-          </div>
-          <span className="text-[11px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
-            {cart.length} Items
-          </span>
-        </div>
-
+      <div className="w-[340px] xl:w-[350px] flex flex-col bg-white shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] z-10 shrink-0 dark:bg-[#0c101c] dark:border-l dark:border-[#1e2235]">
         {/* Cart Item List */}
-        <div className="flex-1 overflow-y-auto px-3 py-1 flex flex-col divide-y divide-slate-100">
+        <div className="flex-1 overflow-y-auto px-3 py-1 flex flex-col divide-y divide-slate-100 dark:divide-[#1e2235]">
           {cart.length === 0 ? (
-            <div className="text-center text-slate-400 my-auto py-8">
-              <ShoppingCart className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-              <p className="font-semibold text-slate-600 text-xs">Cart is empty</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Select products from the left to start billing.</p>
+            <div className="text-center text-slate-400 my-auto py-8 dark:text-slate-500">
+              <ShoppingCart className="w-10 h-10 mx-auto text-slate-300 mb-2 dark:text-slate-600" />
+              <p className="font-semibold text-slate-600 text-xs dark:text-slate-400">Cart is empty</p>
+              <p className="text-[11px] text-slate-400 mt-0.5 dark:text-slate-500">Select products from the left to start billing.</p>
             </div>
           ) : (
             cart.map((item) => {
-<<<<<<< Updated upstream
-              const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
+const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
                 ? item.bag_weight_kg
                 : 1.0;
 
               const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
               const floorPricePerUnit = floorPricePerKg * unitMultiplier;
-              const sellingPricePerKg = unitMultiplier > 0 ? (item.unit_price / unitMultiplier) : item.unit_price;
-              const isBelowFloor = !isCashier && sellingPricePerKg < floorPricePerKg - 0.01;
+              const itemUnitPriceNum = Number(item.unit_price) || 0;
+              const sellingPricePerKg = unitMultiplier > 0 ? (itemUnitPriceNum / unitMultiplier) : itemUnitPriceNum;
+              const isBelowFloor = sellingPricePerKg < floorPricePerKg - 0.01;
 
               return (
                 <div
                   key={item.product_id}
                   className={`py-2 px-0.5 transition-all ${
-                    isBelowFloor ? 'bg-red-50/70 -mx-1 px-1.5 rounded' : ''
+                    isBelowFloor ? 'bg-amber-50/50 -mx-1 px-1.5 rounded dark:bg-amber-950/30' : ''
                   }`}
-=======
-              return (
-                <div
-                  key={item.product_id}
-                  className="py-2 px-0.5 transition-all"
->>>>>>> Stashed changes
                 >
                   {/* Top: Product Name & Delete Button */}
                   <div className="flex justify-between items-center gap-1">
-                    <span className="font-bold text-slate-800 text-xs truncate" title={item.productName}>
+                    <span className="font-bold text-slate-800 text-xs truncate dark:text-white" title={item.productName}>
                       {item.productName}
                     </span>
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.product_id)}
-                      className="text-slate-400 hover:text-red-600 p-0.5 transition-colors shrink-0"
+                      className="text-slate-400 hover:text-red-600 p-0.5 transition-colors shrink-0 dark:hover:text-red-400 cursor-pointer"
                       title="Remove item"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
-<<<<<<< Updated upstream
                   {isBelowFloor && (
-                    <div className="flex items-center gap-1 text-[10px] text-red-700 bg-red-100/80 p-1 rounded border border-red-300 font-medium my-1">
-                      <AlertCircle className="w-3 h-3 shrink-0 text-red-600" />
-                      Below floor (Rs. {floorPricePerUnit.toFixed(1)} / {item.selected_unit})
+                    <div className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50 p-1 rounded border border-amber-300 font-medium my-1 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300">
+                      <AlertCircle className="w-3 h-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                      Notice: Below floor margin (Rs. {floorPricePerUnit.toFixed(1)} / {item.selected_unit})
                     </div>
                   )}
 
                   {/* Bottom: Unit, Quantity & Line Total Price (No editable price input) */}
-=======
-                  {/* Bottom: Unit, Quantity & Line Total Price (Editable price input) */}
->>>>>>> Stashed changes
                   <div className="flex justify-between items-center gap-2 mt-1">
                     <div className="flex items-center gap-1.5">
                       <select
                         value={item.selected_unit}
                         onChange={(e) => updateCartItem(item.product_id, { selected_unit: e.target.value })}
-                        className="text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 font-semibold text-slate-700 focus:outline-none shadow-2xs"
+                        className="text-[11px] bg-white border border-slate-300 rounded px-1.5 py-0.5 font-semibold text-slate-700 focus:outline-none shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-slate-200"
                       >
                         <option value="KG">KG</option>
                         <option value="Bag">Bag ({item.bag_weight_kg}k)</option>
@@ -748,26 +774,13 @@ export default function POSPage() {
 
                       <input
                         type="number"
-                        min={1}
-                        value={item.quantity}
-                        onChange={(e) =>
+                        step="any"
+                        min={0.001}
+                        value={item.quantity === '' ? '' : item.quantity}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const val = e.target.value;
                           updateCartItem(item.product_id, {
-<<<<<<< Updated upstream
-                            quantity: Math.max(1, parseInt(e.target.value) || 1),
-                          })
-                        }
-                        className="w-12 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none shadow-2xs"
-                      />
-
-                      <span className="text-[11px] text-slate-500 font-semibold font-mono">
-                        @ Rs. {item.unit_price}
-                      </span>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="text-xs font-black text-slate-900 block font-mono">
-                        Rs. {(item.quantity * item.unit_price).toLocaleString()}
-=======
                             quantity: val === '' ? '' : (parseFloat(val) || 0),
                           });
                         }}
@@ -777,33 +790,16 @@ export default function POSPage() {
                           }
                         }}
                         className="w-14 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
-                        title="Quantity"
                       />
 
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-slate-500 font-semibold font-mono dark:text-slate-400">@ Rs.</span>
-                        <input
-                          type="number"
-                          step="any"
-                          min={0}
-                          value={item.unit_price === '' ? '' : item.unit_price}
-                          onFocus={(e) => e.target.select()}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            updateCartItem(item.product_id, {
-                              unit_price: val === '' ? ('' as any) : Math.max(0, parseFloat(val) || 0),
-                            });
-                          }}
-                          className="w-16 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
-                          title="Price per unit"
-                        />
-                      </div>
+                      <span className="text-[11px] text-slate-500 font-semibold font-mono dark:text-slate-400">
+                        @ Rs. {item.unit_price}
+                      </span>
                     </div>
 
                     <div className="text-right shrink-0">
                       <span className="text-xs font-black text-slate-900 block font-mono dark:text-white">
                         Rs. {((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toLocaleString()}
->>>>>>> Stashed changes
                       </span>
                     </div>
                   </div>
@@ -814,13 +810,13 @@ export default function POSPage() {
         </div>
 
         {/* Footer Payment Form */}
-        <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-col gap-2">
-          <div className="flex justify-between items-center text-xs text-slate-600 font-medium">
+        <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-col gap-2 dark:bg-[#0c101c] dark:border-[#1e2235]">
+          <div className="flex justify-between items-center text-xs text-slate-600 font-medium dark:text-slate-400">
             <span>Subtotal</span>
-            <span className="font-bold text-slate-800">Rs. {subtotal.toLocaleString()}</span>
+            <span className="font-bold text-slate-800 dark:text-white">Rs. {subtotal.toLocaleString()}</span>
           </div>
 
-          <div className="flex justify-between items-center text-xs text-slate-600 font-medium">
+          <div className="flex justify-between items-center text-xs text-slate-600 font-medium dark:text-slate-400">
             <span className="flex items-center gap-1">
               Discount
             </span>
@@ -829,130 +825,293 @@ export default function POSPage() {
               min={0}
               value={discount || ''}
               onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
-<<<<<<< Updated upstream
-              className={`w-20 text-right text-xs font-bold rounded py-0.5 px-2 ${
-                isCashier ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-white border border-slate-300'
+className={`w-20 text-right text-xs font-bold rounded py-0.5 px-2 ${
+                isCashier ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700' : 'bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white'
               }`}
-=======
-              className="w-20 text-right text-xs font-bold rounded py-0.5 px-2 bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
->>>>>>> Stashed changes
+              disabled={isCashier}
               placeholder="0"
             />
           </div>
 
           {hasCreditBalance && availableCredit > 0 && (
-            <div className="flex justify-between items-center text-xs font-bold bg-emerald-100/90 text-emerald-950 p-2 rounded-lg border border-emerald-300 shadow-2xs">
+            <div className="flex justify-between items-center text-xs font-bold bg-emerald-100/90 text-emerald-950 p-2 rounded-lg border border-emerald-300 shadow-2xs dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300">
               <span className="flex items-center gap-1">
-                <RotateCcw className="w-3 h-3 text-emerald-700" />
+                <RotateCcw className="w-3 h-3 text-emerald-700 dark:text-emerald-400" />
                 Credit Applied:
               </span>
-              <span className="font-mono text-emerald-800 text-xs font-black">
+              <span className="font-mono text-emerald-800 text-xs font-black dark:text-emerald-300">
                 - Rs. {appliedCredit.toLocaleString()}
               </span>
             </div>
           )}
 
-          <div className="flex justify-between items-center pt-1.5 border-t border-slate-200">
-            <span className="text-xs text-slate-800 font-bold">
+          <div className="flex justify-between items-center pt-1.5 border-t border-slate-200 dark:border-[#1e2235]">
+            <span className="text-xs text-slate-800 font-bold dark:text-white">
               {appliedCredit > 0 ? 'Net Payable' : 'Grand Total'}
             </span>
-            <span className="text-base text-blue-600 font-black font-mono">Rs. {total.toLocaleString()}</span>
+            <span className="text-base text-blue-600 font-black font-mono dark:text-sky-400">Rs. {total.toLocaleString()}</span>
           </div>
 
-          {/* Amount Paid Input */}
+          {/* Payment Method Dropdown (Cash in Drawer, Bank Transfer, or Split Payment) */}
           <div>
-            <div className="flex justify-between items-center mb-0.5">
-              <label className="text-[11px] font-bold text-slate-700">
-                Amount Paid
-              </label>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setAmountPaid(0)}
-                  className="text-[9px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition"
-                >
-                  Rs. 0 (Credit)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAmountPaid(total)}
-                  className="text-[9px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 transition"
-                >
-                  Full (Rs. {total.toLocaleString()})
-                </button>
-              </div>
-            </div>
-            <input
-              type="number"
-              min={0}
-              value={amountPaid === '' ? '' : amountPaid}
-              onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
-              placeholder="0 (Enter Amount)"
-              className="w-full text-right font-black text-sm rounded-lg py-1 px-2.5 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono"
-            />
-            {amountPaid !== '' && Number(amountPaid) > total && (
-              <div className="mt-1 flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded text-[11px] font-bold">
-                <span>Change Return:</span>
-                <span className="font-mono text-xs text-emerald-700">
-                  Rs. {(Number(amountPaid) - total).toLocaleString()}
-                </span>
-              </div>
-            )}
-            {amountPaid !== '' && Number(amountPaid) < total && (
-              <div className="mt-1 flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1 rounded text-[11px] font-bold">
-                <span>Remaining Due:</span>
-                <span className="font-mono text-xs text-amber-700">
-                  Rs. {(total - Number(amountPaid)).toLocaleString()}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Payment Method Dropdown */}
-          <div>
+            <label className="text-[11px] font-bold text-slate-700 block mb-0.5 dark:text-slate-300">
+              Payment Method
+            </label>
             <select
-              disabled={isCashier}
-              value={isCashier ? 'CASH' : paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              className={`w-full text-xs font-bold rounded-lg py-1 px-2 border ${
-                isCashier
-                  ? 'bg-slate-100 text-slate-600 cursor-not-allowed border-slate-300 font-mono'
-                  : 'bg-white border-slate-300 focus:ring-1 focus:ring-blue-500'
-              }`}
+              value={paymentMethod}
+              onChange={(e) => {
+                const val = e.target.value;
+                setPaymentMethod(val);
+                if ((val === 'BANK' || val === 'SPLIT') && !selectedBankAccountId && bankAccounts.length > 0) {
+                  setSelectedBankAccountId(bankAccounts[0].id);
+                }
+                if (val === 'SPLIT') {
+                  const half = Math.round((total / 2) * 100) / 100;
+                  setSplitCashAmount(half);
+                  setSplitBankAmount(Math.round((total - half) * 100) / 100);
+                }
+              }}
+              className="w-full text-xs font-bold rounded-lg py-1.5 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
             >
-              <option value="CASH">Cash in Drawer (CASH)</option>
-              <option value="BANK">Bank Transfer</option>
-              <option value="CHEQUE">Cheque</option>
+              <option value="CASH">💵 Cash in Drawer (CASH)</option>
+              <option value="BANK">🏦 Bank Transfer</option>
+              <option value="SPLIT">🔀 Split Payment (Cash + Bank)</option>
             </select>
           </div>
 
-          {!isCashier && (paymentMethod === 'BANK' || paymentMethod === 'CHEQUE') && (
+          {/* Standard Single Amount Paid Input (when CASH or BANK) */}
+          {paymentMethod !== 'SPLIT' && (
             <div>
+              <div className="flex justify-between items-center mb-0.5">
+                <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5 dark:text-slate-300">
+                  <span>Amount Paid</span>
+                  {amountPaid === '' && total > 0 && (
+                    <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1 rounded border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300">
+                      Auto: Full (Rs. {total.toLocaleString()})
+                    </span>
+                  )}
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAmountPaid(0)}
+                    className="text-[9px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200 transition cursor-pointer dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                  >
+                    Rs. 0 (Credit)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAmountPaid(total)}
+                    className="text-[9px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 transition cursor-pointer dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-900/50"
+                  >
+                    Full (Rs. {total.toLocaleString()})
+                  </button>
+                </div>
+              </div>
+              <input
+                type="number"
+                min={0}
+                value={amountPaid === '' ? '' : amountPaid}
+                onChange={(e) => setAmountPaid(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                placeholder={total > 0 ? `Full: Rs. ${total.toLocaleString()}` : '0 (Enter Amount)'}
+                className="w-full text-right font-black text-sm rounded-lg py-1 px-2.5 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+              />
+              {amountPaid !== '' && Number(amountPaid) > total && (
+                <div className="mt-1 flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1 rounded text-[11px] font-bold dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300">
+                  <span>Change Return:</span>
+                  <span className="font-mono text-xs text-emerald-700 dark:text-emerald-400">
+                    Rs. {(Number(amountPaid) - total).toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {amountPaid !== '' && Number(amountPaid) < total && (
+                <div className="mt-1 flex items-center justify-between bg-amber-50 border border-amber-200 text-amber-800 px-2.5 py-1 rounded text-[11px] font-bold dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300">
+                  <span>Remaining Due:</span>
+                  <span className="font-mono text-xs text-amber-700 dark:text-amber-400">
+                    Rs. {(total - Number(amountPaid)).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bank Account Dropdown for BANK method */}
+          {paymentMethod === 'BANK' && (
+            <div>
+              <label className="text-[11px] font-bold text-slate-700 block mb-0.5 dark:text-slate-300">
+                Select Bank Account <span className="text-red-500">*</span>
+              </label>
               <select
                 value={selectedBankAccountId}
                 onChange={(e) => setSelectedBankAccountId(e.target.value)}
-                className="w-full text-xs font-bold rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500"
+                className="w-full text-xs font-bold rounded-lg py-1.5 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+                required
               >
-                <option value="">Select Bank Account...</option>
+                <option value="">-- Select Bank Account --</option>
                 {bankAccounts.map((acc: any) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.bank_name} — {acc.account_title}
+                    {acc.bank_name} — {acc.account_title || acc.name}
                   </option>
                 ))}
               </select>
             </div>
           )}
 
+          {/* Split Payment Dedicated Section */}
+          {paymentMethod === 'SPLIT' && (
+            <div className="p-2.5 bg-blue-50/80 border border-blue-200 rounded-lg flex flex-col gap-2 dark:bg-[#0c1824] dark:border-sky-500/40 dark:shadow-[0_0_14px_rgba(56,189,248,0.15)]">
+              <div className="flex justify-between items-center text-[11px] font-bold text-blue-900 border-b border-blue-200/60 pb-1 dark:text-sky-300 dark:border-sky-500/20">
+                <span>🔀 Split Payment Allocation</span>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const half = Math.round((total / 2) * 100) / 100;
+                      setSplitCashAmount(half);
+                      setSplitBankAmount(Math.round((total - half) * 100) / 100);
+                    }}
+                    className="text-[9px] bg-white border border-blue-300 text-blue-700 px-1.5 py-0.5 rounded font-semibold hover:bg-blue-100 transition cursor-pointer dark:bg-[#161925] dark:border-sky-500/50 dark:text-sky-300 dark:hover:bg-[#1e2337]"
+                  >
+                    50 / 50
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSplitCashAmount(total);
+                      setSplitBankAmount(0);
+                    }}
+                    className="text-[9px] bg-white border border-blue-300 text-blue-700 px-1.5 py-0.5 rounded font-semibold hover:bg-blue-100 transition cursor-pointer dark:bg-[#161925] dark:border-sky-500/50 dark:text-sky-300 dark:hover:bg-[#1e2337]"
+                  >
+                    All Cash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSplitCashAmount(0);
+                      setSplitBankAmount(total);
+                    }}
+                    className="text-[9px] bg-white border border-blue-300 text-blue-700 px-1.5 py-0.5 rounded font-semibold hover:bg-blue-100 transition cursor-pointer dark:bg-[#161925] dark:border-sky-500/50 dark:text-sky-300 dark:hover:bg-[#1e2337]"
+                  >
+                    All Bank
+                  </button>
+                </div>
+              </div>
+
+              {/* Cash & Bank Portions in a Single Row */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* Cash Portion */}
+                <div>
+                  <div className="flex justify-between items-center mb-0.5">
+                    <label className="text-[10px] font-bold text-slate-700 truncate dark:text-slate-300" title="Cash Portion (Rs.)">
+                      💵 Cash Portion (Rs.)
+                    </label>
+                    {splitBankAmount !== '' && Number(splitBankAmount) < total && (
+                      <button
+                        type="button"
+                        onClick={() => setSplitCashAmount(Math.max(0, total - Number(splitBankAmount)))}
+                        className="text-[9px] text-blue-600 hover:underline font-semibold dark:text-sky-400"
+                        title={`Fill Remaining (Rs. ${Math.max(0, total - Number(splitBankAmount)).toLocaleString()})`}
+                      >
+                        Fill Rem.
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={splitCashAmount === '' ? '' : splitCashAmount}
+                    onChange={(e) => setSplitCashAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono dark:bg-[#121520] dark:border-[#2D3349] dark:text-white dark:focus:border-sky-400"
+                  />
+                </div>
+
+                {/* Bank Portion */}
+                <div>
+                  <div className="flex justify-between items-center mb-0.5">
+                    <label className="text-[10px] font-bold text-slate-700 truncate dark:text-slate-300" title="Bank Transfer Portion (Rs.)">
+                      🏦 Bank Portion (Rs.)
+                    </label>
+                    {splitCashAmount !== '' && Number(splitCashAmount) < total && (
+                      <button
+                        type="button"
+                        onClick={() => setSplitBankAmount(Math.max(0, total - Number(splitCashAmount)))}
+                        className="text-[9px] text-blue-600 hover:underline font-semibold dark:text-sky-400"
+                        title={`Fill Remaining (Rs. ${Math.max(0, total - Number(splitCashAmount)).toLocaleString()})`}
+                      >
+                        Fill Rem.
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={splitBankAmount === '' ? '' : splitBankAmount}
+                    onChange={(e) => setSplitBankAmount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="w-full text-right font-black text-xs rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 font-mono dark:bg-[#121520] dark:border-[#2D3349] dark:text-white dark:focus:border-sky-400"
+                  />
+                </div>
+              </div>
+
+              {/* Bank Selector for the transfer portion */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-0.5 dark:text-slate-300">
+                  Select Destination Bank Account <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedBankAccountId}
+                  onChange={(e) => setSelectedBankAccountId(e.target.value)}
+                  className="w-full text-xs font-bold rounded-lg py-1 px-2 border border-slate-300 bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer dark:bg-[#121520] dark:border-[#2D3349] dark:text-white"
+                  required
+                >
+                  <option value="">-- Select Bank Account --</option>
+                  {bankAccounts.map((acc: any) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.bank_name} — {acc.account_title || acc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Split Summary Footer */}
+              <div className="flex justify-between items-center pt-1 border-t border-blue-200 text-xs dark:border-sky-500/20">
+                <span className="font-semibold text-slate-600 dark:text-slate-400">Total Tendered:</span>
+                <span className="font-bold font-mono text-slate-900 dark:text-sky-300">
+                  Rs. {(effectiveSplitCash + effectiveSplitBank).toLocaleString()}
+                </span>
+              </div>
+
+              {(effectiveSplitCash + effectiveSplitBank) > total && (
+                <div className="flex items-center justify-between bg-emerald-100/90 text-emerald-900 px-2 py-0.5 rounded text-[10px] font-bold dark:bg-emerald-950/40 dark:border dark:border-emerald-800 dark:text-emerald-300">
+                  <span>Change Return (from Cash):</span>
+                  <span className="font-mono text-xs">
+                    Rs. {((effectiveSplitCash + effectiveSplitBank) - total).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              {(effectiveSplitCash + effectiveSplitBank) < total && (
+                <div className="flex items-center justify-between bg-amber-100/90 text-amber-900 px-2 py-0.5 rounded text-[10px] font-bold dark:bg-amber-950/40 dark:border dark:border-amber-800 dark:text-amber-300">
+                  <span>Remaining Due:</span>
+                  <span className="font-mono text-xs">
+                    Rs. {(total - (effectiveSplitCash + effectiveSplitBank)).toLocaleString()}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Slip Type Options */}
-          <div className="p-1.5 bg-slate-100/80 border border-slate-200 rounded-lg">
+          <div className="p-1.5 bg-slate-100/80 border border-slate-200 rounded-lg dark:bg-[#0c101c] dark:border-[#23283B]">
             <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
                 onClick={() => setSlipMode('SINGLE')}
-                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 ${
+                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 cursor-pointer ${
                   slipMode === 'SINGLE'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold border-amber-500 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-[#161925] dark:text-slate-300 dark:border-[#2D3349] dark:hover:bg-[#1e2337]'
                 }`}
               >
                 <FileText className="w-3 h-3" />
@@ -961,10 +1120,10 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setSlipMode('DUPLICATE')}
-                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 ${
+                className={`py-1 px-2 rounded text-[11px] font-bold transition-all border flex items-center justify-center gap-1 cursor-pointer ${
                   slipMode === 'DUPLICATE'
-                    ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
-                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold border-amber-500 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-[#161925] dark:text-slate-300 dark:border-[#2D3349] dark:hover:bg-[#1e2337]'
                 }`}
               >
                 <Copy className="w-3 h-3" />
@@ -973,13 +1132,54 @@ export default function POSPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => checkoutMutation.mutate()}
-            disabled={!isCartValid || checkoutMutation.isPending}
-            className="w-full mt-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold rounded-lg text-sm transition-all shadow-sm active:scale-[0.98] flex justify-center items-center gap-2"
-          >
-            {checkoutMutation.isPending ? 'Processing POS Sale...' : 'Complete POS Sale'}
-          </button>
+          <div className="grid grid-cols-3 gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (cart.length === 0) {
+                  alert('Cart is empty. Add items first to hold.');
+                  return;
+                }
+                setIsHoldConfirmOpen(true);
+              }}
+              disabled={cart.length === 0 || createHeldOrderMutation.isPending}
+              className="col-span-1 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold rounded-lg text-xs transition border border-amber-300 flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer shadow-2xs dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-300 dark:border-amber-800/60"
+              title="Hold current cart and clear screen for next customer"
+            >
+              <PauseCircle className="w-3.5 h-3.5 text-amber-800 dark:text-amber-400" />
+              <span>Hold Bill</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (paymentMethod === 'BANK' && !selectedBankAccountId) {
+                  alert('Please select a Bank Account for Bank Transfer payment');
+                  return;
+                }
+                if (paymentMethod === 'SPLIT') {
+                  if (effectiveSplitBank > 0 && !selectedBankAccountId) {
+                    alert('Please select a Bank Account for the Bank Transfer portion');
+                    return;
+                  }
+                  if (effectiveSplitCash <= 0 && effectiveSplitBank <= 0) {
+                    alert('Please enter at least Cash or Bank amount for Split Payment');
+                    return;
+                  }
+                }
+
+                if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                  handleOfflineCheckout();
+                  return;
+                }
+
+                checkoutMutation.mutate();
+              }}
+              disabled={!isCartValid || checkoutMutation.isPending}
+              className="col-span-2 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold rounded-lg text-sm transition-all shadow-md shadow-amber-500/20 active:scale-[0.98] flex justify-center items-center gap-2 cursor-pointer dark:from-amber-500 dark:to-amber-600 dark:text-slate-950"
+            >
+              {checkoutMutation.isPending ? 'Processing POS Sale...' : 'Complete POS Sale'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -997,6 +1197,28 @@ export default function POSPage() {
       <ShiftAuditModal
         isOpen={isShiftAuditOpen}
         onClose={() => setIsShiftAuditOpen(false)}
+      />
+
+      {/* Held Orders Review & Resume Modal */}
+      <HeldOrdersModal
+        isOpen={isHeldOrdersOpen}
+        onClose={() => setIsHeldOrdersOpen(false)}
+        heldOrders={heldOrders}
+        isLoading={isLoadingHeldOrders}
+        onResume={handleResumeHeldOrder}
+        onDelete={(orderId) => deleteHeldOrderMutation.mutate(orderId)}
+        isDeleting={deleteHeldOrderMutation.isPending}
+      />
+
+      {/* Hold Confirmation Modal */}
+      <HoldConfirmModal
+        isOpen={isHoldConfirmOpen}
+        onClose={() => setIsHoldConfirmOpen(false)}
+        onConfirm={(refNote) => createHeldOrderMutation.mutate(refNote)}
+        customerName={selectedCustomerId ? (customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer') : 'Walk-In Customer'}
+        itemsCount={cart.length}
+        totalAmount={total}
+        isPending={createHeldOrderMutation.isPending}
       />
 
       </div>

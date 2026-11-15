@@ -17,7 +17,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db('categories').whereILike('name', 'Test%').delete();
-  await db.destroy();
 });
 
 describe('POST /api/v1/categories', () => {

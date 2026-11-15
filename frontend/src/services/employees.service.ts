@@ -1,5 +1,13 @@
 import api from './api';
-import { Employee, CreateEmployeeData, UpdateEmployeeData, EmployeeFilters } from '../types/employee.types';
+import {
+  Employee,
+  CreateEmployeeData,
+  UpdateEmployeeData,
+  EmployeeFilters,
+  EmployeeLedgerData,
+  EmployeeLedgerEntry,
+  CreateEmployeeLedgerEntryPayload,
+} from '../types/employee.types';
 import { ApiSuccess } from '../types/api.types';
 
 export const employeesService = {
@@ -26,4 +34,21 @@ export const employeesService = {
   deleteEmployee: async (id: string): Promise<void> => {
     await api.delete(`/employees/${id}`);
   },
+
+  getLedger: async (id: string, month?: string): Promise<EmployeeLedgerData> => {
+    const response = await api.get<ApiSuccess<EmployeeLedgerData>>(`/employees/${id}/ledger`, {
+      params: month ? { month } : {},
+    });
+    return response.data.data;
+  },
+
+  addLedgerEntry: async (id: string, data: CreateEmployeeLedgerEntryPayload): Promise<EmployeeLedgerEntry> => {
+    const response = await api.post<ApiSuccess<EmployeeLedgerEntry>>(`/employees/${id}/ledger`, data);
+    return response.data.data;
+  },
+
+  deleteLedgerEntry: async (id: string, entryId: string): Promise<void> => {
+    await api.delete(`/employees/${id}/ledger/${entryId}`);
+  },
 };
+

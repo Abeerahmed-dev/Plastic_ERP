@@ -11,10 +11,14 @@ const productSchema = z.object({
   code: z.string().optional(),
   name: z.string().min(2, 'Name is required').max(150),
   name_urdu: z.string().optional(),
-  size: z.string().optional(),
+  size: z.string({ required_error: 'Size/Variant is compulsory' })
+    .trim()
+    .min(1, 'Size/Variant is compulsory'),
+  low_stock_threshold: z.coerce.number().min(0, 'Must be at least 0').default(0),
   description: z.string().optional(),
   category_id: z.string().min(1, 'Category is required'),
   cost_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
+  historical_wac: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   sale_price: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   opening_stock: z.coerce.number().min(0, 'Must be at least 0').optional().default(0),
   is_active: z.boolean().optional(),
@@ -61,9 +65,11 @@ export const ProductFormModal = ({
       name: '',
       name_urdu: '',
       size: '',
+      low_stock_threshold: 0,
       description: '',
       category_id: '',
       cost_price: 0,
+      historical_wac: 0,
       sale_price: 0,
       opening_stock: 0,
       is_active: true,
@@ -73,6 +79,8 @@ export const ProductFormModal = ({
 
   const selectedCategoryId = watch('category_id');
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+  const openingStockValue = watch('opening_stock');
+  const isZeroStock = Number(openingStockValue || 0) <= 0;
 
   useEffect(() => {
     if (isOpen) {
@@ -82,9 +90,11 @@ export const ProductFormModal = ({
           name: initialData.name,
           name_urdu: initialData.name_urdu || '',
           size: initialData.size || '',
+          low_stock_threshold: Number((initialData as any).low_stock_threshold || 0),
           description: initialData.description || '',
           category_id: initialData.category_id,
           cost_price: Number(initialData.cost_price),
+          historical_wac: Number(initialData.cost_price),
           sale_price: Number(initialData.sale_price),
           opening_stock: Number(initialData.opening_stock),
           is_active: initialData.is_active,
@@ -96,9 +106,11 @@ export const ProductFormModal = ({
           name: '',
           name_urdu: '',
           size: '',
+          low_stock_threshold: 0,
           description: '',
           category_id: categories.length > 0 ? categories[0].id : '',
           cost_price: 0,
+          historical_wac: 0,
           sale_price: 0,
           opening_stock: 0,
           is_active: true,
@@ -108,14 +120,27 @@ export const ProductFormModal = ({
     }
   }, [isOpen, initialData, reset, categories]);
 
+
   if (!isOpen) return null;
 
   const inputCls = (hasError: boolean) =>
-    `block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
-      hasError
-        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
+    `block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${hasError
+      ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+      : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
     }`;
+
+  const handleFormSubmit = (data: ProductFormData) => {
+    const openingStock = Number(data.opening_stock || 0);
+    const histWac = openingStock > 0 ? Number(data.historical_wac || 0) : 0;
+    onSubmit({
+      ...data,
+      cost_price: initialData?.cost_price ? Number(initialData.cost_price) : (histWac > 0 ? histWac : 0),
+      sale_price: initialData?.sale_price ? Number(initialData.sale_price) : 0,
+      opening_stock: openingStock,
+      opening_stock_kg: openingStock,
+      historical_wac: histWac,
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto pt-10 pb-10">
@@ -133,7 +158,7 @@ export const ProductFormModal = ({
         </div>
 
         <div className="px-6 py-6 max-h-[70vh] overflow-y-auto">
-          <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <form id="product-form" onSubmit={handleSubmit(handleFormSubmit)} autoComplete="off" className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -141,41 +166,63 @@ export const ProductFormModal = ({
                 </label>
                 <input
                   {...register('code')}
-                  placeholder="Leave blank to auto-generate"
-                  className={inputCls(!!errors.code)}
+                  disabled
+                  readOnly
+                  autoComplete="off"
+                  placeholder="Auto-generated upon saving"
+                  className="block w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-500 cursor-not-allowed"
                 />
                 {errors.code && <p className="mt-1 text-xs text-red-600">{errors.code.message}</p>}
               </div>
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Product Name (English) <span className="text-red-500">*</span>
+                  Product Name <span className="text-red-500">*</span>
                 </label>
-                <input {...register('name')} placeholder="e.g. Shopping Bag / 30/s Poly" className={inputCls(!!errors.name)} />
+                <input
+                  {...register('name')}
+                  autoComplete="off"
+                  placeholder="e.g. Shopping Bag / 30/s Poly"
+                  className={inputCls(!!errors.name)}
+                />
                 {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
               </div>
 
               <div>
-                <label className="mb-1.5 flex items-center justify-between text-sm font-medium text-slate-700">
-                  <span>Urdu Name / پروڈکٹ کا نام اردو میں</span>
-                  <span className="text-slate-400 font-normal text-xs">(اختیاری)</span>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Size / Variant <span className="text-red-500">*</span>
+                  <span className="text-slate-400 font-normal text-xs ml-1">(e.g., 10x15, Standard)</span>
                 </label>
                 <input
-                  {...register('name_urdu')}
-                  placeholder="مثال: شاپنگ بیگ یا رول"
-                  dir="rtl"
-                  className={`${inputCls(!!errors.name_urdu)} font-serif`}
+                  {...register('size', { required: 'Size/Variant is compulsory' })}
+                  required
+                  autoComplete="off"
+                  placeholder="e.g. 10x15 or Standard"
+                  className={inputCls(!!errors.size)}
                 />
-                {errors.name_urdu && <p className="mt-1 text-xs text-red-600">{errors.name_urdu.message}</p>}
+                {errors.size && <p className="mt-1 text-xs text-red-600 font-medium">{errors.size.message}</p>}
               </div>
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Size <span className="text-slate-400 font-normal text-xs">(Format: Width x Height, e.g., 10x15)</span>
+                  Low Stock Alert Threshold (KG)
+                  <span className="text-slate-400 font-normal text-xs ml-1">(Warning limit)</span>
                 </label>
-                <input {...register('size')} placeholder="e.g. 10x15" className={inputCls(!!errors.size)} />
-                {errors.size && <p className="mt-1 text-xs text-red-600">{errors.size.message}</p>}
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  {...register('low_stock_threshold')}
+                  autoComplete="off"
+                  placeholder="e.g. 50"
+                  className={inputCls(!!errors.low_stock_threshold)}
+                />
+                {errors.low_stock_threshold && (
+                  <p className="mt-1 text-xs text-red-600 font-medium">{errors.low_stock_threshold.message}</p>
+                )}
+                <p className="mt-1 text-[11px] text-slate-400">Triggers dashboard warning when current stock &le; threshold.</p>
               </div>
+
 
               <div className="md:col-span-2">
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -199,44 +246,75 @@ export const ProductFormModal = ({
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Cost Price (Per Unit/KG)</label>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Base Unit of Measure
+                </label>
                 <input
-                  {...register('cost_price')}
-                  type="number"
-                  step="0.01"
-                  className={inputCls(!!errors.cost_price)}
+                  type="text"
+                  value="Kilograms (KG)"
+                  disabled
+                  readOnly
+                  autoComplete="off"
+                  className="block w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-600 cursor-not-allowed"
                 />
-                {errors.cost_price && <p className="mt-1 text-xs text-red-600">{errors.cost_price.message}</p>}
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Sale Price (Per KG)</label>
-                <input
-                  {...register('sale_price')}
-                  type="number"
-                  step="0.01"
-                  className={inputCls(!!errors.sale_price)}
-                />
-                {errors.sale_price && <p className="mt-1 text-xs text-red-600">{errors.sale_price.message}</p>}
+                <p className="mt-1 text-xs text-slate-400">Standard system-wide unit for all inventory & WAC calculations.</p>
               </div>
             </div>
 
             {!initialData && (
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Opening Stock (KG) <span className="text-slate-400 font-normal text-xs">(Optional)</span>
-                </label>
-                <input
-                  {...register('opening_stock')}
-                  type="number"
-                  step="0.01"
-                  placeholder="0"
-                  className={inputCls(!!errors.opening_stock)}
-                />
-                <p className="mt-1 text-xs text-slate-500">Opening stock in KG at system go-live (leave blank or 0 if starting with zero stock).</p>
-                {errors.opening_stock && (
-                  <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
-                )}
+              <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/40 space-y-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    Day Zero Stock (Optional)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Initialize existing on-hand stock and historical cost. Generates an active Day-Zero FIFO bucket (Owner Equity) without creating a purchase payable.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                      Opening Stock (KG)
+                    </label>
+                    <input
+                      {...register('opening_stock')}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      autoComplete="off"
+                      placeholder="0"
+                      className={inputCls(!!errors.opening_stock)}
+                    />
+                    {errors.opening_stock && (
+                      <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                      Historical WAC / Price per KG (Rs)
+                    </label>
+                    <input
+                      {...register('historical_wac')}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      disabled={isZeroStock}
+                      autoComplete="off"
+                      placeholder="0"
+                      className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${isZeroStock
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-blue-500/20'
+                        }`}
+                    />
+                    {isZeroStock ? (
+                      <p className="mt-1 text-[11px] text-slate-400">Disabled when Opening Stock is 0.</p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-blue-600 font-medium">Used as initial FIFO buy price per KG.</p>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -245,6 +323,7 @@ export const ProductFormModal = ({
               <textarea
                 {...register('description')}
                 rows={3}
+                autoComplete="off"
                 className={inputCls(!!errors.description)}
               ></textarea>
             </div>
@@ -277,11 +356,11 @@ export const ProductFormModal = ({
             type="submit"
             form="product-form"
             disabled={isSubmitting}
-            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition shadow-sm"
+            className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed transition cursor-pointer"
           >
             {isSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="mr-2 h-4 w-4 animate-spin text-slate-950" />
                 Saving...
               </>
             ) : (

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ok } from '../../shared/apiResponse';
-import { createExpenseSchema, expenseQuerySchema } from './expenses.schemas';
+import { createExpenseSchema, payExpenseSchema, expenseQuerySchema } from './expenses.schemas';
 import * as expensesService from './expenses.service';
 
 export async function createExpenseController(
@@ -9,10 +9,39 @@ export async function createExpenseController(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const parsed = createExpenseSchema.parse(req.body);
+    const payload = createExpenseSchema.parse(req.body);
     const userId = req.user?.id;
-    const expense = await expensesService.addExpense(parsed, userId);
+    const expense = await expensesService.addExpense(payload, userId);
     res.status(201).json(ok(expense));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function payExpenseController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const payload = payExpenseSchema.parse(req.body);
+    const userId = req.user?.id;
+    const updated = await expensesService.payExpense(req.params.id, payload, userId);
+    res.status(200).json(ok(updated));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listOutstandingExpensesController(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const outstanding = await expensesService.listOutstandingExpenses(category);
+    res.status(200).json(ok(outstanding));
   } catch (err) {
     next(err);
   }

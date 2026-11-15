@@ -90,12 +90,16 @@ export interface InventoryValuationItem {
   id: string;
   product_name: string;
   code: string;
+  size?: string;
   category: string;
   current_stock_kg: number;
   stock_on_hand: number;
   current_wac: number;
   asset_value: number;
   total_asset_value: number;
+  low_stock_threshold?: number;
+  is_low_stock?: boolean;
+  deficit_kg?: number;
   buckets: FifoBucketItem[];
   lifetime_kg_sold: number;
   lifetime_kg_acquired: number;

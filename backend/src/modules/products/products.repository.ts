@@ -7,6 +7,7 @@ export interface ProductRow {
   name: string;
   name_urdu?: string | null;
   size: string | null;
+  low_stock_threshold?: number;
   description: string | null;
   category_id: string;
   cost_price: number;
@@ -22,6 +23,7 @@ export interface ProductRow {
   updated_at: Date;
 }
 
+
 export interface ProductWithStock extends ProductRow {
   current_stock: number;
   category_name: string;
@@ -36,16 +38,22 @@ export interface ProductWithStock extends ProductRow {
 export async function generateProductCode(): Promise<string> {
   const result = await db('products')
     .whereILike('code', 'PROD-%')
-    .max('code as max_code')
-    .first<{ max_code: string | null }>();
+    .select('code');
 
-  if (!result?.max_code) {
+  if (!result || result.length === 0) {
     return 'PROD-0001';
   }
 
-  const parts = result.max_code.split('-');
-  const num = parseInt(parts[1] ?? '0', 10);
-  const nextNum = isNaN(num) ? 1 : num + 1;
+  let maxNum = 0;
+  for (const row of result) {
+    const parts = (row.code || '').split('-');
+    const num = parseInt(parts[1] ?? '0', 10);
+    if (!isNaN(num) && num > maxNum) {
+      maxNum = num;
+    }
+  }
+
+  const nextNum = maxNum + 1;
   return `PROD-${String(nextNum).padStart(4, '0')}`;
 }
 
@@ -173,11 +181,16 @@ export async function createProduct(
   data: CreateProductInput,
   createdBy?: string | null,
 ): Promise<ProductWithStock> {
-  const code = (data.code && data.code.trim().length > 0)
-    ? data.code.trim()
+  const rawCode = (data as any).product_code || data.code;
+  const code = (rawCode && String(rawCode).trim().length > 0)
+    ? String(rawCode).trim()
     : await generateProductCode();
-  const initialStock = data.opening_stock || 0;
-  const initialCost = data.cost_price || 0;
+  const initialStock = data.opening_stock_kg !== undefined
+    ? Number(data.opening_stock_kg)
+    : Number(data.opening_stock || 0);
+  const initialCost = data.historical_wac !== undefined
+    ? Number(data.historical_wac)
+    : Number(data.cost_price || 0);
   const fixedPrice = data.fixed_retail_price_per_kg || data.sale_price || 0;
 
   // Retrieve category name to satisfy products.category NOT NULL string constraint
@@ -188,7 +201,8 @@ export async function createProduct(
     code,
     name: data.name,
     name_urdu: data.name_urdu ?? null,
-    size: data.size ?? null,
+    size: (data.size && data.size.trim().length > 0) ? data.size.trim() : 'Standard',
+    low_stock_threshold: data.low_stock_threshold !== undefined ? Number(data.low_stock_threshold) : 0,
     description: data.description ?? null,
     category_id: data.category_id,
     category: categoryName,
@@ -206,17 +220,20 @@ export async function createProduct(
     .insert(insertPayload)
     .returning('*');
 
+  // Day Zero FIFO Bucket & Valuation (Bypasses purchase_invoices and accounts_payable)
   if (initialStock > 0) {
     const hasBatches = await db.schema.hasTable('inventory_batches');
     if (hasBatches) {
       const batchNum = `PB-INIT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       await db('inventory_batches').insert({
         product_id: row.id,
+        purchase_invoice_id: null,
         batch_number: batchNum,
         batch_buy_price_per_kg: initialCost,
         original_qty: initialStock,
         remaining_qty: initialStock,
         status: 'ACTIVE',
+        size: row.size || 'Standard',
       });
     }
 
@@ -229,7 +246,7 @@ export async function createProduct(
         unit_cost: initialCost,
         total_asset_value: initialStock * initialCost,
         capital_equity_value: initialStock * initialCost,
-        notes: 'Initial opening stock on product creation',
+        notes: 'Day Zero initial opening stock / Capital Equity (Owner Paid)',
         created_by: createdBy || null,
       });
     }

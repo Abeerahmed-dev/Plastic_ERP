@@ -113,9 +113,9 @@ export default function CategoriesPage() {
         </div>
         <button
           onClick={openAddModal}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 transition cursor-pointer"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-4 w-4 text-slate-950" />
           Add Category
         </button>
       </div>
@@ -261,9 +261,9 @@ export default function CategoriesPage() {
                 <button
                   type="submit"
                   disabled={saveMutation.isPending}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm transition disabled:opacity-50 flex items-center gap-2"
+                  className="px-5 py-2 text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition disabled:opacity-50 flex items-center gap-2 cursor-pointer"
                 >
-                  {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-slate-950" />}
                   {saveMutation.isPending ? 'Saving...' : 'Save Category'}
                 </button>
               </div>

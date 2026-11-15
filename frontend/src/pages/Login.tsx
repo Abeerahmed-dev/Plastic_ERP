@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation } from '@tanstack/react-query';
-import { Lock, Mail, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../services/auth.service';
 import { useAuthStore } from '../store/auth.store';
 import type { LoginRequest } from '../types/auth.types';
@@ -17,11 +17,18 @@ const loginSchema = z.object({
 
 export const Login = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const setAuth = useAuthStore((state) => state.setAuth);
+  const { isAuthenticated, user, setAuth } = useAuthStore();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const from = location.state?.from?.pathname || '/dashboard';
+  // If already authenticated, redirect straight to role's designated landing page
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      const role = (user?.roleName || user?.role || '').toUpperCase();
+      const defaultDest = role === 'CASHIER' ? '/pos' : role === 'ACCOUNTANT' ? '/customers' : '/dashboard';
+      navigate(defaultDest, { replace: true });
+    }
+  }, [isAuthenticated, user, navigate]);
 
   const {
     register,
@@ -35,7 +42,9 @@ export const Login = () => {
     mutationFn: authService.login,
     onSuccess: (data) => {
       setAuth(data.user, data.access_token, data.refresh_token);
-      navigate(from, { replace: true });
+      const role = (data.user?.roleName || data.user?.role || '').toUpperCase();
+      const defaultDest = role === 'CASHIER' ? '/pos' : role === 'ACCOUNTANT' ? '/customers' : '/dashboard';
+      navigate(defaultDest, { replace: true });
     },
     onError: (error: import('axios').AxiosError<{message: string}>) => {
       setServerError(
@@ -50,90 +59,105 @@ export const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
-      {/* Decorative background elements */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden -z-10">
-        <div className="absolute -top-[30%] -right-[10%] w-[70%] h-[70%] rounded-full bg-blue-400/20 blur-[120px]" />
-        <div className="absolute -bottom-[30%] -left-[10%] w-[70%] h-[70%] rounded-full bg-indigo-400/20 blur-[120px]" />
+    <div className="relative min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8 overflow-hidden bg-slate-950">
+      {/* Decorative ambient glowing gradient orbs (Pure lightweight CSS) */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[20%] -left-[10%] w-[55vw] h-[55vw] rounded-full bg-gradient-to-br from-blue-600/25 to-indigo-600/10 blur-[130px]" />
+        <div className="absolute -bottom-[20%] -right-[10%] w-[60vw] h-[60vw] rounded-full bg-gradient-to-tl from-purple-600/20 via-indigo-500/15 to-transparent blur-[140px]" />
+        <div className="absolute top-[35%] left-[25%] w-[40vw] h-[40vw] rounded-full bg-blue-500/10 blur-[120px]" />
       </div>
 
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+      <div className="relative z-10 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
           <img
             src={sabirLogo}
             alt="Sabir Plastic"
-            className="h-20 w-auto object-contain drop-shadow-md"
+            className="h-20 w-auto object-contain drop-shadow-2xl filter brightness-110"
           />
         </div>
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900 tracking-tight">
+        <h2 className="mt-4 text-center text-3xl font-extrabold text-white tracking-tight drop-shadow-lg">
           Sabir Plastic Store
         </h2>
-        <p className="mt-2 text-center text-sm text-slate-500">
+        <p className="mt-2 text-center text-sm text-slate-300 drop-shadow">
           Sign in to access your dashboard
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white/80 backdrop-blur-xl py-8 px-4 shadow-2xl sm:rounded-3xl sm:px-10 border border-white/50">
+      <div className="relative z-10 mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        {/* Glass Mirror Card */}
+        <div className="bg-white/[0.12] backdrop-blur-2xl py-8 px-4 shadow-[0_16px_40px_rgba(0,0,0,0.5)] sm:rounded-3xl sm:px-10 border border-white/30 ring-1 ring-white/20">
           <form className="space-y-6" onSubmit={handleSubmit(onSubmit)}>
             {serverError && (
-              <div className="p-4 rounded-xl bg-red-50 border border-red-100 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">{serverError}</p>
+              <div className="p-4 rounded-xl bg-red-500/20 border border-red-400/40 backdrop-blur-md flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-300 shrink-0 mt-0.5" />
+                <p className="text-sm font-medium text-red-100">{serverError}</p>
               </div>
             )}
 
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-slate-700 mb-1"
+                className="block text-sm font-semibold text-white/90 drop-shadow mb-1.5"
               >
                 Email address
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-slate-400" aria-hidden="true" />
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Mail className="h-5 w-5 text-white/60" aria-hidden="true" />
                 </div>
                 <input
                   id="email"
                   type="email"
                   autoComplete="email"
-                  className={`block w-full pl-10 pr-3 py-2.5 border ${
-                    errors.email ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                  } rounded-xl bg-white/50 focus:bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 sm:text-sm transition-colors duration-200`}
+                  className={`block w-full pl-10 pr-3.5 py-2.5 border ${
+                    errors.email ? 'border-red-400 focus:ring-red-400' : 'border-white/30 focus:border-white/80'
+                  } rounded-xl bg-white/15 focus:bg-white/25 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-md sm:text-sm transition-all duration-200`}
                   placeholder="admin@sabirplastic.com"
                   {...register('email')}
                 />
               </div>
               {errors.email && (
-                <p className="mt-1 text-sm text-red-500">{errors.email.message}</p>
+                <p className="mt-1 text-xs font-medium text-red-300">{errors.email.message}</p>
               )}
             </div>
 
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-slate-700 mb-1"
+                className="block text-sm font-semibold text-white/90 drop-shadow mb-1.5"
               >
                 Password
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-slate-400" aria-hidden="true" />
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Lock className="h-5 w-5 text-white/60" aria-hidden="true" />
                 </div>
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
-                  className={`block w-full pl-10 pr-3 py-2.5 border ${
-                    errors.password ? 'border-red-300 focus:ring-red-500 focus:border-red-500' : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500'
-                  } rounded-xl bg-white/50 focus:bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 sm:text-sm transition-colors duration-200`}
+                  className={`block w-full pl-10 pr-11 py-2.5 border ${
+                    errors.password ? 'border-red-400 focus:ring-red-400' : 'border-white/30 focus:border-white/80'
+                  } rounded-xl bg-white/15 focus:bg-white/25 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/40 backdrop-blur-md sm:text-sm transition-all duration-200`}
                   placeholder="••••••••"
                   {...register('password')}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-white/60 hover:text-white transition-colors cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-5 w-5" aria-hidden="true" />
+                  ) : (
+                    <Eye className="h-5 w-5" aria-hidden="true" />
+                  )}
+                </button>
               </div>
               {errors.password && (
-                <p className="mt-1 text-sm text-red-500">{errors.password.message}</p>
+                <p className="mt-1 text-xs font-medium text-red-300">{errors.password.message}</p>
               )}
             </div>
 
@@ -143,23 +167,23 @@ export const Login = () => {
                   id="remember-me"
                   name="remember-me"
                   type="checkbox"
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded cursor-pointer"
+                  className="h-4 w-4 text-blue-500 focus:ring-blue-400 border-white/40 bg-white/20 rounded cursor-pointer"
                 />
                 <label
                   htmlFor="remember-me"
-                  className="ml-2 block text-sm text-slate-700 cursor-pointer"
+                  className="ml-2 block text-sm font-medium text-white/90 cursor-pointer drop-shadow"
                 >
                   Remember me
                 </label>
               </div>
 
               <div className="text-sm">
-                <a
-                  href="#"
-                  className="font-medium text-blue-600 hover:text-blue-500 transition-colors"
+                <Link
+                  to="/forgot-password"
+                  className="font-medium text-blue-300 hover:text-white transition-colors drop-shadow cursor-pointer"
                 >
                   Forgot your password?
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -167,11 +191,11 @@ export const Login = () => {
               <button
                 type="submit"
                 disabled={loginMutation.isPending}
-                className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0"
+                className="w-full flex justify-center items-center py-2.5 px-4 border border-amber-300/40 rounded-xl shadow-lg text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-400/50 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0 cursor-pointer shadow-amber-500/25"
               >
                 {loginMutation.isPending ? (
                   <>
-                    <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" />
+                    <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5 text-slate-950" />
                     Signing in...
                   </>
                 ) : (

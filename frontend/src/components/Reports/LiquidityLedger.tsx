@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Wallet, Building2, Clock, TrendingUp, DollarSign,
-  Boxes, CreditCard, ExternalLink, X, ShoppingCart,
+  Boxes, CreditCard, ExternalLink, X, ArrowRightLeft, ShoppingCart,
 } from 'lucide-react';
 import { useReportStore } from '../../store/useReportStore';
 import api from '../../services/api';
@@ -10,9 +10,10 @@ import { CashBookModal } from './CashBookModal';
 import { PdcLedgerModal } from './PdcLedgerModal';
 import { IssuedPdcLedgerModal } from './IssuedPdcLedgerModal';
 import { BankAccountsModal } from './BankAccountsModal';
+import { TransferFundsModal } from '../Modals/TransferFundsModal';
 
 interface LiquidityModalData {
-  type: 'receivables' | 'payables' | 'unsold-stock';
+  type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances' | 'pending-expenses';
   title: string;
   items: any[];
 }
@@ -40,16 +41,26 @@ export function LiquidityLedger() {
   const [isPdcModalOpen, setIsPdcModalOpen] = useState(false);
   const [isIssuedPdcModalOpen, setIsIssuedPdcModalOpen] = useState(false);
   const [isBankAccountsModalOpen, setIsBankAccountsModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
 
   useEffect(() => {
     fetchAllReports();
     const interval = setInterval(() => {
-      useReportStore.getState().fetchLiquidityLedger();
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [fetchAllReports]);
+      useReportStore.getState().fetchAllReports(true);
+    }, 5000);
 
-  const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc') => {
+    const handleFocus = () => {
+      useReportStore.getState().fetchAllReports(true);
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const openLiquidityModal = async (type: 'receivables' | 'payables' | 'unsold-stock' | 'pdc' | 'customer-advances' | 'supplier-advances' | 'pending-expenses') => {
     if (type === 'pdc') {
       setIsPdcModalOpen(true);
       return;
@@ -65,15 +76,24 @@ export function LiquidityLedger() {
     } else if (type === 'payables') {
       title = 'Accounts Payable Detail (Money Owed to Parties)';
       endpoint = '/reports/liquidity/payables';
+    } else if (type === 'pending-expenses') {
+      title = 'Pending OPEX Liability Detail (Unpaid Operational Expenses)';
+      endpoint = '/reports/liquidity/pending-expenses';
     } else if (type === 'unsold-stock') {
       title = 'Unsold Warehouse Stock Asset Detail';
       endpoint = '/reports/liquidity/unsold-stock';
+    } else if (type === 'customer-advances') {
+      title = 'Customer Overpayment Advances (Unallocated Wallet Liability Detail)';
+      endpoint = '/reports/liquidity/customer-advances';
+    } else if (type === 'supplier-advances') {
+      title = 'Supplier Prepaid Advances (Prepaid Cash Asset Detail)';
+      endpoint = '/reports/liquidity/supplier-advances';
     }
 
     try {
       const response = await api.get(endpoint);
       setModalData({
-        type: type as 'receivables' | 'payables' | 'unsold-stock',
+        type: type as any,
         title,
         items: response.data.data || [],
       });
@@ -86,54 +106,55 @@ export function LiquidityLedger() {
 
   return (
     <>
-      <div className="rounded-2xl sm:rounded-3xl border border-slate-300/80 bg-white p-5 sm:p-6 shadow-[0_20px_50px_rgba(15,23,42,0.30),0_8px_20px_rgba(15,23,42,0.18)] space-y-4">
+      <div className="rounded-2xl sm:rounded-3xl border border-slate-300/80 bg-white p-5 sm:p-6 shadow-[0_20px_50px_rgba(15,23,42,0.30),0_8px_20px_rgba(15,23,42,0.18)] space-y-4 dark:bg-[#121520] dark:border-[#23283B] dark:shadow-[0_20px_50px_rgba(0,0,0,0.6)]">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200/60 shadow-xs">
-              <Wallet className="w-5 h-5 text-emerald-600" />
+            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200/60 shadow-xs dark:bg-emerald-950/40 dark:border-emerald-500/80 dark:text-emerald-400 dark:shadow-[0_0_15px_rgba(52,211,153,0.35)]">
+              <Wallet className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight leading-snug">
+              <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight leading-snug">
                 Liquidity &amp; Working Capital
               </h2>
-              <p className="text-xs text-slate-500 font-medium">
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                 Click cards to drill down
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            {isLoadingLiquidity && (
-              <span className="text-xs text-blue-600 animate-pulse font-medium">Loading...</span>
-            )}
-            <Link
-              to="/pos"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md hover:shadow-lg transition-all active:scale-95 border border-amber-500/30"
-              title="Open Walk-in POS"
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsTransferModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-xs font-bold transition shadow-md shadow-amber-500/20 active:scale-95 shrink-0 cursor-pointer dark:from-transparent dark:via-transparent dark:to-transparent dark:bg-amber-950/30 dark:border dark:border-amber-500/80 dark:text-amber-400 dark:shadow-[0_0_15px_rgba(245,158,11,0.25)] hover:dark:bg-amber-900/40"
+              title="Move funds between Bank Accounts and Cash Drawer"
             >
-              <ShoppingCart className="w-4 h-4 text-slate-950" />
-              <span>Walk-in POS</span>
-            </Link>
+              <ArrowRightLeft className="w-3.5 h-3.5 text-slate-950 dark:text-amber-400" />
+              Transfer Funds
+            </button>
+            {isLoadingLiquidity && (
+              <span className="text-xs text-blue-600 dark:text-blue-400 animate-pulse font-medium">Loading...</span>
+            )}
           </div>
         </div>
 
-        {/* 7 Grid Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-2 sm:gap-2.5 w-full min-w-0">
+        {/* 10 Grid Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-10 gap-2 sm:gap-2.5 w-full min-w-0">
           {/* Card 1: Cash in Drawer */}
           <button
             onClick={() => setIsCashBookOpen(true)}
-            className="w-full text-left rounded-xl border border-slate-300 bg-[#f1f5f9] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-slate-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            className="w-full text-left rounded-xl border border-slate-300 bg-[#f1f5f9] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-slate-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#0c1b2b] dark:border-sky-400 dark:shadow-[0_0_14px_rgba(56,189,248,0.45)] hover:dark:shadow-[0_0_20px_rgba(56,189,248,0.7)]"
             title={`Cash in Drawer: ${formatPKR(liquidityLedger?.cash_drawer)} (Click to audit)`}
           >
-            <div className="flex items-center justify-between text-slate-700 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-slate-700 min-w-0 dark:text-sky-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-sky-400">
                 CASH IN DRAWER
                 <ExternalLink className="w-2.5 h-2.5 shrink-0" />
               </span>
-              <DollarSign className="h-3.5 w-3.5 text-slate-600 shrink-0 ml-1" />
+              <DollarSign className="h-3.5 w-3.5 text-slate-600 shrink-0 ml-1 dark:text-sky-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-slate-900 tabular-nums leading-tight truncate"
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-slate-900 tabular-nums leading-tight truncate dark:text-sky-300"
               title={formatPKR(liquidityLedger?.cash_drawer)}
             >
               {formatPKR(liquidityLedger?.cash_drawer)}
@@ -144,18 +165,18 @@ export function LiquidityLedger() {
           <button
             type="button"
             onClick={() => setIsBankAccountsModalOpen(true)}
-            className="w-full text-left rounded-xl border border-emerald-300 bg-[#eefaf4] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-emerald-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            className="w-full text-left rounded-xl border border-emerald-300 bg-[#eefaf4] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-emerald-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#092218] dark:border-emerald-400 dark:shadow-[0_0_14px_rgba(52,211,153,0.45)] hover:dark:shadow-[0_0_20px_rgba(52,211,153,0.7)]"
             title={`Bank Balances: ${formatPKR(liquidityLedger?.bank_balances)} (Click to open accounts)`}
           >
-            <div className="flex items-center justify-between text-emerald-800 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-emerald-800 min-w-0 dark:text-emerald-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-emerald-400">
                 BANK BALANCES
                 <ExternalLink className="w-2.5 h-2.5 shrink-0" />
               </span>
-              <Building2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 ml-1" />
+              <Building2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 ml-1 dark:text-emerald-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-emerald-800 tabular-nums leading-tight truncate"
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-emerald-800 tabular-nums leading-tight truncate dark:text-emerald-300"
               title={formatPKR(liquidityLedger?.bank_balances)}
             >
               {formatPKR(liquidityLedger?.bank_balances)}
@@ -167,17 +188,17 @@ export function LiquidityLedger() {
             type="button"
             onClick={() => openLiquidityModal('pdc')}
             title={`Pending PDC Receivable: ${formatPKR(liquidityLedger?.post_dated_cheques)} (Click to view)`}
-            className="w-full text-left rounded-xl border border-amber-300 bg-[#fffbeb] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-amber-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            className="w-full text-left rounded-xl border border-amber-300 bg-[#fffbeb] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-amber-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#201c08] dark:border-yellow-400 dark:shadow-[0_0_14px_rgba(250,204,21,0.45)] hover:dark:shadow-[0_0_20px_rgba(250,204,21,0.7)]"
           >
-            <div className="flex items-center justify-between text-amber-800 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-amber-800 min-w-0 dark:text-yellow-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-yellow-400">
                 PDC RECEIVABLE
-                <ExternalLink className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                <ExternalLink className="w-2.5 h-2.5 text-amber-600 dark:text-yellow-400 shrink-0" />
               </span>
-              <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0 ml-1" />
+              <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0 ml-1 dark:text-yellow-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-amber-800 tabular-nums leading-tight truncate"
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-amber-800 tabular-nums leading-tight truncate dark:text-yellow-300"
               title={formatPKR(liquidityLedger?.post_dated_cheques)}
             >
               {formatPKR(liquidityLedger?.post_dated_cheques)}
@@ -188,21 +209,59 @@ export function LiquidityLedger() {
           <button
             type="button"
             onClick={() => setIsIssuedPdcModalOpen(true)}
-            title={`Issued PDC Liability: ${formatPKR(liquidityLedger?.post_dated_cheques)} (Click to view)`}
-            className="w-full text-left rounded-xl border border-rose-300 bg-[#fff1f2] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            title={`Issued PDC Liability: ${formatPKR(liquidityLedger?.issued_post_dated_cheques)} (Click to view)`}
+            className="w-full text-left rounded-xl border border-rose-300 bg-[#fff1f2] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#25101a] dark:border-pink-400/90 dark:shadow-[0_0_14px_rgba(244,114,182,0.4)] hover:dark:shadow-[0_0_20px_rgba(244,114,182,0.65)]"
           >
-            <div className="flex items-center justify-between text-rose-800 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-rose-800 min-w-0 dark:text-pink-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-pink-400">
                 PDC LIABILITY
-                <ExternalLink className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                <ExternalLink className="w-2.5 h-2.5 text-rose-600 dark:text-pink-400 shrink-0" />
               </span>
-              <Clock className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1" />
+              <Clock className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1 dark:text-pink-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-800 tabular-nums leading-tight truncate"
-              title={formatPKR(liquidityLedger?.post_dated_cheques)}
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-800 tabular-nums leading-tight truncate dark:text-pink-300"
+              title={formatPKR(liquidityLedger?.issued_post_dated_cheques)}
             >
-              {formatPKR(liquidityLedger?.post_dated_cheques)}
+              {formatPKR(liquidityLedger?.issued_post_dated_cheques)}
+            </p>
+          </button>
+
+          {/* Card 3C: Customer Advances Liability */}
+          <button
+            type="button"
+            onClick={() => openLiquidityModal('customer-advances')}
+            title="Click to view customer advance breakdown →"
+            className="w-full text-left rounded-xl border border-amber-300 bg-amber-100/60 p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-amber-400 cursor-pointer transition-all shadow-2xs active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#23170a] dark:border-amber-500 dark:shadow-[0_0_14px_rgba(245,158,11,0.4)] hover:dark:shadow-[0_0_20px_rgba(245,158,11,0.65)]"
+          >
+            <div className="flex items-center justify-between text-amber-900 min-w-0 dark:text-amber-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-amber-400">
+                CUST. ADVANCES
+                <ExternalLink className="w-2.5 h-2.5 text-amber-800 dark:text-amber-400 shrink-0" />
+              </span>
+              <Wallet className="h-3.5 w-3.5 text-amber-700 shrink-0 ml-1 dark:text-amber-400" />
+            </div>
+            <p className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-amber-900 tabular-nums leading-tight truncate dark:text-amber-300">
+              {formatPKR(liquidityLedger?.customer_advances_liability)}
+            </p>
+          </button>
+
+          {/* Card 3D: Supplier Advances Asset */}
+          <button
+            type="button"
+            onClick={() => openLiquidityModal('supplier-advances')}
+            title="Click to view supplier advance breakdown →"
+            className="w-full text-left rounded-xl border border-teal-300 bg-teal-100/60 p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-teal-400 cursor-pointer transition-all shadow-2xs active:scale-[0.98] min-w-0 overflow-hidden dark:bg-gradient-to-b dark:from-cyan-900/40 dark:to-cyan-950/70 dark:border-cyan-400 dark:shadow-[0_0_14px_rgba(34,211,238,0.4)] hover:dark:shadow-[0_0_20px_rgba(34,211,238,0.65)]"
+          >
+            <div className="flex items-center justify-between text-teal-900 min-w-0 dark:text-cyan-300">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-cyan-300">
+                SUPP. ADVANCES
+                <ExternalLink className="w-2.5 h-2.5 text-teal-800 dark:text-cyan-300 shrink-0" />
+              </span>
+              <Wallet className="h-3.5 w-3.5 text-teal-700 shrink-0 ml-1 dark:text-cyan-400" />
+            </div>
+            <p className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-teal-900 tabular-nums leading-tight truncate dark:text-cyan-300">
+              {formatPKR(liquidityLedger?.supplier_advances_asset)}
             </p>
           </button>
 
@@ -210,17 +269,17 @@ export function LiquidityLedger() {
           <button
             onClick={() => openLiquidityModal('receivables')}
             title={`Market Receivables (Udhaar): ${formatPKR(liquidityLedger?.market_receivables)} (Click to view)`}
-            className="w-full text-left rounded-xl border border-rose-300 bg-[#fff1f2] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            className="w-full text-left rounded-xl border border-rose-300 bg-[#fff1f2] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#220c0f] dark:border-red-600/90 dark:shadow-[0_0_14px_rgba(239,68,68,0.4)] hover:dark:shadow-[0_0_20px_rgba(239,68,68,0.65)]"
           >
-            <div className="flex items-center justify-between text-rose-800 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-rose-800 min-w-0 dark:text-red-400">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-red-400">
                 RECEIVABLES (UDHAAR)
                 <ExternalLink className="w-2.5 h-2.5 shrink-0" />
               </span>
-              <TrendingUp className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1" />
+              <TrendingUp className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1 dark:text-red-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-800 tabular-nums leading-tight truncate"
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-800 tabular-nums leading-tight truncate dark:text-red-400"
               title={formatPKR(liquidityLedger?.market_receivables)}
             >
               {formatPKR(liquidityLedger?.market_receivables)}
@@ -231,17 +290,17 @@ export function LiquidityLedger() {
           <button
             onClick={() => openLiquidityModal('unsold-stock')}
             title={`Unsold Stock Value: ${formatPKR(liquidityLedger?.total_inventory_value)} (Click to view)`}
-            className="w-full text-left rounded-xl border border-blue-300 bg-[#eff6ff] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-blue-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            className="w-full text-left rounded-xl border border-blue-300 bg-[#eff6ff] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-blue-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#1a0f2b] dark:border-purple-500 dark:shadow-[0_0_14px_rgba(168,85,247,0.45)] hover:dark:shadow-[0_0_20px_rgba(168,85,247,0.7)]"
           >
-            <div className="flex items-center justify-between text-blue-800 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-blue-800 min-w-0 dark:text-purple-300">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-purple-300">
                 UNSOLD STOCK
                 <ExternalLink className="w-2.5 h-2.5 shrink-0" />
               </span>
-              <Boxes className="h-3.5 w-3.5 text-blue-600 shrink-0 ml-1" />
+              <Boxes className="h-3.5 w-3.5 text-blue-600 shrink-0 ml-1 dark:text-purple-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-blue-800 tabular-nums leading-tight truncate"
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-blue-800 tabular-nums leading-tight truncate dark:text-purple-300"
               title={formatPKR(liquidityLedger?.total_inventory_value)}
             >
               {formatPKR(liquidityLedger?.total_inventory_value)}
@@ -252,33 +311,75 @@ export function LiquidityLedger() {
           <button
             onClick={() => openLiquidityModal('payables')}
             title={`Accounts Payable: ${formatPKR(liquidityLedger?.total_accounts_payable)} (Click to view)`}
-            className="w-full text-left rounded-xl border border-rose-300 bg-[#ffe4e6] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-500 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden"
+            className="w-full text-left rounded-xl border border-rose-300 bg-[#ffe4e6] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-500 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-gradient-to-br dark:from-rose-950/60 dark:via-[#2b0c18] dark:to-rose-900/40 dark:border-rose-500 dark:shadow-[0_0_16px_rgba(244,63,94,0.5)] hover:dark:shadow-[0_0_22px_rgba(244,63,94,0.7)]"
           >
-            <div className="flex items-center justify-between text-rose-900 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate">
+            <div className="flex items-center justify-between text-rose-900 min-w-0 dark:text-rose-300">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-rose-300">
                 ACCTS PAYABLE
                 <ExternalLink className="w-2.5 h-2.5 shrink-0" />
               </span>
-              <CreditCard className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1" />
+              <CreditCard className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1 dark:text-rose-400" />
             </div>
             <p
-              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-900 tabular-nums leading-tight truncate"
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-900 tabular-nums leading-tight truncate dark:text-rose-400"
               title={formatPKR(liquidityLedger?.total_accounts_payable)}
             >
               {formatPKR(liquidityLedger?.total_accounts_payable)}
             </p>
+            {Number(liquidityLedger?.pending_expenses_liability || 0) > 0 && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openLiquidityModal('pending-expenses');
+                }}
+                className="text-[9px] font-bold text-rose-700 dark:text-rose-300 block truncate hover:underline"
+                title="Click to view pending OPEX detail"
+              >
+                + {formatPKR(liquidityLedger?.pending_expenses_liability)} OPEX
+              </span>
+            )}
+          </button>
+
+          {/* Card 7: Pending OPEX Liability */}
+          <button
+            type="button"
+            onClick={() => openLiquidityModal('pending-expenses')}
+            title={`Pending OPEX Liability: ${formatPKR(liquidityLedger?.pending_expenses_liability)} (Click to view)`}
+            className="w-full text-left rounded-xl border border-rose-300 bg-[#fff1f2] p-2.5 sm:p-3 space-y-1 hover:ring-2 hover:ring-rose-400 cursor-pointer transition-all shadow-2xs hover:shadow-sm active:scale-[0.98] min-w-0 overflow-hidden dark:bg-[#25101a] dark:border-rose-400/90 dark:shadow-[0_0_14px_rgba(244,63,94,0.4)] hover:dark:shadow-[0_0_20px_rgba(244,63,94,0.65)]"
+          >
+            <div className="flex items-center justify-between text-rose-800 min-w-0 dark:text-rose-300">
+              <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 truncate dark:text-rose-300">
+                PENDING OPEX
+                <ExternalLink className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400 shrink-0" />
+              </span>
+              <DollarSign className="h-3.5 w-3.5 text-rose-600 shrink-0 ml-1 dark:text-rose-400" />
+            </div>
+            <p
+              className="text-xs sm:text-sm xl:text-[13px] 2xl:text-sm font-extrabold text-rose-800 tabular-nums leading-tight truncate dark:text-rose-300"
+              title={formatPKR(liquidityLedger?.pending_expenses_liability)}
+            >
+              {formatPKR(liquidityLedger?.pending_expenses_liability)}
+            </p>
+            <span className="text-[9px] font-medium text-rose-600 dark:text-rose-400/80 block truncate">
+              Unpaid expenses
+            </span>
           </button>
         </div>
 
         {/* Footer Net Business Capital Bar */}
-        <div className="px-5 py-3 rounded-2xl bg-[#14323c] text-white flex flex-wrap items-center justify-between gap-3 text-xs shadow-inner">
+        <div className="px-5 py-3 rounded-2xl bg-[#14323c] text-white flex flex-wrap items-center justify-between gap-3 text-xs shadow-inner dark:bg-[#0c2229] dark:border dark:border-teal-500/30 dark:shadow-[0_0_15px_rgba(20,184,166,0.15)]">
           <div className="flex items-center gap-2">
-            <span className="text-slate-300 font-medium">Liquid (Cash + Bank)</span>
+            <span className="text-slate-300 dark:text-slate-400 font-medium">Liquid (Cash + Bank)</span>
             <span className="font-mono font-bold text-emerald-400 text-sm">{formatPKR(liquidityLedger?.total_liquid)}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-slate-300 font-medium">Net Capital:</span>
-            <span className="font-black text-base text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
+          <div className="flex flex-col sm:items-end">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-300 dark:text-slate-400 font-medium">Net Capital:</span>
+              <span className="font-black text-base text-white">{formatPKR(liquidityLedger?.net_business_capital)}</span>
+            </div>
+            <span className="text-[10px] text-teal-200/80 dark:text-teal-400/80 font-mono">
+              (Liquid + Udhaar + Stock + Sup Adv + Rec PDC) - (Payables + Cust Adv + Iss PDC) - Pending OPEX
+            </span>
           </div>
         </div>
       </div>
@@ -286,15 +387,15 @@ export function LiquidityLedger() {
       {/* ─── Detail Drill-Down Modal ─── */}
       {modalData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col my-auto max-h-[85vh] overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col my-auto max-h-[85vh] overflow-hidden dark:bg-[#121520] dark:border dark:border-[#23283B]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 dark:bg-[#0F111A] dark:border-[#23283B]">
               <div>
-                <h3 className="text-base font-bold text-slate-900">{modalData.title}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">{modalData.items.length} Records Found</p>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">{modalData.title}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{modalData.items.length} Records Found</p>
               </div>
               <button
                 onClick={() => setModalData(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition"
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 dark:hover:text-white rounded-lg transition"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -310,11 +411,11 @@ export function LiquidityLedger() {
                   No entities found for this ledger query.
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#23283B]">
                   <table className="w-full text-sm text-left">
                     {modalData.type === 'receivables' && (
                       <>
-                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200">
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
                           <tr>
                             <th className="py-3 px-4">Customer Name &amp; Code</th>
                             <th className="py-3 px-4">Phone / Location</th>
@@ -323,10 +424,10 @@ export function LiquidityLedger() {
                             <th className="py-3 px-4 text-right">Total Owed (PKR)</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] dark:text-slate-200">
                           {modalData.items.map((row: any) => (
-                            <tr key={row.customer_id} className="hover:bg-slate-50/70">
-                              <td className="py-3 px-4 font-semibold text-slate-900">
+                            <tr key={row.customer_id} className="hover:bg-slate-50/70 dark:hover:bg-[#1A1E2E]">
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
                                 {row.name}
                                 <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
                               </td>
@@ -345,7 +446,7 @@ export function LiquidityLedger() {
 
                     {modalData.type === 'payables' && (
                       <>
-                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200">
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
                           <tr>
                             <th className="py-3 px-4">Party Name &amp; Code</th>
                             <th className="py-3 px-4">Phone / Location</th>
@@ -354,10 +455,10 @@ export function LiquidityLedger() {
                             <th className="py-3 px-4 text-right">Total Owed (PKR)</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] dark:text-slate-200">
                           {modalData.items.map((row: any) => (
-                            <tr key={row.supplier_id} className="hover:bg-slate-50/70">
-                              <td className="py-3 px-4 font-semibold text-slate-900">
+                            <tr key={row.supplier_id} className="hover:bg-slate-50/70 dark:hover:bg-[#1A1E2E]">
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
                                 {row.name}
                                 <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
                               </td>
@@ -376,7 +477,7 @@ export function LiquidityLedger() {
 
                     {modalData.type === 'unsold-stock' && (
                       <>
-                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200">
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
                           <tr>
                             <th className="py-3 px-4">Product Name &amp; Code</th>
                             <th className="py-3 px-4">Category</th>
@@ -385,10 +486,10 @@ export function LiquidityLedger() {
                             <th className="py-3 px-4 text-right">Total Asset Value (PKR)</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] dark:text-slate-200">
                           {modalData.items.map((row: any) => (
-                            <tr key={row.product_id} className="hover:bg-slate-50/70">
-                              <td className="py-3 px-4 font-semibold text-slate-900">
+                            <tr key={row.product_id} className="hover:bg-slate-50/70 dark:hover:bg-[#1A1E2E]">
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
                                 {row.name}
                                 <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
                               </td>
@@ -403,15 +504,116 @@ export function LiquidityLedger() {
                         </tbody>
                       </>
                     )}
+
+                    {modalData.type === 'customer-advances' && (
+                      <>
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
+                          <tr>
+                            <th className="py-3 px-4">Customer Name &amp; Code</th>
+                            <th className="py-3 px-4">Phone / Location</th>
+                            <th className="py-3 px-4 text-right">Total Billed</th>
+                            <th className="py-3 px-4 text-right">Total Paid</th>
+                            <th className="py-3 px-4 text-right">Unallocated Advance (Rs)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] dark:text-slate-200">
+                          {modalData.items.map((row: any) => (
+                            <tr key={row.customer_id} className="hover:bg-slate-50/70 dark:hover:bg-[#1A1E2E]">
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
+                                {row.name}
+                                <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 text-xs">
+                                <div>{row.phone}</div>
+                                <div className="text-slate-400">{row.city}</div>
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_billed)}</td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_paid)}</td>
+                              <td className="py-3 px-4 text-right font-bold text-amber-600 font-mono">{formatPKR(row.advance_credit)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {modalData.type === 'supplier-advances' && (
+                      <>
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
+                          <tr>
+                            <th className="py-3 px-4">Supplier Name &amp; Code</th>
+                            <th className="py-3 px-4">Phone / Location</th>
+                            <th className="py-3 px-4 text-right">Total Billed</th>
+                            <th className="py-3 px-4 text-right">Total Paid</th>
+                            <th className="py-3 px-4 text-right">Prepaid Advance (Rs)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] dark:text-slate-200">
+                          {modalData.items.map((row: any) => (
+                            <tr key={row.supplier_id} className="hover:bg-slate-50/70 dark:hover:bg-[#1A1E2E]">
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
+                                {row.name}
+                                <span className="ml-1.5 text-xs text-slate-400 font-mono">({row.code})</span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 text-xs">
+                                <div>{row.phone}</div>
+                                <div className="text-slate-400">{row.city}</div>
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_billed)}</td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600">{formatPKR(row.total_paid)}</td>
+                              <td className="py-3 px-4 text-right font-bold text-teal-600 font-mono">{formatPKR(row.advance_payable)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
+
+                    {modalData.type === 'pending-expenses' && (
+                      <>
+                        <thead className="bg-slate-50 text-slate-600 uppercase text-xs font-semibold border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
+                          <tr>
+                            <th className="py-3 px-4">Expense Date</th>
+                            <th className="py-3 px-4">Category</th>
+                            <th className="py-3 px-4">Description / Notes</th>
+                            <th className="py-3 px-4 text-right">Total Amount</th>
+                            <th className="py-3 px-4 text-right">Paid</th>
+                            <th className="py-3 px-4 text-right">Pending Liability (PKR)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-[#23283B] dark:text-slate-200">
+                          {modalData.items.map((row: any) => (
+                            <tr key={row.id} className="hover:bg-slate-50/70 dark:hover:bg-[#1A1E2E]">
+                              <td className="py-3 px-4 font-mono text-xs text-slate-600 dark:text-slate-400">
+                                {new Date(row.expense_date).toLocaleDateString('en-PK')}
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">
+                                {row.category}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600 text-xs dark:text-slate-400">
+                                {row.description}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-slate-600 dark:text-slate-400">
+                                {formatPKR(row.amount)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                                {formatPKR(row.paid_amount)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-bold text-rose-600 font-mono">
+                                {formatPKR(row.remaining_amount)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </>
+                    )}
                   </table>
                 </div>
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end dark:bg-[#0F111A] dark:border-[#23283B]">
               <button
                 onClick={() => setModalData(null)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-semibold rounded-xl transition"
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-semibold rounded-xl transition dark:bg-[#1E2438] dark:border dark:border-[#2D3349] dark:text-slate-200 hover:dark:bg-[#28304a]"
               >
                 Close
               </button>
@@ -420,10 +622,42 @@ export function LiquidityLedger() {
         </div>
       )}
 
-      <CashBookModal isOpen={isCashBookOpen} onClose={() => setIsCashBookOpen(false)} />
-      <PdcLedgerModal isOpen={isPdcModalOpen} onClose={() => setIsPdcModalOpen(false)} />
-      <IssuedPdcLedgerModal isOpen={isIssuedPdcModalOpen} onClose={() => setIsIssuedPdcModalOpen(false)} />
-      <BankAccountsModal isOpen={isBankAccountsModalOpen} onClose={() => setIsBankAccountsModalOpen(false)} />
+      <CashBookModal
+        isOpen={isCashBookOpen}
+        onClose={() => {
+          setIsCashBookOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <PdcLedgerModal
+        isOpen={isPdcModalOpen}
+        onClose={() => {
+          setIsPdcModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <IssuedPdcLedgerModal
+        isOpen={isIssuedPdcModalOpen}
+        onClose={() => {
+          setIsIssuedPdcModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <BankAccountsModal
+        isOpen={isBankAccountsModalOpen}
+        onClose={() => {
+          setIsBankAccountsModalOpen(false);
+          fetchAllReports(true);
+        }}
+      />
+      <TransferFundsModal
+        isOpen={isTransferModalOpen}
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          fetchAllReports(true);
+        }}
+        onSuccess={() => fetchAllReports(true)}
+      />
     </>
   );
 }

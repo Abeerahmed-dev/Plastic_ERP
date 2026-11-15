@@ -33,3 +33,8 @@ frontend/coverage/
 
 # ─── TypeScript ────────────────────────────────────
 *.tsbuildinfo
+
+# ─── Cache & Dumps ─────────────────────────────────
+.vite/
+*.dump
+backups/*.dump

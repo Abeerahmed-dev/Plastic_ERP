@@ -87,20 +87,20 @@ export default function IncomeStatementPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 py-8 print:bg-white print:py-0">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#0A0B10] py-8 print:bg-white print:py-0">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
         {/* Sticky Header & Control Bar */}
-        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 p-4 shadow-sm print:hidden">
+        <div className="sticky top-0 z-20 bg-white/95 dark:bg-[#161925]/95 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-[#23283B] p-4 shadow-sm print:hidden">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-xs">
                 <FileText className="h-6 w-6" />
               </div>
               <div>
-                <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                   Income Statement (Profit & Loss)
                 </h1>
-                <p className="text-xs text-slate-500 font-medium">
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                   Financial Performance Report • Accrual & Cash Basis
                 </p>
               </div>
@@ -109,11 +109,11 @@ export default function IncomeStatementPage() {
             {/* Date Filters & Controls */}
             <div className="flex flex-wrap items-center gap-2">
               {/* Presets */}
-              <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs font-semibold">
+              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-[#0F111A] p-1 text-xs font-semibold">
                 <button
                   onClick={() => handlePreset('thisMonth')}
                   className={`px-3 py-1.5 rounded-lg transition ${
-                    activePreset === 'thisMonth' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    activePreset === 'thisMonth' ? 'bg-white dark:bg-[#161925] text-blue-700 dark:text-blue-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 hover:dark:text-white'
                   }`}
                 >
                   This Month
@@ -121,7 +121,7 @@ export default function IncomeStatementPage() {
                 <button
                   onClick={() => handlePreset('lastMonth')}
                   className={`px-3 py-1.5 rounded-lg transition ${
-                    activePreset === 'lastMonth' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    activePreset === 'lastMonth' ? 'bg-white dark:bg-[#161925] text-blue-700 dark:text-blue-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 hover:dark:text-white'
                   }`}
                 >
                   Last Month
@@ -129,7 +129,7 @@ export default function IncomeStatementPage() {
                 <button
                   onClick={() => handlePreset('thisYear')}
                   className={`px-3 py-1.5 rounded-lg transition ${
-                    activePreset === 'thisYear' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    activePreset === 'thisYear' ? 'bg-white dark:bg-[#161925] text-blue-700 dark:text-blue-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 hover:dark:text-white'
                   }`}
                 >
                   This Year
@@ -137,7 +137,7 @@ export default function IncomeStatementPage() {
               </div>
 
               {/* Date Inputs */}
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-[#121520] border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5">
                 <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
                 <input
                   type="date"
@@ -146,7 +146,7 @@ export default function IncomeStatementPage() {
                     setStartDate(e.target.value);
                     setActivePreset('custom');
                   }}
-                  className="bg-transparent text-xs font-medium text-slate-800 outline-none"
+                  className="bg-transparent text-xs font-medium text-slate-800 dark:text-white outline-none"
                 />
                 <span className="text-slate-400 text-xs">to</span>
                 <input
@@ -156,7 +156,7 @@ export default function IncomeStatementPage() {
                     setEndDate(e.target.value);
                     setActivePreset('custom');
                   }}
-                  className="bg-transparent text-xs font-medium text-slate-800 outline-none"
+                  className="bg-transparent text-xs font-medium text-slate-800 dark:text-white outline-none"
                 />
               </div>
 
@@ -164,7 +164,7 @@ export default function IncomeStatementPage() {
               <button
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="p-2 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded-xl transition"
+                className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 hover:dark:text-blue-400 hover:bg-slate-100 hover:dark:bg-slate-800 rounded-xl transition cursor-pointer"
                 title="Refresh Report Data"
               >
                 <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin text-blue-600' : ''}`} />
@@ -172,7 +172,7 @@ export default function IncomeStatementPage() {
 
               <button
                 onClick={handlePrint}
-                className="flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-bold text-white hover:bg-slate-800 active:scale-95 transition"
+                className="flex items-center gap-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 hover:dark:bg-slate-700 dark:border dark:border-slate-700 px-3.5 py-2 text-xs font-bold text-white active:scale-95 transition cursor-pointer"
               >
                 <Printer className="h-3.5 w-3.5" />
                 Print P&L
@@ -182,9 +182,9 @@ export default function IncomeStatementPage() {
         </div>
 
         {/* Printable P&L Statement Container */}
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden print:shadow-none print:border-none print:rounded-none">
+        <div className="bg-white dark:bg-[#161925] rounded-3xl border border-slate-200 dark:border-[#23283B] shadow-xl overflow-hidden print:shadow-none print:border-none print:rounded-none">
           {/* Statement Header */}
-          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 p-6 sm:p-8 text-white border-b border-slate-700">
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 dark:from-[#0e111a] dark:via-[#131726] dark:to-[#17162e] p-6 sm:p-8 text-white border-b border-slate-700 dark:border-[#23283B]">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="text-xs font-bold uppercase tracking-widest text-blue-400 block mb-1">
@@ -236,35 +236,35 @@ export default function IncomeStatementPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b-2 border-slate-300 text-xs font-extrabold text-slate-500 uppercase tracking-wider">
+                      <tr className="border-b-2 border-slate-300 dark:border-[#23283B] text-xs font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                         <th className="py-3 px-4">Line Item / Accounting Category</th>
                         <th className="py-3 px-4 text-right">Amount (PKR)</th>
                       </tr>
                     </thead>
-                    <tbody className="text-sm font-medium divide-y divide-slate-100">
+                    <tbody className="text-sm font-medium divide-y divide-slate-100 dark:divide-slate-800/60">
                       {/* ─── 1. REVENUE SECTION ──────────────────────── */}
                       <tr>
-                        <td colSpan={2} className="pt-6 pb-2 px-2 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                        <td colSpan={2} className="pt-6 pb-2 px-2 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-[#23283B]">
                           1. REVENUE & TURNOVER
                         </td>
                       </tr>
 
                       {/* Gross Sales */}
-                      <tr className="hover:bg-slate-50/70 transition">
-                        <td className="py-2.5 px-4 pl-6 text-slate-800 font-medium">
+                      <tr className="hover:bg-slate-50/70 hover:dark:bg-[#1a1f33] transition">
+                        <td className="py-2.5 px-4 pl-6 text-slate-800 dark:text-slate-200 font-medium">
                           Gross Wholesale & Walk-in Sales Subtotal
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-900 tabular-nums">
+                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
                           {formatMoney(statement.gross_sales)}
                         </td>
                       </tr>
 
                       {/* Delivery / Freight Charge Revenue */}
-                      <tr className="hover:bg-slate-50/70 transition">
-                        <td className="py-2.5 px-4 pl-6 text-slate-800 font-medium">
+                      <tr className="hover:bg-slate-50/70 hover:dark:bg-[#1a1f33] transition">
+                        <td className="py-2.5 px-4 pl-6 text-slate-800 dark:text-slate-200 font-medium">
                           Delivery & Freight Charge Revenue
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-900 tabular-nums">
+                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
                           {formatMoney(statement.delivery_revenue)}
                         </td>
                       </tr>
@@ -272,69 +272,69 @@ export default function IncomeStatementPage() {
                       {/* Sales Returns & Credit Notes (Interactive Drill-Down Trigger) */}
                       <tr
                         onClick={handleOpenReturnsModal}
-                        className="hover:bg-blue-50/80 transition cursor-pointer group select-none"
+                        className="hover:bg-blue-50/80 hover:dark:bg-blue-950/40 transition cursor-pointer group select-none"
                         title="Click to view itemized sales returns & credit notes for this period"
                       >
-                        <td className="py-2.5 px-4 pl-6 text-slate-700 font-medium">
+                        <td className="py-2.5 px-4 pl-6 text-slate-700 dark:text-slate-300 font-medium">
                           <div className="flex items-center gap-2">
-                            <span className="group-hover:text-blue-700 group-hover:underline transition-colors font-semibold">
+                            <span className="group-hover:text-blue-700 group-hover:dark:text-blue-300 group-hover:underline transition-colors font-semibold">
                               Less: Sales Returns & Customer Credit Notes
                             </span>
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-blue-100 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full opacity-80 group-hover:opacity-100 transition-opacity">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-800/60 px-2 py-0.5 rounded-full opacity-80 group-hover:opacity-100 transition-opacity">
                               <Search className="w-3 h-3 text-blue-600" /> Drill-Down 🔍
                             </span>
                           </div>
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 tabular-nums">
+                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 dark:text-rose-400 tabular-nums">
                           {formatMoney(statement.sales_returns, true)}
                         </td>
                       </tr>
 
                       {/* TOTAL NET REVENUE (Calculated Row) */}
-                      <tr className="bg-slate-100/90 font-bold border-t-2 border-b-2 border-slate-300">
-                        <td className="py-3.5 px-4 text-slate-900 uppercase tracking-tight">
+                      <tr className="bg-slate-100/90 dark:bg-[#121520] font-bold border-t-2 border-b-2 border-slate-300 dark:border-[#23283B]">
+                        <td className="py-3.5 px-4 text-slate-900 dark:text-white uppercase tracking-tight">
                           TOTAL NET REVENUE
                         </td>
-                        <td className="py-3.5 px-4 text-right font-mono font-black text-slate-900 text-base tabular-nums">
+                        <td className="py-3.5 px-4 text-right font-mono font-black text-slate-900 dark:text-white text-base tabular-nums">
                           {formatMoney(statement.net_revenue)}
                         </td>
                       </tr>
 
                       {/* ─── 2. COST OF GOODS SOLD (COGS) ────────────── */}
                       <tr>
-                        <td colSpan={2} className="pt-8 pb-2 px-2 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                        <td colSpan={2} className="pt-8 pb-2 px-2 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-[#23283B]">
                           2. COST OF GOODS SOLD (COGS)
                         </td>
                       </tr>
 
                       {/* Inventory Cost of Goods Sold */}
                       <tr className="hover:bg-slate-50/70 transition">
-                        <td className="py-2.5 px-4 pl-6 text-slate-700">
+                        <td className="py-2.5 px-4 pl-6 text-slate-700 dark:text-slate-300">
                           Cost of Inventory Sold (Weighted Average Cost / WAC)
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 tabular-nums">
+                        <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 dark:text-rose-400 tabular-nums">
                           {formatMoney(statement.cogs, true)}
                         </td>
                       </tr>
 
                       {/* GROSS PROFIT (Calculated Row) */}
-                      <tr className="bg-blue-50/90 border-t-2 border-b-2 border-blue-200">
-                        <td className="py-3.5 px-4 text-blue-950 font-bold">
+                      <tr className="bg-blue-50/90 dark:bg-blue-950/40 border-t-2 border-b-2 border-blue-200 dark:border-blue-800/60">
+                        <td className="py-3.5 px-4 text-blue-950 dark:text-white font-bold">
                           <div className="flex items-center gap-2">
                             <span>GROSS PROFIT</span>
-                            <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2.5 py-0.5 rounded-full border border-blue-200">
+                            <span className="text-xs font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/60 px-2.5 py-0.5 rounded-full border border-blue-200 dark:border-blue-700/60">
                               Gross Margin: {statement.gross_margin_pct}%
                             </span>
                           </div>
                         </td>
-                        <td className="py-3.5 px-4 text-right font-mono font-black text-blue-950 text-base tabular-nums">
+                        <td className="py-3.5 px-4 text-right font-mono font-black text-blue-950 dark:text-white text-base tabular-nums">
                           {formatMoney(statement.gross_profit)}
                         </td>
                       </tr>
 
                       {/* ─── 3. OPERATING EXPENSES (OPEX) ───────────── */}
                       <tr>
-                        <td colSpan={2} className="pt-8 pb-2 px-2 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                        <td colSpan={2} className="pt-8 pb-2 px-2 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-[#23283B]">
                           3. OPERATING EXPENSES (OPEX)
                         </td>
                       </tr>
@@ -343,31 +343,31 @@ export default function IncomeStatementPage() {
                       {statement.expenses_breakdown && statement.expenses_breakdown.length > 0 ? (
                         statement.expenses_breakdown.map((exp) => (
                           <tr key={exp.category} className="hover:bg-slate-50/70 transition">
-                            <td className="py-2.5 px-4 pl-6 text-slate-700">
+                            <td className="py-2.5 px-4 pl-6 text-slate-700 dark:text-slate-300">
                               Expense: {exp.category}
                             </td>
-                            <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 tabular-nums">
+                            <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 dark:text-rose-400 tabular-nums">
                               {formatMoney(exp.amount, true)}
                             </td>
                           </tr>
                         ))
                       ) : (
                         <tr className="hover:bg-slate-50/70 transition">
-                          <td className="py-2.5 px-4 pl-6 text-slate-700">
+                          <td className="py-2.5 px-4 pl-6 text-slate-700 dark:text-slate-300">
                             General Operating Expenses Total
                           </td>
-                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 tabular-nums">
+                          <td className="py-2.5 px-4 text-right font-mono font-semibold text-red-600 dark:text-rose-400 tabular-nums">
                             {formatMoney(statement.operating_expenses, true)}
                           </td>
                         </tr>
                       )}
 
                       {/* TOTAL OPERATING EXPENSES (Calculated Row) */}
-                      <tr className="bg-amber-50/80 border-t border-b border-amber-200">
-                        <td className="py-3.5 px-4 text-amber-950 font-bold">
+                      <tr className="bg-amber-50/80 dark:bg-amber-950/30 border-t border-b border-amber-200 dark:border-amber-900/50">
+                        <td className="py-3.5 px-4 text-amber-950 dark:text-amber-300 font-bold">
                           TOTAL OPERATING EXPENSES (OPEX)
                         </td>
-                        <td className="py-3.5 px-4 text-right font-mono font-bold text-amber-950 tabular-nums">
+                        <td className="py-3.5 px-4 text-right font-mono font-bold text-amber-950 dark:text-amber-400 tabular-nums">
                           {formatMoney(statement.operating_expenses, true)}
                         </td>
                       </tr>
@@ -379,8 +379,8 @@ export default function IncomeStatementPage() {
                       <tr
                         className={`${
                           statement.net_profit >= 0
-                            ? 'bg-emerald-50/90 border-t-2 border-b-2 border-emerald-400 text-emerald-950'
-                            : 'bg-red-50/90 border-t-2 border-b-2 border-red-400 text-red-950'
+                            ? 'bg-emerald-50/90 dark:bg-emerald-950/30 border-t-2 border-b-2 border-emerald-400 dark:border-emerald-800/60 text-emerald-950 dark:text-emerald-300'
+                            : 'bg-red-50/90 dark:bg-rose-950/30 border-t-2 border-b-2 border-red-400 dark:border-rose-800/60 text-red-950 dark:text-rose-300'
                         }`}
                       >
                         <td className="py-4 px-4 font-black text-base">
@@ -389,8 +389,8 @@ export default function IncomeStatementPage() {
                             <span
                               className={`text-xs font-bold px-3 py-0.5 rounded-full border ${
                                 statement.net_profit >= 0
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                  : 'bg-red-100 text-red-800 border-red-300'
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-200 dark:border-emerald-700/60'
+                                  : 'bg-red-100 text-red-800 border-red-300 dark:bg-rose-900/60 dark:text-rose-200 dark:border-rose-700/60'
                               }`}
                             >
                               Net Margin: {statement.net_margin_pct}%
@@ -398,7 +398,9 @@ export default function IncomeStatementPage() {
                           </div>
                         </td>
                         <td className="py-4 px-4 text-right font-mono font-black text-xl tabular-nums">
-                          {formatMoney(statement.net_profit)}
+                          <span className={statement.net_profit >= 0 ? 'dark:text-emerald-400' : 'dark:text-rose-400'}>
+                            {formatMoney(statement.net_profit)}
+                          </span>
                         </td>
                       </tr>
                     </tbody>
@@ -406,7 +408,7 @@ export default function IncomeStatementPage() {
                 </div>
 
                 {/* Footer Notes */}
-                <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400">
+                <div className="pt-6 border-t border-slate-100 dark:border-[#23283B] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400 dark:text-slate-500">
                   <p>Report Generated: {new Date().toLocaleString()}</p>
                   <p>Sabir Plastic Wholesale ERP • Confidential Financial Document</p>
                 </div>

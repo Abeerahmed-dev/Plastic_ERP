@@ -8,8 +8,8 @@ export async function createInvoice(input: CreateInvoiceInput, userId?: string) 
   return await getInvoice(invoiceId);
 }
 
-export async function getInvoices() {
-  return await invoicesRepo.findAllInvoices();
+export async function getInvoices(filter?: { created_by?: string; is_pos_only?: boolean }) {
+  return await invoicesRepo.findAllInvoices(filter);
 }
 
 export async function getInvoice(id: string) {
@@ -24,5 +24,13 @@ export async function getInvoiceReturnSummary(id: string) {
 
 export async function processSalesReturn(id: string, input: CreateSalesReturnInput, userId?: string) {
   return await invoicesRepo.processSalesReturn(id, input, userId);
+}
+
+export async function getPendingDeliveries(query?: { status?: string; product_id?: string }) {
+  return await invoicesRepo.getPendingDeliveries(query);
+}
+
+export async function syncOfflineInvoices(invoices: any[], userId?: string) {
+  return await invoicesRepo.processOfflineSyncInvoices(invoices, userId);
 }
 

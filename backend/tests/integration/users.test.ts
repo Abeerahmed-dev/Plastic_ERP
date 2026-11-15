@@ -25,10 +25,6 @@ beforeAll(async () => {
   accountantRoleId = roles.id;
 });
 
-afterAll(async () => {
-  await db.destroy();
-});
-
 describe('Users API (Integration)', () => {
   describe('GET /api/v1/users', () => {
     it('should return a list of users for authenticated admin', async () => {

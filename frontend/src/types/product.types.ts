@@ -13,6 +13,7 @@ export interface Product {
   name: string;
   name_urdu?: string | null;
   size?: string | null;
+  low_stock_threshold?: number;
   description: string | null;
   category_id: string;
   category_name?: string;
@@ -35,11 +36,14 @@ export interface CreateProductData {
   name: string;
   name_urdu?: string;
   size?: string;
+  low_stock_threshold?: number;
   description?: string;
   category_id: string;
   cost_price: number;
   sale_price: number;
   opening_stock: number;
+  opening_stock_kg?: number;
+  historical_wac?: number;
   notes?: string;
 }
 
@@ -47,6 +51,7 @@ export interface UpdateProductData {
   code?: string;
   name?: string;
   size?: string;
+  low_stock_threshold?: number;
   description?: string;
   category_id?: string;
   cost_price?: number;
@@ -54,3 +59,4 @@ export interface UpdateProductData {
   is_active?: boolean;
   notes?: string;
 }
+

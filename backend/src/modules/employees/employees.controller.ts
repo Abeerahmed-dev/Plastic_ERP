@@ -1,6 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { ok } from '../../shared/apiResponse';
-import { CreateEmployeeSchema, UpdateEmployeeSchema, EmployeeQuerySchema } from './employees.schemas';
+import {
+  CreateEmployeeSchema,
+  UpdateEmployeeSchema,
+  EmployeeQuerySchema,
+  CreateEmployeeLedgerEntrySchema,
+} from './employees.schemas';
 import { employeesService } from './employees.service';
 
 export async function createEmployeeController(
@@ -10,7 +15,8 @@ export async function createEmployeeController(
 ): Promise<void> {
   try {
     const parsed = CreateEmployeeSchema.parse(req.body);
-    const employee = await employeesService.create(parsed);
+    const userId = (req as any).user?.id;
+    const employee = await employeesService.create(parsed, userId);
     res.status(201).json(ok(employee));
   } catch (err) {
     next(err);
@@ -70,3 +76,46 @@ export async function deleteEmployeeController(
     next(err);
   }
 }
+
+export async function getEmployeeLedgerController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const month = req.query.month as string | undefined;
+    const ledger = await employeesService.getLedger(req.params.id, month);
+    res.status(200).json(ok(ledger));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function addEmployeeLedgerEntryController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const parsed = CreateEmployeeLedgerEntrySchema.parse(req.body);
+    const userId = (req as any).user?.id;
+    const entry = await employeesService.addLedgerEntry(req.params.id, parsed, userId);
+    res.status(201).json(ok(entry));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteEmployeeLedgerEntryController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    await employeesService.deleteLedgerEntry(req.params.entryId);
+    res.status(200).json(ok({ message: 'Ledger entry deleted successfully' }));
+  } catch (err) {
+    next(err);
+  }
+}
+

@@ -4,12 +4,20 @@ import {
   findEmployeeById,
   updateEmployeeRecord,
   deleteEmployeeRecord,
+  getEmployeeLedger,
+  addEmployeeLedgerEntry,
+  deleteEmployeeLedgerEntry,
 } from './employees.repository';
-import { CreateEmployeeInput, UpdateEmployeeInput, EmployeeQuery } from './employees.schemas';
+import {
+  CreateEmployeeInput,
+  UpdateEmployeeInput,
+  EmployeeQuery,
+  CreateEmployeeLedgerEntryInput,
+} from './employees.schemas';
 
 export const employeesService = {
-  create: async (data: CreateEmployeeInput) => {
-    return createEmployeeRecord(data);
+  create: async (data: CreateEmployeeInput, userId?: string) => {
+    return createEmployeeRecord(data, userId);
   },
 
   getAll: async (query: EmployeeQuery = {}) => {
@@ -33,4 +41,21 @@ export const employeesService = {
     if (!existing) throw new Error('Employee not found');
     return deleteEmployeeRecord(id);
   },
+
+  getLedger: async (employeeId: string, month?: string) => {
+    return getEmployeeLedger(employeeId, month);
+  },
+
+  addLedgerEntry: async (
+    employeeId: string,
+    data: CreateEmployeeLedgerEntryInput,
+    userId?: string
+  ) => {
+    return addEmployeeLedgerEntry(employeeId, data, userId);
+  },
+
+  deleteLedgerEntry: async (entryId: string) => {
+    return deleteEmployeeLedgerEntry(entryId);
+  },
 };
+

@@ -2,31 +2,16 @@
  * Bilingual Urdu-English product names and automatic phonetic transliterator
  */
 
-const URDU_DICTIONARY: Record<string, string> = {
-  // Categories & standard plastics
+export const URDU_DICTIONARY: Record<string, string> = {
+  // Poly & Bags
   '30/s poly': '۳۰/ایس پولی بیگ',
   '50/s poly': '۵۰/ایس پولی بیگ',
   'plastic bag': 'پلاسٹک بیگ',
   'shopping bag': 'شاپنگ بیگ / تھیلی',
   'poly bag': 'پولی بیگ',
-  'roll': 'پلاسٹک رول',
-  'plastic roll': 'پلاسٹک رول',
-  'sheet': 'پلاسٹک شیٹ',
-  'plastic sheet': 'پلاسٹک شیٹ',
-  'granules': 'پلاسٹک دانہ',
-  'dana': 'پلاسٹک دانہ',
-  'packaging': 'پیکجنگ مٹیریل',
   'd-cut': 'ڈی کٹ بیگ',
   'w-cut': 'ڈبلیو کٹ بیگ',
   'garbage bag': 'کچرا بیگ / ڈسٹ بن بیگ',
-<<<<<<< Updated upstream
-  'newspaper': 'اخبار / ریپنگ پیپر',
-  'korean newspaper': 'کورین اخبار',
-  'other': 'متفرق پلاسٹک',
-};
-
-export function getUrduProductName(name?: string, nameUrdu?: string, category?: string): string {
-=======
   'zipper bag': 'زپر بیگ',
   'zipper': 'زپر بیگ',
   'shopper': 'شاپر / شاپنگ بیگ',
@@ -237,41 +222,14 @@ function translateToken(token: string): string {
   return phoneticTransliterateWord(clean);
 }
 
-export function getUrduProductName(name?: string, nameUrdu?: string, _category?: string): string {
+export function getUrduProductName(name?: string, nameUrdu?: string, category?: string): string {
   // 1. Explicit user/database provided Urdu name
->>>>>>> Stashed changes
   if (nameUrdu && nameUrdu.trim()) {
     return nameUrdu.trim();
   }
 
-  if (!name) return '';
+  if (!name || !name.trim()) return '';
 
-<<<<<<< Updated upstream
-  const cleanName = name.toLowerCase().trim();
-  
-  // Direct dictionary match
-  if (URDU_DICTIONARY[cleanName]) {
-    return URDU_DICTIONARY[cleanName];
-  }
-
-  // Partial match in dictionary
-  for (const [key, val] of Object.entries(URDU_DICTIONARY)) {
-    if (cleanName.includes(key)) {
-      return val;
-    }
-  }
-
-  // Category fallback
-  if (category) {
-    const cleanCat = category.toLowerCase().trim();
-    if (URDU_DICTIONARY[cleanCat]) {
-      return URDU_DICTIONARY[cleanCat];
-    }
-  }
-
-  // Generic natural Urdu transliteration/fallback
-  return name;
-=======
   // 2. If name itself is already in Urdu/Arabic script, return it
   if (/[\u0600-\u06FF]/.test(name)) {
     return name.trim();
@@ -285,10 +243,26 @@ export function getUrduProductName(name?: string, nameUrdu?: string, _category?:
     return URDU_DICTIONARY[cleanLower];
   }
 
-  // 4. Token-by-token smart conversion (preserving delimiters, numbers, sizes)
+  // 4. Substring / multi-word match in dictionary (longest keys first)
+  const sortedKeys = Object.keys(URDU_DICTIONARY).sort((a, b) => b.length - a.length);
+  for (const key of sortedKeys) {
+    const regex = new RegExp(`(^|[^a-z0-9])${key}([^a-z0-9]|$)`, 'i');
+    if (regex.test(cleanLower)) {
+      return URDU_DICTIONARY[key];
+    }
+  }
+
+  // 5. Category fallback
+  if (category) {
+    const cleanCat = category.toLowerCase().trim();
+    if (URDU_DICTIONARY[cleanCat]) {
+      return URDU_DICTIONARY[cleanCat];
+    }
+  }
+
+  // 6. Token-by-token smart phonetic conversion
   return clean.split(/([\s\-_/]+)/).map((t) => {
     if (/^[\s\-_/]+$/.test(t)) return t;
     return translateToken(t);
   }).join('');
->>>>>>> Stashed changes
 }

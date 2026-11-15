@@ -18,7 +18,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db('suppliers').whereILike('name', '%Test Supplier%').delete();
-  await db.destroy();
 });
 
 describe('POST /api/v1/suppliers', () => {

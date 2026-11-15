@@ -3,6 +3,7 @@ import CashierDashboard from './CashierDashboard';
 import { LiquidityLedger } from '../components/Reports/LiquidityLedger';
 import { BusinessPerformanceCharts } from '../components/Reports/BusinessPerformanceCharts';
 import { InventoryLedgerSection } from '../components/Reports/InventoryLedgerSection';
+import { LowStockWidget } from '../components/Dashboard/LowStockWidget';
 
 export const Dashboard = () => {
   const { user } = useAuthStore();
@@ -19,7 +20,7 @@ export const Dashboard = () => {
         <LiquidityLedger />
       </div>
 
-      {/* 2. Side-by-Side: Time-Bound Business Performance (P&L Graphs) + 1. Inventory Ledger & WAC Asset Valuation */}
+      {/* 2. Side-by-Side: Time-Bound Business Performance (P&L Graphs) + Inventory Ledger & WAC Asset Valuation */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch w-full min-w-0">
         {/* Left Column: Graphs */}
         <div className="w-full min-w-0">
@@ -30,6 +31,11 @@ export const Dashboard = () => {
         <div className="w-full min-w-0">
           <InventoryLedgerSection />
         </div>
+      </div>
+
+      {/* Low Stock Early Warnings Alert Engine */}
+      <div className="w-full min-w-0">
+        <LowStockWidget />
       </div>
     </main>
   );

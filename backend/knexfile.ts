@@ -1,7 +1,12 @@
 import type { Knex } from 'knex';
 import dotenv from 'dotenv';
+import path from 'path';
 
-dotenv.config();
+if (process.env.NODE_ENV === 'test') {
+  dotenv.config({ path: path.resolve(__dirname, '.env.test'), override: true });
+} else {
+  dotenv.config();
+}
 
 const config: { [key: string]: Knex.Config } = {
   development: {
@@ -30,12 +35,12 @@ const config: { [key: string]: Knex.Config } = {
 
   test: {
     client: 'postgresql',
-    connection: {
+    connection: process.env.DATABASE_URL || {
       host: process.env.DB_HOST ?? 'localhost',
       port: Number(process.env.DB_PORT ?? 5432),
-      database: process.env.DB_NAME_TEST ?? process.env.DB_NAME ?? 'sabir_plastic_erp',
+      database: process.env.DB_NAME_TEST ?? (process.env.DB_NAME?.endsWith('_test') ? process.env.DB_NAME : `${process.env.DB_NAME ?? 'sabir_plastic_erp'}_test`),
       user: process.env.DB_USER ?? 'erp_user',
-      password: process.env.DB_PASSWORD ?? 'devpassword',
+      password: process.env.DB_PASSWORD ?? 'change_me_in_production',
     },
     pool: {
       min: 1,
@@ -60,7 +65,13 @@ const config: { [key: string]: Knex.Config } = {
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      ssl: { rejectUnauthorized: false },
+      ssl:
+        process.env.DB_SSL === 'true' ||
+        (process.env.DB_HOST &&
+          process.env.DB_HOST !== 'localhost' &&
+          process.env.DB_HOST !== '127.0.0.1')
+          ? { rejectUnauthorized: false }
+          : false,
     },
     pool: {
       min: 2,
