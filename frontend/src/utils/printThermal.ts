@@ -61,6 +61,14 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
   const discount = Number(invoice.discount || 0);
   const totalAmount = Number(invoice.total_amount || 0);
 
+  // Total weight calculation
+  const totalWeight = items.reduce((sum, item) => {
+    const isItemReturn = item.isReturn || item.quantity < 0;
+    const qty = isItemReturn ? -Math.abs(Number(item.quantity) || 0) : (Number(item.quantity) || 0);
+    return sum + qty;
+  }, 0);
+  const formattedTotalWeight = Number(totalWeight.toFixed(3)).toString();
+
   // Payment method & tender calculation
   const paymentMethod = String(invoice.payment_method || invoice.paymentMethod || 'CASH').toUpperCase();
   const isBank = paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name;
@@ -80,7 +88,21 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
     const unit = item.selected_unit || 'KG';
     const lineTotal = displayQty * item.unit_price;
     const englishName = item.productName || item.product_name || 'Item';
-    const urduName = getUrduProductName(englishName, item.name_urdu || item.product_name_urdu, item.category);
+
+    // Parse base product name and size/variant to prevent BiDi inversion
+    let baseName = englishName;
+    let sizePart = (item.size || item.product_size || item.variant_size || '').trim();
+
+    if (!sizePart && englishName.includes(' - ')) {
+      const idx = englishName.lastIndexOf(' - ');
+      baseName = englishName.substring(0, idx).trim();
+      sizePart = englishName.substring(idx + 3).trim();
+    } else if (sizePart && englishName.endsWith(` - ${sizePart}`)) {
+      baseName = englishName.slice(0, -(` - ${sizePart}`.length)).trim();
+    }
+
+    const urduBase = getUrduProductName(baseName, item.name_urdu || item.product_name_urdu, item.category);
+    const urduSize = sizePart ? (getUrduProductName(sizePart) || sizePart) : '';
 
     return `
       <tr style="vertical-align: top; border-bottom: 1px dotted #bbb;">
@@ -88,14 +110,19 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
           <div style="font-weight: bold; font-size: 10px; line-height: 1.2; text-align: left; color: #000;">
             ${isItemReturn ? '[REFUND] ' : ''}${englishName}
           </div>
-          ${urduName ? `
-            <div style="font-size: 10px; font-weight: bold; color: #000; text-align: left; line-height: 1.25; margin-top: 1px; font-family: 'Segoe UI', Tahoma, Arial, sans-serif;">
-              ${urduName}
+          ${urduBase ? `
+            <div style="font-size: 10px; font-weight: bold; color: #000; text-align: left; line-height: 1.25; margin-top: 1px; direction: ltr; unicode-bidi: isolate;">
+              <span dir="rtl" style="font-family: 'Segoe UI', Tahoma, Arial, sans-serif;">${urduBase}</span>
+              ${urduSize ? `
+                <span dir="ltr" style="font-family: Arial, sans-serif; font-size: 9.5px; margin-left: 2px;">
+                  &lrm;- ${urduSize}&lrm;
+                </span>
+              ` : ''}
             </div>
           ` : ''}
         </td>
         <td style="padding: 2.5px 1px; width: 14%; text-align: center; vertical-align: top; font-size: 9.5px; font-weight: 600;">
-          ${displayQty}<span style="font-size: 8px; display: block; color: #555;">${unit}</span>
+          ${displayQty}
         </td>
         <td style="padding: 2.5px 1px; width: 17%; text-align: right; vertical-align: top; font-size: 9.5px;">
           ${Number(item.unit_price).toLocaleString()}
@@ -165,8 +192,8 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
       <table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 4px; font-size: 9px;">
         <thead>
           <tr style="border-bottom: 1px solid #000; font-weight: bold;">
-            <th style="padding: 2px 1px; width: 52%; text-align: left;">Item / نام</th>
-            <th style="padding: 2px 1px; width: 14%; text-align: center;">Qty</th>
+            <th style="padding: 2px 1px; width: 52%; text-align: left;">Item</th>
+            <th style="padding: 2px 1px; width: 14%; text-align: center;">KG</th>
             <th style="padding: 2px 1px; width: 17%; text-align: right;">Rate</th>
             <th style="padding: 2px 3px 2px 1px; width: 17%; text-align: right;">Total</th>
           </tr>
@@ -174,10 +201,18 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
         <tbody>
           ${itemsHtml}
         </tbody>
+        <tfoot>
+          <tr style="border-top: 1px dashed #000; font-weight: bold; font-size: 9.5px;">
+            <td style="padding: 2.5px 1px; width: 52%; text-align: left;">Total Weight:</td>
+            <td style="padding: 2.5px 1px; width: 14%; text-align: center; white-space: nowrap;">${formattedTotalWeight} KG</td>
+            <td style="padding: 2.5px 1px; width: 17%;"></td>
+            <td style="padding: 2.5px 3px 2.5px 1px; width: 17%;"></td>
+          </tr>
+        </tfoot>
       </table>
 
       <!-- Financial Summary -->
-      <div style="border-top: 1px dashed #000; padding-top: 3px; margin-bottom: 4px; font-size: 9.5px;">
+      <div style="padding-top: 1px; margin-bottom: 4px; font-size: 9.5px;">
         ${asDuplicate ? `
           <div class="flex" style="font-weight: 900; font-size: 11px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 2px 0; padding-right: 2px;">
             <span>TOTAL:</span>
@@ -234,10 +269,12 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
       <!-- Footer Notes -->
       <div style="text-align: center; font-size: 8px; margin-top: 2px; padding-top: 2px; border-top: 1px dashed #000; line-height: 1.2;">
         <p style="font-weight: bold;">Thank You For Your Business!</p>
-        <p style="font-size: 9px; font-weight: bold; color: #000; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; text-align: center; margin-top: 2px; line-height: 1.25;">
-          نوٹ: مال نہ ملنے کی صورت میں 15 دن میں رابطہ کریں اس کے بعد کمپنی ذمہ دار نہیں ہوگی۔ شکریہ
-        </p>
-        <p style="font-size: 7px; color: #555; margin-top: 1px;">* Software Generated POS Tax-Compliant Receipt *</p>
+        <div style="border: 1.5px solid #000; border-radius: 4px; padding: 3px 4px; margin: 3px auto 2px auto; text-align: center; box-sizing: border-box;">
+          <p style="font-size: 9.5px; font-weight: bold; color: #000; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; text-align: center; line-height: 1.35; margin: 0;" dir="rtl">
+            نوٹ: مال نہ ملنے کی صورت میں 15 دن میں رابطہ کریں اس کے بعد کمپنی ذمہ دار نہیں ہوگی۔ شکریہ
+          </p>
+        </div>
+        <p style="font-size: 9.5px; color: #111; margin-top: 4px;">*software manufactured by PENTACORE SOLUTION </br> ph no 0335-3392443 / 0333-8200344*</p>
       </div>
     </div>
   `;
@@ -294,15 +331,15 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
             line-height: 1.25;
           }
           .receipt-container {
-            width: 66mm;
-            max-width: 66mm;
+            width: 76mm;
+            max-width: 76mm;
             margin: 0 !important;
             padding: 0;
             box-sizing: border-box;
           }
           .slip-page {
-            width: 66mm;
-            max-width: 66mm;
+            width: 76mm;
+            max-width: 76mm;
             margin: 0 !important;
             padding: 0mm 2mm 6mm 1mm;
             box-sizing: border-box;
@@ -336,9 +373,9 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
             }
             .slip-page {
               margin: 0 !important;
-              padding: 0mm 2mm 6mm 1mm !important;
-              width: 66mm !important;
-              max-width: 66mm !important;
+              padding: 2mm 2mm 6mm 1mm !important;
+              width: 76mm !important;
+              max-width: 76mm !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
               page-break-inside: avoid !important;

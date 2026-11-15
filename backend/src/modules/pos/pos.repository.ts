@@ -2,26 +2,28 @@ import db from '../../db/knex';
 import { Knex } from 'knex';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
 
+<<<<<<< Updated upstream
 import { ForbiddenError } from '../../shared/errors';
+=======
+export { restoreInventoryBucketsLifo };
+
+import { NotFoundError } from '../../shared/errors';
+import { logger } from '../../config/logger';
+import { estimateOverdraftCogs } from '../../shared/overdraftPricing';
+>>>>>>> Stashed changes
 
 export async function processPOSCheckout(
   userId: string,
   items: { product_id: string; quantity: number; selected_unit?: string; unit_price: number }[],
   discount: number,
-  userRole?: string,
+  _userRole?: string,
   customerId?: string,
   amountPaidInput?: number,
   paymentMethodInput?: string,
   bankAccountId?: string | null
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
-    const isCashier = userRole?.toUpperCase() === 'CASHIER';
-
-    if (isCashier && discount > 0) {
-      throw new ForbiddenError('Cashiers are not authorized to issue discounts or credit. Invoice must be paid in full.');
-    }
-
-    const effectiveDiscount = isCashier ? 0 : discount;
+    const effectiveDiscount = Number(discount || 0);
 
     // 1. Customer Selection
     let targetCustomer = null;
@@ -69,8 +71,24 @@ export async function processPOSCheckout(
         ? bagWeight
         : 1.0;
 
+<<<<<<< Updated upstream
       const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
       const effectiveUnitPrice = isCashier ? (fixedRetailKg * unitMultiplier) : Number(item.unit_price);
+=======
+      const retailNum = Number(product.fixed_retail_price_per_kg || 0);
+      const saleNum = Number(product.sale_price || 0);
+      const itemUnitPriceNum = Number(item.unit_price || 0);
+
+      // Correctly handle string '0.00' coercion from PostgreSQL
+      const fixedRetailKg = retailNum > 0
+        ? retailNum
+        : (saleNum > 0 ? saleNum : (itemUnitPriceNum > 0 ? (itemUnitPriceNum / unitMultiplier) : 0));
+
+      // Respect the client-provided unit_price (allows 0% and negative margin sales in POS); fallback to catalog retail/sale price
+      const effectiveUnitPrice = (item.unit_price !== undefined && item.unit_price !== null && !isNaN(Number(item.unit_price)))
+        ? Number(item.unit_price)
+        : (fixedRetailKg > 0 ? (fixedRetailKg * unitMultiplier) : 0);
+>>>>>>> Stashed changes
       const lineTotal = Number(item.quantity) * effectiveUnitPrice;
       subtotal += lineTotal;
 
@@ -122,9 +140,25 @@ export async function processPOSCheckout(
         const sold_kg = Number(item.quantity) * unitMultiplier;
         const currentStock = Number(product.total_stock_kg || 0);
 
+<<<<<<< Updated upstream
         if (sold_kg > currentStock) {
           throw new Error(
             `Insufficient stock for ${product.name} (Requested: ${sold_kg} KG, Available: ${currentStock} KG).`
+=======
+        // Concurrency Safety Wall: Lock row and query live inventory bucket in real-time
+        const liveProduct = await trx('products')
+          .where({ id: item.product_id })
+          .forUpdate()
+          .select('id', 'name', 'total_stock_kg')
+          .first();
+
+        const live_stock = Number(liveProduct?.total_stock_kg ?? product.total_stock_kg ?? 0);
+
+        if (live_stock < sold_kg) {
+          logger.warn(
+            { productId: product.id, productName: product.name, liveStock: live_stock, requestedKg: sold_kg },
+            `POS: Stock for "${product.name}" is insufficient or negative (${live_stock} KG available, requested ${sold_kg} KG). Proceeding with POS sale & overdraft/unbatched fulfillment.`
+>>>>>>> Stashed changes
           );
         }
 

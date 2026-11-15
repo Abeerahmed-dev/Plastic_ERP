@@ -31,6 +31,7 @@ export interface InvoiceDetailData {
   date: string;
   due_date?: string | null;
   status: string;
+  type?: string;
   invoice_type?: string;
   parent_invoice_id?: string | null;
   return_reason?: string | null;
@@ -461,13 +462,13 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
           <div className="pt-10 pb-2 flex justify-between items-end px-2 print:pt-14">
             <div className="text-center">
               <div className="w-40 sm:w-48 border-b border-dashed border-slate-400 mb-1.5"></div>
-              <p className="text-xs font-semibold text-slate-600">Receiver's Signature</p>
+              <p className="text-xs font-semibold text-slate-600">Labour Name</p>
             </div>
 
             <div className="text-center">
               <div className="w-44 sm:w-52 border-b-2 border-slate-800 mb-1.5"></div>
               <p className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                Authorized Signature
+                Authorized Stamp
               </p>
             </div>
           </div>
@@ -511,17 +512,73 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               </button>
             )}
 
+<<<<<<< Updated upstream
             <button
               onClick={handlePrint}
               className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-md transition active:scale-95"
             >
               <Printer className="w-4 h-4" />
               Print Invoice
+=======
+            {isPosInvoice && (
+              <button
+                type="button"
+                onClick={() => triggerPrint('POS')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+              >
+                🖨️ POS Receipt (80mm)
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => triggerPrint('A4')}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+            >
+              <Printer className="w-4 h-4 text-slate-950" />
+              Print A4 Invoice
+>>>>>>> Stashed changes
             </button>
           </div>
         </div>
       </div>
     </div>
+<<<<<<< Updated upstream
   );
+=======
+
+    {/* Print-Only Targeted Invoice Components */}
+    {printMode === 'POS' && createPortal(
+      <div className="pos-print-portal hidden print:block">
+        <style dangerouslySetInnerHTML={{ __html: `
+          @page {
+            size: 80mm auto !important;
+            margin: 0 !important;
+          }
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        ` }} />
+        <ThermalReceipt80mm data={invoice} />
+      </div>,
+      document.body
+    )}
+
+    {printMode === 'A4' && createPortal(
+      <div className="invoice-print-portal hidden print:block">
+        <style dangerouslySetInnerHTML={{ __html: `
+          @page {
+            size: A4 portrait !important;
+            margin: 8mm !important;
+          }
+        ` }} />
+        <A4SalesInvoice data={{ ...invoice, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
+      </div>,
+      document.body
+    )}
+  </>
+);
+>>>>>>> Stashed changes
 }
 

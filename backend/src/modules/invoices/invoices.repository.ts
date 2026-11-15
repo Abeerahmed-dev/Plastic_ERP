@@ -174,6 +174,7 @@ export async function createInvoiceWithItems(
           : Number(product.rolling_avg_cost_per_kg || 0);
         const lineCogs = Math.round(totalLineCogs * 100) / 100;
 
+<<<<<<< Updated upstream
         // Price Floor Check against rolling average cost
         const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
         const floorPricePerKg = appliedCogsPerKg * (1 + (minMarkupPercent / 100));
@@ -182,6 +183,9 @@ export async function createInvoiceWithItems(
         if (sellingPricePerKg < floorPricePerKg - 0.01) {
           throw new Error(`Selling price for ${product.name} is below minimum authorized margin.`);
         }
+=======
+        // Margin floor restriction removed - selling at 0% or negative margin is permitted for all roles
+>>>>>>> Stashed changes
 
         // Deduct stock from product
         await trx('products')

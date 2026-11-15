@@ -18,7 +18,7 @@ interface CartItem {
   category?: string;
   quantity: number;
   selected_unit: string;
-  unit_price: number;
+  unit_price: number | string;
   fixed_retail_price_per_kg: number;
   current_stock: number;
   bag_weight_kg: number;
@@ -80,14 +80,14 @@ export default function POSPage() {
   });
 
   const addToCart = (product: any) => {
-    const stockKg = Number(product.total_stock_kg ?? product.current_stock ?? 0);
-    if (stockKg <= 0) return;
-
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
+<<<<<<< Updated upstream
         const existing = prev[existingIndex];
         if (existing.quantity >= stockKg) return prev;
+=======
+>>>>>>> Stashed changes
         return prev.map((item, idx) =>
           idx === existingIndex ? { ...item, quantity: item.quantity + 1 } : item,
         );
@@ -110,7 +110,7 @@ export default function POSPage() {
           selected_unit: 'KG',
           unit_price: initialUnitPrice,
           fixed_retail_price_per_kg: fixedRetailKg,
-          current_stock: Number(product.current_stock || 0),
+          current_stock: Number(product.total_stock_kg ?? product.current_stock ?? 0),
           bag_weight_kg: bagWeight,
           rolling_avg_cost_per_kg: Number(product.rolling_avg_cost_per_kg || product.cost_price || 0),
         },
@@ -124,13 +124,18 @@ export default function POSPage() {
         if (item.product_id !== productId) return item;
         const updated = { ...item, ...updates };
 
-        // If unit changes, re-calculate fixed price for Cashier
-        if (updates.selected_unit && isCashier) {
-          const unitMultiplier =
+        // If unit changes, scale price proportionally based on bag weight
+        if (updates.selected_unit && updates.selected_unit !== item.selected_unit) {
+          const oldMultiplier =
+            item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora'
+              ? item.bag_weight_kg
+              : 1.0;
+          const newMultiplier =
             updates.selected_unit.toLowerCase() === 'bag' || updates.selected_unit.toLowerCase() === 'bora'
               ? item.bag_weight_kg
               : 1.0;
-          updated.unit_price = item.fixed_retail_price_per_kg * unitMultiplier;
+          const ratePerKg = oldMultiplier > 0 ? (Number(item.unit_price) / oldMultiplier) : Number(item.unit_price);
+          updated.unit_price = Math.round(ratePerKg * newMultiplier * 100) / 100;
         }
 
         return updated;
@@ -147,8 +152,13 @@ export default function POSPage() {
   const hasCreditBalance = customerBalance < 0;
   const availableCredit = hasCreditBalance ? Math.abs(customerBalance) : 0;
 
+<<<<<<< Updated upstream
   const subtotal = cart.reduce((acc, item) => acc + item.quantity * item.unit_price, 0);
   const effectiveDiscount = isCashier ? 0 : discount;
+=======
+  const subtotal = cart.reduce((acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0), 0);
+  const effectiveDiscount = discount || 0;
+>>>>>>> Stashed changes
   const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
@@ -165,8 +175,12 @@ export default function POSPage() {
 
   const isCartValid =
     cart.length > 0 &&
+<<<<<<< Updated upstream
     cart.every((item) => item.quantity > 0) &&
     !hasPriceFloorViolation;
+=======
+    cart.every((item) => Number(item.quantity) > 0 && item.unit_price !== '' && !isNaN(Number(item.unit_price)) && Number(item.unit_price) >= 0);
+>>>>>>> Stashed changes
 
   const checkoutMutation = useMutation({
     mutationFn: () =>
@@ -176,7 +190,7 @@ export default function POSPage() {
           product_id: i.product_id,
           quantity: i.quantity,
           selected_unit: i.selected_unit,
-          unit_price: i.unit_price,
+          unit_price: Number(i.unit_price) || 0,
         })),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
@@ -232,6 +246,131 @@ export default function POSPage() {
     },
   });
 
+<<<<<<< Updated upstream
+=======
+  const handleOfflineCheckout = async () => {
+    try {
+      const orderData = {
+        customer_id: selectedCustomerId || undefined,
+        items: cart.map((i) => ({
+          product_id: i.product_id,
+          quantity: Number(i.quantity) || 0,
+          selected_unit: i.selected_unit,
+          unit_price: Number(i.unit_price) || 0,
+        })),
+        discount: effectiveDiscount,
+        amount_paid: effectiveAmountPaid,
+        payment_method: paymentMethod,
+        bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
+        split_cash_amount: isSplit ? effectiveSplitCash : undefined,
+        split_bank_amount: isSplit ? effectiveSplitBank : undefined,
+      };
+
+      await offlineVaultService.saveOfflineInvoice(orderData);
+
+      // State Assertion: Cashier local UI stock quantity decrements immediately to prevent blind overselling
+      queryClient.setQueriesData({ queryKey: ['posProducts'] }, (oldData: any) => {
+        if (!Array.isArray(oldData)) return oldData;
+        return oldData.map((prod: any) => {
+          const cartItem = cart.find((c) => c.product_id === prod.id);
+          if (!cartItem) return prod;
+          const soldQty = Number(cartItem.quantity) || 0;
+          const curStock = Number(prod.total_stock_kg ?? prod.current_stock ?? 0);
+          const nextStock = curStock - soldQty;
+          return {
+            ...prod,
+            total_stock_kg: nextStock,
+            current_stock: nextStock,
+          };
+        });
+      });
+
+      const newCount = await offlineVaultService.getPendingCount();
+      setOfflinePendingCount(newCount);
+
+      setCart([]);
+      setDiscount(0);
+      setAmountPaid('');
+      setSplitCashAmount('');
+      setSplitBankAmount('');
+      setSelectedCustomerId('');
+      setSelectedBankAccountId('');
+
+      toast.warning('Offline Sync Pending: Sale saved in local vault');
+    } catch (err: any) {
+      console.error('Failed to store offline checkout:', err);
+      toast.error('Failed to save offline sale');
+    }
+  };
+
+  // Hold Order Mutation
+  const createHeldOrderMutation = useMutation({
+    mutationFn: (refNote: string) => {
+      const customer = customers.find((c) => c.id === selectedCustomerId);
+      return posService.createHeldOrder({
+        reference_note: refNote,
+        customer_id: selectedCustomerId || null,
+        customer_name: customer ? customer.name : 'Walk-In Customer',
+        items: cart,
+        subtotal,
+        discount,
+        total_amount: total,
+        payment_method: paymentMethod,
+        split_cash_amount: splitCashAmount !== '' ? Number(splitCashAmount) : null,
+        split_bank_amount: splitBankAmount !== '' ? Number(splitBankAmount) : null,
+        bank_account_id: selectedBankAccountId || null,
+        slip_mode: slipMode,
+      });
+    },
+    onSuccess: () => {
+      setIsHoldConfirmOpen(false);
+      setCart([]);
+      setDiscount(0);
+      setAmountPaid('');
+      setSplitCashAmount('');
+      setSplitBankAmount('');
+      setSelectedCustomerId('');
+      setSelectedBankAccountId('');
+      queryClient.invalidateQueries({ queryKey: ['posHeldOrders'] });
+    },
+    onError: (err: any) => {
+      alert(err?.response?.data?.error || err?.message || 'Failed to hold order');
+    },
+  });
+
+  // Delete Held Order Mutation
+  const deleteHeldOrderMutation = useMutation({
+    mutationFn: (orderId: string) => posService.deleteHeldOrder(orderId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posHeldOrders'] });
+    },
+  });
+
+  // Resume Held Order Handler
+  const handleResumeHeldOrder = (order: POSHeldOrder) => {
+    if (cart.length > 0) {
+      const confirmOverwrite = window.confirm(
+        'Your current cart already contains items. Do you want to replace the current cart with this held bill?'
+      );
+      if (!confirmOverwrite) return;
+    }
+
+    setCart(order.items || []);
+    setSelectedCustomerId(order.customer_id || '');
+    setDiscount(Number(order.discount || 0));
+    setPaymentMethod(order.payment_method || 'CASH');
+    setSplitCashAmount(order.split_cash_amount !== null && order.split_cash_amount !== undefined ? Number(order.split_cash_amount) : '');
+    setSplitBankAmount(order.split_bank_amount !== null && order.split_bank_amount !== undefined ? Number(order.split_bank_amount) : '');
+    setSelectedBankAccountId(order.bank_account_id || '');
+    if (order.slip_mode === 'DUPLICATE' || order.slip_mode === 'SINGLE') {
+      setSlipMode(order.slip_mode as any);
+    }
+
+    deleteHeldOrderMutation.mutate(order.id);
+    setIsHeldOrdersOpen(false);
+  };
+
+>>>>>>> Stashed changes
   return (
     <>
       <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden">
@@ -337,15 +476,19 @@ export default function POSPage() {
                   <button
                     key={p.id}
                     onClick={() => addToCart(p)}
-                    disabled={isOutOfStock}
-                    className={`border rounded-xl p-2.5 flex flex-col justify-between text-left transition-all duration-150 group relative min-h-[105px] max-h-[120px] overflow-hidden ${
+                    className={`border rounded-xl p-2.5 flex flex-col justify-between text-left transition-all duration-150 group relative min-h-[105px] max-h-[120px] overflow-hidden cursor-pointer ${
                       isOutOfStock
+<<<<<<< Updated upstream
                         ? 'border-red-300 bg-red-50/80 shadow-[0_4px_14px_rgba(239,68,68,0.18)] cursor-not-allowed opacity-90'
                         : 'bg-white border-slate-300/80 shadow-[0_6px_16px_rgba(15,23,42,0.22),0_2px_6px_rgba(15,23,42,0.12)] hover:border-blue-500 hover:shadow-[0_10px_24px_rgba(15,23,42,0.30),0_4px_10px_rgba(37,99,235,0.20)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]'
+=======
+                        ? 'border-amber-300/80 bg-amber-50/40 hover:border-amber-500 shadow-[0_4px_12px_rgba(245,158,11,0.12)] hover:-translate-y-0.5 active:scale-[0.98] dark:bg-amber-950/20 dark:border-amber-900/40 hover:dark:border-amber-500/60'
+                        : 'bg-white border-slate-300/80 shadow-[0_6px_16px_rgba(15,23,42,0.22),0_2px_6px_rgba(15,23,42,0.12)] hover:border-blue-500 hover:shadow-[0_10px_24px_rgba(15,23,42,0.30),0_4px_10px_rgba(37,99,235,0.20)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] dark:bg-[#121520] dark:border-[#23283B] hover:dark:border-blue-500/80 dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)]'
+>>>>>>> Stashed changes
                     }`}
                     title={
                       isOutOfStock
-                        ? `${p.name} - Out of Stock (0 KG Available)`
+                        ? `${p.name} - Rs. ${displayPrice} / KG (${stockKg} KG Available - Click to sell)`
                         : `${p.name} - Rs. ${displayPrice} / KG (${stockKg} KG Available)`
                     }
                   >
@@ -353,14 +496,18 @@ export default function POSPage() {
                     <div className="flex items-center justify-between gap-1 w-full mb-0.5">
                       <span
                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded truncate max-w-[50%] ${
+<<<<<<< Updated upstream
                           isOutOfStock ? 'text-red-700 bg-red-100/80' : 'text-slate-500 bg-slate-100'
+=======
+                          isOutOfStock ? 'text-amber-800 bg-amber-100/80 dark:bg-amber-900/40 dark:text-amber-300' : 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400'
+>>>>>>> Stashed changes
                         }`}
                       >
                         {p.category || p.category_name || 'Item'}
                       </span>
                       {isOutOfStock ? (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 bg-red-600 text-white shadow-2xs uppercase tracking-tight">
-                          Out of Stock
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 bg-rose-500 text-white shadow-2xs uppercase tracking-tight" title="Out of Stock (Click to sell anyway)">
+                          {stockKg} KG
                         </span>
                       ) : (
                         <span
@@ -379,16 +526,18 @@ export default function POSPage() {
                     <div className="my-auto py-0.5">
                       <p
                         className={`font-bold text-xs line-clamp-2 leading-snug transition-colors ${
+<<<<<<< Updated upstream
                           isOutOfStock ? 'text-red-950/80' : 'text-slate-800 group-hover:text-blue-600'
+=======
+                          isOutOfStock ? 'text-slate-800 group-hover:text-amber-600 dark:text-slate-100 group-hover:dark:text-amber-400' : 'text-slate-800 group-hover:text-blue-600 dark:text-slate-100 group-hover:dark:text-blue-400'
+>>>>>>> Stashed changes
                         }`}
                       >
                         {p.size ? `${p.name} - ${p.size}` : p.name}
                       </p>
                       {p.name_urdu && (
                         <p
-                          className={`text-[10px] font-medium truncate mt-0.5 ${
-                            isOutOfStock ? 'text-red-400' : 'text-slate-400'
-                          }`}
+                          className="text-[10px] font-medium truncate mt-0.5 text-slate-400"
                           dir="rtl"
                         >
                           {p.name_urdu}
@@ -396,35 +545,52 @@ export default function POSPage() {
                       )}
                     </div>
 
-                    {/* Bottom: Price & Quick Add / Out of Stock Indicator */}
+                    {/* Bottom: Price & Quick Add */}
                     <div
                       className={`flex items-end justify-between pt-1 border-t mt-0.5 w-full ${
+<<<<<<< Updated upstream
                         isOutOfStock ? 'border-red-200' : 'border-slate-100'
+=======
+                        isOutOfStock ? 'border-amber-200/80 dark:border-amber-900/40' : 'border-slate-100 dark:border-[#1e2235]'
+>>>>>>> Stashed changes
                       }`}
                     >
                       <div>
                         <span
+<<<<<<< Updated upstream
                           className={`text-[8px] font-semibold uppercase block leading-none ${
                             isOutOfStock ? 'text-red-400' : 'text-slate-400'
                           }`}
+=======
+                          className="text-[8px] font-semibold uppercase block leading-none text-slate-400 dark:text-slate-500"
+>>>>>>> Stashed changes
                         >
                           Rate
                         </span>
                         <span
                           className={`font-black text-xs leading-tight ${
+<<<<<<< Updated upstream
                             isOutOfStock ? 'text-red-700' : 'text-blue-600'
+=======
+                            isOutOfStock ? 'text-slate-800 dark:text-slate-100' : 'text-blue-600 dark:text-blue-400'
+>>>>>>> Stashed changes
                           }`}
                         >
                           Rs. {displayPrice}
                           <span
+<<<<<<< Updated upstream
                             className={`text-[9px] font-medium ml-0.5 ${
                               isOutOfStock ? 'text-red-400' : 'text-slate-500'
                             }`}
+=======
+                            className="text-[9px] font-medium ml-0.5 text-slate-500 dark:text-slate-400"
+>>>>>>> Stashed changes
                           >
                             /KG
                           </span>
                         </span>
                       </div>
+<<<<<<< Updated upstream
                       {isOutOfStock ? (
                         <div className="px-1.5 py-0.5 rounded bg-red-100 border border-red-200 text-red-700 text-[9px] font-extrabold uppercase shadow-2xs">
                           0 KG
@@ -434,6 +600,15 @@ export default function POSPage() {
                           +
                         </div>
                       )}
+=======
+                      <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[11px] font-black transition-colors shadow-2xs ${
+                        isOutOfStock
+                          ? 'bg-amber-100 text-amber-700 group-hover:bg-amber-600 group-hover:text-white dark:bg-amber-950/50 dark:text-amber-400 dark:border dark:border-amber-800/50 group-hover:dark:bg-amber-600 group-hover:dark:text-white'
+                          : 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white dark:bg-blue-950/50 dark:text-blue-400 dark:border dark:border-blue-800/50 group-hover:dark:bg-blue-600 group-hover:dark:text-white'
+                      }`}>
+                        +
+                      </div>
+>>>>>>> Stashed changes
                     </div>
                   </button>
                 );
@@ -510,6 +685,7 @@ export default function POSPage() {
             </div>
           ) : (
             cart.map((item) => {
+<<<<<<< Updated upstream
               const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selected_unit.toLowerCase() === 'bora')
                 ? item.bag_weight_kg
                 : 1.0;
@@ -525,6 +701,12 @@ export default function POSPage() {
                   className={`py-2 px-0.5 transition-all ${
                     isBelowFloor ? 'bg-red-50/70 -mx-1 px-1.5 rounded' : ''
                   }`}
+=======
+              return (
+                <div
+                  key={item.product_id}
+                  className="py-2 px-0.5 transition-all"
+>>>>>>> Stashed changes
                 >
                   {/* Top: Product Name & Delete Button */}
                   <div className="flex justify-between items-center gap-1">
@@ -541,6 +723,7 @@ export default function POSPage() {
                     </button>
                   </div>
 
+<<<<<<< Updated upstream
                   {isBelowFloor && (
                     <div className="flex items-center gap-1 text-[10px] text-red-700 bg-red-100/80 p-1 rounded border border-red-300 font-medium my-1">
                       <AlertCircle className="w-3 h-3 shrink-0 text-red-600" />
@@ -549,6 +732,9 @@ export default function POSPage() {
                   )}
 
                   {/* Bottom: Unit, Quantity & Line Total Price (No editable price input) */}
+=======
+                  {/* Bottom: Unit, Quantity & Line Total Price (Editable price input) */}
+>>>>>>> Stashed changes
                   <div className="flex justify-between items-center gap-2 mt-1">
                     <div className="flex items-center gap-1.5">
                       <select
@@ -566,6 +752,7 @@ export default function POSPage() {
                         value={item.quantity}
                         onChange={(e) =>
                           updateCartItem(item.product_id, {
+<<<<<<< Updated upstream
                             quantity: Math.max(1, parseInt(e.target.value) || 1),
                           })
                         }
@@ -580,6 +767,43 @@ export default function POSPage() {
                     <div className="text-right shrink-0">
                       <span className="text-xs font-black text-slate-900 block font-mono">
                         Rs. {(item.quantity * item.unit_price).toLocaleString()}
+=======
+                            quantity: val === '' ? '' : (parseFloat(val) || 0),
+                          });
+                        }}
+                        onBlur={() => {
+                          if (item.quantity === '' || Number(item.quantity) <= 0) {
+                            updateCartItem(item.product_id, { quantity: 1 });
+                          }
+                        }}
+                        className="w-14 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+                        title="Quantity"
+                      />
+
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 font-semibold font-mono dark:text-slate-400">@ Rs.</span>
+                        <input
+                          type="number"
+                          step="any"
+                          min={0}
+                          value={item.unit_price === '' ? '' : item.unit_price}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateCartItem(item.product_id, {
+                              unit_price: val === '' ? ('' as any) : Math.max(0, parseFloat(val) || 0),
+                            });
+                          }}
+                          className="w-16 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+                          title="Price per unit"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-xs font-black text-slate-900 block font-mono dark:text-white">
+                        Rs. {((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toLocaleString()}
+>>>>>>> Stashed changes
                       </span>
                     </div>
                   </div>
@@ -598,18 +822,20 @@ export default function POSPage() {
 
           <div className="flex justify-between items-center text-xs text-slate-600 font-medium">
             <span className="flex items-center gap-1">
-              Discount {isCashier && <Lock className="w-3 h-3 text-slate-400" />}
+              Discount
             </span>
             <input
               type="number"
               min={0}
-              disabled={isCashier}
-              readOnly={isCashier}
-              value={isCashier ? 0 : (discount || '')}
+              value={discount || ''}
               onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
+<<<<<<< Updated upstream
               className={`w-20 text-right text-xs font-bold rounded py-0.5 px-2 ${
                 isCashier ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-white border border-slate-300'
               }`}
+=======
+              className="w-20 text-right text-xs font-bold rounded py-0.5 px-2 bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+>>>>>>> Stashed changes
               placeholder="0"
             />
           </div>

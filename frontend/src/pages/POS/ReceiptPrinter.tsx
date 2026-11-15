@@ -31,6 +31,13 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
     const discount = Number(invoice.discount || 0);
     const totalAmount = Number(invoice.total_amount || 0);
 
+    const totalWeight = items.reduce((sum, item) => {
+      const isItemReturn = item.isReturn || item.quantity < 0;
+      const qty = isItemReturn ? -Math.abs(Number(item.quantity) || 0) : (Number(item.quantity) || 0);
+      return sum + qty;
+    }, 0);
+    const formattedTotalWeight = Number(totalWeight.toFixed(3)).toString();
+
     const paymentMethod = String(invoice.payment_method || invoice.paymentMethod || 'CASH').toUpperCase();
     const isBank = paymentMethod === 'BANK' || paymentMethod === 'BANK_TRANSFER' || !!invoice.bank_name;
     const isCheque = paymentMethod === 'CHEQUE';
@@ -152,7 +159,20 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
               const unit = item.selected_unit || 'KG';
               const lineTotal = displayQty * item.unit_price;
               const englishName = item.productName || item.product_name || 'Item';
-              const urduName = getUrduProductName(englishName, item.name_urdu || item.product_name_urdu, item.category);
+
+              let baseName = englishName;
+              let sizePart = (item.size || item.product_size || item.variant_size || '').trim();
+
+              if (!sizePart && englishName.includes(' - ')) {
+                const idx = englishName.lastIndexOf(' - ');
+                baseName = englishName.substring(0, idx).trim();
+                sizePart = englishName.substring(idx + 3).trim();
+              } else if (sizePart && englishName.endsWith(` - ${sizePart}`)) {
+                baseName = englishName.slice(0, -(` - ${sizePart}`.length)).trim();
+              }
+
+              const urduBase = getUrduProductName(baseName, item.name_urdu || item.product_name_urdu, item.category);
+              const urduSize = sizePart ? (getUrduProductName(sizePart) || sizePart) : '';
 
               return (
                 <tr key={idx} className="align-top">
@@ -160,14 +180,19 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
                     <div className="font-bold text-[11px] leading-tight">
                       {isItemReturn ? `[REFUND] ${englishName}` : englishName}
                     </div>
-                    {urduName && (
-                      <div className="text-[10.5px] font-bold text-black font-sans leading-tight mt-0.5" dir="rtl">
-                        {urduName}
+                    {urduBase && (
+                      <div className="text-[10.5px] font-bold text-black font-sans leading-tight mt-0.5 text-left" style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>
+                        <span dir="rtl">{urduBase}</span>
+                        {urduSize && (
+                          <span dir="ltr" className="ml-1 text-[9.5px]">
+                            &lrm;- {urduSize}&lrm;
+                          </span>
+                        )}
                       </div>
                     )}
                   </td>
                   <td className="py-1 text-center whitespace-nowrap">
-                    {displayQty} <span className="text-[9px] uppercase">{unit}</span>
+                    {displayQty}
                   </td>
                   <td className="py-1 text-right whitespace-nowrap">{Number(item.unit_price).toLocaleString()}</td>
                   <td className="py-1 text-right font-semibold whitespace-nowrap">{lineTotal.toLocaleString()}</td>
@@ -175,10 +200,18 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
               );
             })}
           </tbody>
+          <tfoot>
+            <tr className="border-t border-dashed border-black font-bold text-[11px]">
+              <td className="py-1 text-left">Total Weight:</td>
+              <td className="py-1 text-center whitespace-nowrap">{formattedTotalWeight} KG</td>
+              <td></td>
+              <td></td>
+            </tr>
+          </tfoot>
         </table>
 
         {/* Financial Summary */}
-        <div className="border-t border-dashed border-black pt-1.5 mb-2 text-[11px] space-y-0.5">
+        <div className="pt-1 mb-2 text-[11px] space-y-0.5">
           {isDuplicate ? (
             <div className="flex justify-between font-extrabold text-sm border-t border-b border-black py-1 my-1">
               <span>TOTAL / کل رقم:</span>
@@ -242,8 +275,8 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
           <p className="text-[10px] font-bold text-black leading-tight font-sans" dir="rtl">
             نوٹ: مال نہ ملنے کی صورت میں 15 دن میں رابطہ کریں اس کے بعد کمپنی ذمہ دار نہیں ہوگی۔ شکریہ
           </p>
-          <p className="text-[8px] text-gray-600">
-            * Software Generated POS Tax-Compliant Receipt *
+          <p className="text-[8px] text-gray-900">
+            * This software is manufactured by PENTACORE SOLUTION *
           </p>
         </div>
       </div>
