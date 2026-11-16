@@ -52,3 +52,8 @@ export async function updateStockDcAndPrices(
 ) {
   return await repo.updateStockDcAndPrices(purchaseId, payload, userId);
 }
+
+export async function voidPurchaseInvoice(id: string, voidReason?: string, userId?: string) {
+  return await repo.voidPurchaseInvoice(id, voidReason, userId);
+}
+

@@ -34,3 +34,8 @@ export async function syncOfflineInvoices(invoices: any[], userId?: string) {
   return await invoicesRepo.processOfflineSyncInvoices(invoices, userId);
 }
 
+export async function voidInvoice(id: string, voidReason?: string, userId?: string) {
+  return await invoicesRepo.voidInvoice(id, voidReason, userId);
+}
+
+

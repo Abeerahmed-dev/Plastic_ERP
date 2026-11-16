@@ -149,5 +149,26 @@ export async function syncOfflineInvoices(req: Request, res: Response, next: Nex
   }
 }
 
+export async function voidInvoice(req: Request, res: Response, next: NextFunction) {
+  try {
+    const invoiceId = req.params.id;
+    const { voidReason } = req.body || {};
+    const userId = req.user?.id;
+
+    const voided = await invoicesService.voidInvoice(invoiceId, voidReason, userId);
+    res.json(ok(voided));
+  } catch (error: any) {
+    if (error.message?.includes('not found')) {
+      res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
+
 
 

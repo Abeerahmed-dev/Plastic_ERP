@@ -6,6 +6,7 @@ import { X, Loader2, Info } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Product } from '../../types/product.types';
 import { categoriesService, Category } from '../../services/categories.service';
+import { productsService } from '../../services/products.service';
 
 const productSchema = z.object({
   code: z.string().optional(),
@@ -52,6 +53,18 @@ export const ProductFormModal = ({
 
   const categories = propCategories || fetchedCategories;
 
+  const { data: freshProduct } = useQuery({
+    queryKey: ['product', initialData?.id],
+    queryFn: () => productsService.getProduct(initialData!.id),
+    enabled: isOpen && !!initialData?.id,
+  });
+
+  const hasTransactions = Boolean(
+    freshProduct?.has_transactions ??
+    (initialData as any)?.has_transactions ??
+    ((freshProduct?.transaction_count ?? (initialData as any)?.transaction_count ?? 0) > 0)
+  );
+
   const {
     register,
     handleSubmit,
@@ -85,20 +98,23 @@ export const ProductFormModal = ({
   useEffect(() => {
     if (isOpen) {
       if (initialData) {
+        const prod = freshProduct || initialData;
+        const openingStockNum = Number(prod.opening_stock ?? 0);
+        const histWacNum = Number((prod as any).historical_wac ?? prod.cost_price ?? 0);
         reset({
-          code: initialData.code,
-          name: initialData.name,
-          name_urdu: initialData.name_urdu || '',
-          size: initialData.size || '',
-          low_stock_threshold: Number((initialData as any).low_stock_threshold || 0),
-          description: initialData.description || '',
-          category_id: initialData.category_id,
-          cost_price: Number(initialData.cost_price),
-          historical_wac: Number(initialData.cost_price),
-          sale_price: Number(initialData.sale_price),
-          opening_stock: Number(initialData.opening_stock),
-          is_active: initialData.is_active,
-          notes: initialData.notes || '',
+          code: prod.code,
+          name: prod.name,
+          name_urdu: prod.name_urdu || '',
+          size: prod.size || '',
+          low_stock_threshold: Number((prod as any).low_stock_threshold || 0),
+          description: prod.description || '',
+          category_id: prod.category_id,
+          cost_price: Number(prod.cost_price || 0),
+          historical_wac: histWacNum,
+          sale_price: Number(prod.sale_price || 0),
+          opening_stock: openingStockNum,
+          is_active: prod.is_active,
+          notes: prod.notes || '',
         });
       } else {
         reset({
@@ -118,7 +134,7 @@ export const ProductFormModal = ({
         });
       }
     }
-  }, [isOpen, initialData, reset, categories]);
+  }, [isOpen, initialData, freshProduct, reset, categories]);
 
 
   if (!isOpen) return null;
@@ -261,62 +277,89 @@ export const ProductFormModal = ({
               </div>
             </div>
 
-            {!initialData && (
-              <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/40 space-y-3">
+            <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/40 space-y-3">
+              <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                     Day Zero Stock (Optional)
+                    {initialData && hasTransactions && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                        Locked (Transactions Recorded)
+                      </span>
+                    )}
+                    {initialData && !hasTransactions && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Unlocked (0 Transactions)
+                      </span>
+                    )}
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Initialize existing on-hand stock and historical cost. Generates an active Day-Zero FIFO bucket (Owner Equity) without creating a purchase payable.
                   </p>
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                      Opening Stock (KG)
-                    </label>
-                    <input
-                      {...register('opening_stock')}
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      autoComplete="off"
-                      placeholder="0"
-                      className={inputCls(!!errors.opening_stock)}
-                    />
-                    {errors.opening_stock && (
-                      <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
-                    )}
-                  </div>
+              {initialData && hasTransactions && (
+                <p className="text-xs font-semibold text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200 flex items-center gap-2">
+                  <Info className="h-4 w-4 shrink-0 text-amber-600" />
+                  Cannot modify Day Zero stock after transactions have been recorded. Inputs are read-only to preserve inventory ledger integrity.
+                </p>
+              )}
 
-                  <div>
-                    <label className="mb-1.5 block text-xs font-bold text-slate-700">
-                      Historical WAC / Price per KG (Rs)
-                    </label>
-                    <input
-                      {...register('historical_wac')}
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      disabled={isZeroStock}
-                      autoComplete="off"
-                      placeholder="0"
-                      className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${isZeroStock
-                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                    Opening Stock (KG)
+                  </label>
+                  <input
+                    {...register('opening_stock')}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={hasTransactions}
+                    readOnly={hasTransactions}
+                    autoComplete="off"
+                    placeholder="0"
+                    className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
+                      hasTransactions
+                        ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
+                        : inputCls(!!errors.opening_stock)
+                    }`}
+                  />
+                  {errors.opening_stock && (
+                    <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold text-slate-700">
+                    Historical WAC / Price per KG (Rs)
+                  </label>
+                  <input
+                    {...register('historical_wac')}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={hasTransactions || isZeroStock}
+                    readOnly={hasTransactions}
+                    autoComplete="off"
+                    placeholder="0"
+                    className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
+                      hasTransactions || isZeroStock
+                        ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
                         : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-blue-500/20'
-                        }`}
-                    />
-                    {isZeroStock ? (
-                      <p className="mt-1 text-[11px] text-slate-400">Disabled when Opening Stock is 0.</p>
-                    ) : (
-                      <p className="mt-1 text-[11px] text-blue-600 font-medium">Used as initial FIFO buy price per KG.</p>
-                    )}
-                  </div>
+                    }`}
+                  />
+                  {hasTransactions ? (
+                    <p className="mt-1 text-[11px] text-slate-400">Locked to protect financial inventory ledger.</p>
+                  ) : isZeroStock ? (
+                    <p className="mt-1 text-[11px] text-slate-400">Disabled when Opening Stock is 0.</p>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-blue-600 font-medium">Used as initial FIFO buy price per KG.</p>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
 
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">Description</label>

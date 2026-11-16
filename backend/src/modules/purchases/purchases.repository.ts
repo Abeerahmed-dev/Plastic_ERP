@@ -1395,3 +1395,201 @@ export async function updateStockDcAndPrices(
     };
   });
 }
+
+/**
+ * Voids a purchase invoice and reverses associated inventory, batches, and payments.
+ * Strictly executes within an atomic Knex transaction:
+ * 1. Lock & Verify: SELECT * FROM purchase_invoices WHERE id = ? FOR UPDATE. Throws if missing or already VOID.
+ * 2. Check Active Debit Notes: Cannot void if there are active debit notes linked to this invoice.
+ * 3. Double-Spend Protection: Check inventory_batches for this purchase. If remaining_qty < original_qty - 0.0001, stock was already sold/dispatched.
+ * 4. Stock Reversal: Deduct remaining_qty from products.total_stock_kg. Set batch status = 'VOID', remaining_qty = 0.
+ * 5. Recompute Rolling WAC: Recalculate products.rolling_avg_cost_per_kg from remaining active batches.
+ * 6. Audit Trail: Insert reversal record into inventory_transactions.
+ * 7. Payment Unlinking: Clear purchase_invoice_id from supplier_payments (route to advance credit), delete supplier_payment_allocations.
+ * 8. Status Update: Set purchase_invoices status = 'VOID', void_reason = voidReason, voided_at = trx.fn.now(), voided_by_user_id = userId, balance_due = 0.
+ */
+export async function voidPurchaseInvoice(
+  invoiceId: string,
+  voidReason?: string,
+  userId?: string
+): Promise<any> {
+  return await db.transaction(async (trx) => {
+    // 1. Lock & Verify
+    const invoice = await trx('purchase_invoices')
+      .where('id', invoiceId)
+      .forUpdate()
+      .first();
+
+    if (!invoice) {
+      throw new Error(`Purchase Invoice with ID ${invoiceId} not found`);
+    }
+
+    if (invoice.status === 'VOID') {
+      throw new Error(`Purchase Invoice with ID ${invoiceId} is already VOID`);
+    }
+
+    if (invoice.status === 'CANCELLED') {
+      throw new Error(`Purchase Invoice with ID ${invoiceId} is cancelled`);
+    }
+
+    // 2. Check Active Debit Notes
+    const activeDebitNotes = await trx('purchase_invoices')
+      .where('parent_invoice_id', invoiceId)
+      .where('invoice_type', 'DEBIT_NOTE')
+      .whereNotIn('status', ['VOID', 'CANCELLED']);
+
+    if (activeDebitNotes.length > 0) {
+      throw new Error('Cannot void purchase invoice: it has active debit note(s) attached. Please void or resolve debit notes first.');
+    }
+
+    // 3. Batches & Double-Spend Protection
+    const batches = await trx('inventory_batches')
+      .where('purchase_invoice_id', invoiceId);
+
+    for (const batch of batches) {
+      const orig = Number(batch.original_qty || 0);
+      const rem = Number(batch.remaining_qty || 0);
+      if (rem < orig - 0.0001) {
+        throw new Error('STOCK_ALREADY_SOLD');
+      }
+    }
+
+    // 4. Reverse Stock & Batches
+    const hasInvTx = await trx.schema.hasTable('inventory_transactions');
+    const touchedProductIds = new Set<string>();
+
+    for (const batch of batches) {
+      const rem = Number(batch.remaining_qty || 0);
+      const buyPrice = Number(batch.batch_buy_price_per_kg ?? batch.buy_price_per_kg ?? 0);
+
+      if (batch.product_id) {
+        touchedProductIds.add(batch.product_id);
+
+        if (rem > 0) {
+          await trx('products')
+            .where('id', batch.product_id)
+            .update({
+              total_stock_kg: trx.raw('GREATEST(0, COALESCE(total_stock_kg, 0) - ?)', [rem]),
+              updated_at: new Date(),
+            });
+
+          if (hasInvTx) {
+            await trx('inventory_transactions').insert({
+              product_id: batch.product_id,
+              transaction_type: 'ADJUSTMENT',
+              quantity_kg: -rem,
+              unit_cost: buyPrice,
+              total_asset_value: -(rem * buyPrice),
+              capital_equity_value: 0,
+              notes: `Purchase Voided: Stock Reversal for Invoice ${invoice.invoice_number}`,
+              created_by: userId || null,
+            });
+          }
+        }
+      }
+
+      await trx('inventory_batches')
+        .where('id', batch.id)
+        .update({
+          remaining_qty: 0,
+          status: 'VOID',
+          updated_at: new Date(),
+        });
+    }
+
+    // 5. Recompute rolling WAC for touched products
+    for (const productId of touchedProductIds) {
+      const activeBatches = await trx('inventory_batches')
+        .where('product_id', productId)
+        .where('status', 'ACTIVE')
+        .select('remaining_qty', 'batch_buy_price_per_kg', 'buy_price_per_kg');
+
+      let totalRem = 0;
+      let totalVal = 0;
+      for (const b of activeBatches) {
+        const rem = Number(b.remaining_qty || 0);
+        const cost = Number(b.batch_buy_price_per_kg ?? b.buy_price_per_kg ?? 0);
+        totalRem += rem;
+        totalVal += rem * cost;
+      }
+
+      if (totalRem > 0) {
+        const newRollingWac = Math.round((totalVal / totalRem) * 10000) / 10000;
+        await trx('products')
+          .where('id', productId)
+          .update({
+            rolling_avg_cost_per_kg: newRollingWac,
+            updated_at: new Date(),
+          });
+      }
+    }
+
+    // 6. Payment Unlinking (convert supplier payments to advance balance)
+    const hasSupplierPayments = await trx.schema.hasTable('supplier_payments');
+    if (hasSupplierPayments) {
+      const hasAllocationsTable = await trx.schema.hasTable('supplier_payment_allocations');
+      const allocatedPaymentIds: string[] = [];
+      if (hasAllocationsTable) {
+        const allocations = await trx('supplier_payment_allocations')
+          .where('purchase_invoice_id', invoiceId)
+          .select('payment_id');
+        allocations.forEach((a: any) => {
+          if (a.payment_id) allocatedPaymentIds.push(a.payment_id);
+        });
+        await trx('supplier_payment_allocations')
+          .where('purchase_invoice_id', invoiceId)
+          .delete();
+      }
+
+      const hasIsAdvance = await trx.schema.hasColumn('supplier_payments', 'is_advance');
+      const hasPaymentType = await trx.schema.hasColumn('supplier_payments', 'payment_type');
+
+      const pmtUpdate: Record<string, any> = {
+        purchase_invoice_id: null,
+        updated_at: new Date(),
+      };
+      if (hasIsAdvance) pmtUpdate.is_advance = true;
+      if (hasPaymentType) pmtUpdate.payment_type = 'ADVANCE';
+
+      const pmtQuery = trx('supplier_payments');
+      pmtQuery.where((qb) => {
+        qb.where('purchase_invoice_id', invoiceId);
+        if (allocatedPaymentIds.length > 0) {
+          qb.orWhereIn('id', allocatedPaymentIds);
+        }
+      });
+      await pmtQuery.update(pmtUpdate);
+    }
+
+    // 7. Update purchase invoice record
+    const cleanedReason = typeof voidReason === 'string' && voidReason.trim().length > 0
+      ? voidReason.trim()
+      : null;
+
+    const invoiceUpdatePayload: Record<string, any> = {
+      status: 'VOID',
+      void_reason: cleanedReason,
+      voided_at: trx.fn.now(),
+      updated_at: new Date(),
+    };
+    if (userId) {
+      invoiceUpdatePayload.voided_by_user_id = userId;
+    }
+
+    const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
+    if (hasBalanceDue) {
+      invoiceUpdatePayload.balance_due = 0;
+    }
+
+    await trx('purchase_invoices')
+      .where('id', invoiceId)
+      .update(invoiceUpdatePayload);
+
+    const [voidedInvoice] = await trx('purchase_invoices')
+      .where('id', invoiceId)
+      .select('*');
+
+    return voidedInvoice;
+  });
+}
+

@@ -253,3 +253,39 @@ export async function updateStockDcAndPrices(req: Request, res: Response) {
     });
   }
 }
+
+export async function voidPurchaseInvoice(req: Request, res: Response) {
+  try {
+    const invoiceId = req.params.id;
+    const { voidReason } = req.body || {};
+    const userId = req.user?.id;
+
+    const voided = await purchasesService.voidPurchaseInvoice(invoiceId, voidReason, userId);
+    res.json({
+      success: true,
+      message: 'Purchase invoice voided successfully',
+      data: voided,
+    });
+  } catch (error: any) {
+    if (error.message === 'STOCK_ALREADY_SOLD') {
+      res.status(400).json({
+        success: false,
+        error: 'Cannot void purchase invoice: stock from this purchase has already been sold or returned.',
+        message: 'Cannot void purchase invoice: stock from this purchase has already been sold or returned.',
+      });
+      return;
+    }
+    if (error.message?.includes('not found')) {
+      res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+      return;
+    }
+    res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to void purchase invoice',
+    });
+  }
+}
+

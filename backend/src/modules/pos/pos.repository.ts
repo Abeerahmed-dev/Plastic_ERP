@@ -5,13 +5,13 @@ import { restoreInventoryBucketsLifo } from '../invoices/invoices.repository';
 
 export { restoreInventoryBucketsLifo };
 
-import { NotFoundError, InsufficientStockError } from '../../shared/errors';
+import { NotFoundError } from '../../shared/errors';
 import { logger } from '../../config/logger';
-import { estimateOverdraftCogs } from '../../shared/overdraftPricing';
+import { estimateOverdraftCogs, getLatestMarketBatchPrice } from '../../shared/overdraftPricing';
 
 export async function processPOSCheckout(
   userId: string,
-  items: { product_id: string; quantity: number; selected_unit?: string; unit_price: number }[],
+  items: { product_id: string; quantity: number; selected_unit?: string; unit_price?: number; price?: number }[],
   discount: number,
   _userRole?: string,
   customerId?: string,
@@ -86,15 +86,14 @@ export async function processPOSCheckout(
 
       const retailNum = Number(product.fixed_retail_price_per_kg || 0);
       const saleNum = Number(product.sale_price || 0);
-      const itemUnitPriceNum = Number(item.unit_price || 0);
+      const rawPrice = (item as any).price !== undefined ? (item as any).price : item.unit_price;
+      const customPriceNum = rawPrice !== undefined && rawPrice !== null ? Number(rawPrice) : NaN;
 
-      // Correctly handle string '0.00' coercion from PostgreSQL
-      const fixedRetailKg = retailNum > 0
-        ? retailNum
-        : (saleNum > 0 ? saleNum : (itemUnitPriceNum > 0 ? (itemUnitPriceNum / unitMultiplier) : 0));
+      const defaultKgPrice = retailNum > 0 ? retailNum : (saleNum > 0 ? saleNum : 0);
+      const defaultUnitPrice = defaultKgPrice * unitMultiplier;
 
-      // Strictly lock selling price: use database's product selling price, or fallback to unit_price
-      const effectiveUnitPrice = fixedRetailKg > 0 ? (fixedRetailKg * unitMultiplier) : itemUnitPriceNum;
+      // Allow manual price override from payload; do not overwrite custom price with database product.selling_price
+      const effectiveUnitPrice = !isNaN(customPriceNum) ? customPriceNum : defaultUnitPrice;
       const lineTotal = Number(item.quantity) * effectiveUnitPrice;
       subtotal += lineTotal;
 
@@ -127,16 +126,23 @@ export async function processPOSCheckout(
 
         invoiceItemsToInsert.push({
           product_id: item.product_id,
+          variant_id: (item as any).variant_id || null,
+          size: (item as any).size || (product as any).size || 'Standard',
           batch_id: primaryBatchId,
           quantity: item.quantity,
+          requested_qty: 0,
+          fulfilled_qty: 0,
+          deferred_qty: 0,
           selected_unit,
           actual_weight_per_unit: unitMultiplier,
           net_kg_processed: sold_kg,
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: effectiveUnitPrice,
           total_price: lineTotal,
+          is_deferred: false,
           estimated_cogs: -lineCogs,
           actual_cogs: -lineCogs,
+          missing_qty: 0,
           name_urdu: product.name_urdu || null,
           batchDepletions: [],
         });
@@ -159,23 +165,17 @@ export async function processPOSCheckout(
         const liveProduct = await trx('products')
           .where({ id: item.product_id })
           .forUpdate()
-          .select('id', 'name', 'total_stock_kg')
+          .select('id', 'name', 'total_stock_kg', 'rolling_avg_cost_per_kg', 'cost_price', 'min_markup_percent')
           .first();
 
-        const live_stock = Number(liveProduct?.total_stock_kg ?? product.total_stock_kg ?? 0);
+        const live_stock = Math.max(0, Number(liveProduct?.total_stock_kg ?? product.total_stock_kg ?? 0));
+        const requested_qty = sold_kg;
+        const available_qty = Math.min(live_stock, requested_qty);
+        const missing_qty = Math.max(0, requested_qty - available_qty);
+        const is_deferred = missing_qty > 0;
 
-        if (live_stock < sold_kg) {
-          throw new InsufficientStockError(live_stock);
-        }
-
-        // ── Auto-FIFO Price-Bucket Stock Deduction ──
-        const activeBuckets = await trx('inventory_batches')
-          .where('product_id', item.product_id)
-          .andWhere('remaining_qty', '>', 0)
-          .orderBy('created_at', 'asc'); // Oldest first
-
-        let kgToDeduct = sold_kg;
-        let totalLineCogs = 0;
+        let kgToDeduct = available_qty;
+        let totalAvailableCogs = 0;
         let primaryBatchId: string | null = null;
         const itemBatchDepletions: {
           batch_id: string;
@@ -183,72 +183,108 @@ export async function processPOSCheckout(
           cogs_per_kg: number;
         }[] = [];
 
-        for (const bucket of activeBuckets) {
-          if (kgToDeduct <= 0) break;
-          if (!primaryBatchId) primaryBatchId = bucket.id;
+        if (available_qty > 0) {
+          // ── Auto-FIFO Price-Bucket Stock Deduction for available stock ──
+          const activeBuckets = await trx('inventory_batches')
+            .where('product_id', item.product_id)
+            .andWhere('remaining_qty', '>', 0)
+            .orderBy('created_at', 'asc'); // Oldest first
 
-          const available = Number(bucket.remaining_qty || 0);
-          const buyPrice = Number(bucket.batch_buy_price_per_kg ?? bucket.buy_price_per_kg ?? 0);
+          for (const bucket of activeBuckets) {
+            if (kgToDeduct <= 0) break;
+            if (!primaryBatchId) primaryBatchId = bucket.id;
 
-          if (available >= kgToDeduct) {
-            const qtyToTake = kgToDeduct;
-            const newRemaining = available - qtyToTake;
-            const newStatus = newRemaining <= 0 ? 'DEPLETED' : 'ACTIVE';
+            const available = Number(bucket.remaining_qty || 0);
+            const buyPrice = Number(bucket.batch_buy_price_per_kg ?? bucket.buy_price_per_kg ?? 0);
 
-            await trx('inventory_batches')
-              .where('id', bucket.id)
-              .update({
-                remaining_qty: newRemaining,
-                status: newStatus,
-                updated_at: new Date(),
+            if (available >= kgToDeduct) {
+              const qtyToTake = kgToDeduct;
+              const newRemaining = available - qtyToTake;
+              const newStatus = newRemaining <= 0 ? 'DEPLETED' : 'ACTIVE';
+
+              await trx('inventory_batches')
+                .where('id', bucket.id)
+                .update({
+                  remaining_qty: newRemaining,
+                  status: newStatus,
+                  updated_at: new Date(),
+                });
+
+              totalAvailableCogs += qtyToTake * buyPrice;
+              itemBatchDepletions.push({
+                batch_id: bucket.id,
+                qty_deducted: qtyToTake,
+                cogs_per_kg: buyPrice,
               });
+              kgToDeduct = 0;
+              break;
+            } else {
+              // Empty this bucket to 0
+              const qtyToTake = available;
+              await trx('inventory_batches')
+                .where('id', bucket.id)
+                .update({
+                  remaining_qty: 0,
+                  status: 'DEPLETED',
+                  updated_at: new Date(),
+                });
 
-            totalLineCogs += qtyToTake * buyPrice;
-            itemBatchDepletions.push({
-              batch_id: bucket.id,
-              qty_deducted: qtyToTake,
-              cogs_per_kg: buyPrice,
-            });
-            kgToDeduct = 0;
-            break;
-          } else {
-            // Empty this bucket to 0
-            const qtyToTake = available;
-            await trx('inventory_batches')
-              .where('id', bucket.id)
-              .update({
-                remaining_qty: 0,
-                status: 'DEPLETED',
-                updated_at: new Date(),
+              totalAvailableCogs += qtyToTake * buyPrice;
+              itemBatchDepletions.push({
+                batch_id: bucket.id,
+                qty_deducted: qtyToTake,
+                cogs_per_kg: buyPrice,
               });
-
-            totalLineCogs += qtyToTake * buyPrice;
-            itemBatchDepletions.push({
-              batch_id: bucket.id,
-              qty_deducted: qtyToTake,
-              cogs_per_kg: buyPrice,
-            });
-            kgToDeduct -= qtyToTake;
+              kgToDeduct -= qtyToTake;
+            }
           }
+
+          // Fallback if physical stock was in total_stock_kg but not in active batches
+          if (kgToDeduct > 0) {
+            const { unitPrice: latestFallbackPrice } = await getLatestMarketBatchPrice(
+              trx,
+              item.product_id,
+              liveProduct
+            );
+            totalAvailableCogs += kgToDeduct * latestFallbackPrice;
+          }
+
+          // Deduct physically available stock from product
+          await trx('products')
+            .where({ id: product.id })
+            .update({
+              total_stock_kg: trx.raw('GREATEST(0, total_stock_kg - ?)', [available_qty]),
+              updated_at: new Date(),
+            });
+
+          // Record inventory transaction for physical dispatch
+          await trx('inventory_transactions').insert({
+            product_id: item.product_id,
+            transaction_type: 'SALE',
+            quantity_kg: available_qty,
+            unit_cost: available_qty > 0 ? (totalAvailableCogs / available_qty) : 0,
+            total_asset_value: Math.round(totalAvailableCogs * 100) / 100,
+            capital_equity_value: 0,
+            notes: `POS Sale (${targetCustomer.name}) (Dispatched ${available_qty} KG${missing_qty > 0 ? `, Deferred ${missing_qty} KG` : ''})`,
+            created_by: userId,
+          });
         }
 
-        const unbatchedShortfallQty = kgToDeduct > 0 ? kgToDeduct : 0;
-        const overdraftEstimate = unbatchedShortfallQty > 0
-          ? await estimateOverdraftCogs(trx, item.product_id, unbatchedShortfallQty, product)
-          : null;
-        const fallbackBatchPrice = overdraftEstimate?.unitPrice ?? Number(product.rolling_avg_cost_per_kg || product.cost_price || 0);
+        // ── Shared Overdraft Split Engine: latest market batch price (with product base/cost fallback) ──
+        const { unitPrice: latestBatchPrice, estimatedCogs: missingEstimatedCogs } =
+          await estimateOverdraftCogs(trx, item.product_id, missing_qty, liveProduct || product);
 
-        const unbatchedEstimatedCogs = overdraftEstimate?.estimatedCogs ?? 0;
-        const lineCogs = Math.round(totalLineCogs * 100) / 100;
-        const estimatedLineCogs = Math.round((totalLineCogs + unbatchedEstimatedCogs) * 100) / 100;
+        const estimated_cogs = Math.round((totalAvailableCogs + missingEstimatedCogs) * 100) / 100;
+        const actual_cogs = Math.round(totalAvailableCogs * 100) / 100;
+
         const appliedCogsPerKg = sold_kg > 0
-          ? Math.round((estimatedLineCogs / sold_kg) * 10000) / 10000
-          : fallbackBatchPrice;
+          ? Math.round((estimated_cogs / sold_kg) * 10000) / 10000
+          : (latestBatchPrice || Number(product.rolling_avg_cost_per_kg || product.cost_price || 0));
 
         // Advisory Price Floor Check against rolling average cost (non-blocking for POS)
         const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
         const floorPricePerKg = appliedCogsPerKg * (1 + (minMarkupPercent / 100));
-        const sellingPricePerKg = sold_kg > 0 ? (lineTotal / sold_kg) : Number(item.unit_price);
+        const sellingPricePerKg = sold_kg > 0 ? (lineTotal / sold_kg) : effectiveUnitPrice;
 
         if (sellingPricePerKg < floorPricePerKg - 0.01) {
           logger.warn(
@@ -257,41 +293,27 @@ export async function processPOSCheckout(
           );
         }
 
-        // Deduct stock from product
-        await trx('products')
-          .where({ id: product.id })
-          .update({
-            total_stock_kg: trx.raw('total_stock_kg - ?', [sold_kg]),
-            updated_at: new Date(),
-          });
-
         invoiceItemsToInsert.push({
           product_id: item.product_id,
+          variant_id: (item as any).variant_id || null,
+          size: (item as any).size || product.size || 'Standard',
           batch_id: primaryBatchId,
           quantity: item.quantity,
+          requested_qty,
+          fulfilled_qty: available_qty,
+          deferred_qty: missing_qty,
           selected_unit,
           actual_weight_per_unit: unitMultiplier,
           net_kg_processed: sold_kg,
           applied_cogs_per_kg: appliedCogsPerKg,
           unit_price: effectiveUnitPrice,
           total_price: lineTotal,
-          is_deferred: kgToDeduct > 0,
-          estimated_cogs: estimatedLineCogs,
-          actual_cogs: lineCogs,
+          is_deferred,
+          estimated_cogs,
+          actual_cogs,
+          missing_qty,
           name_urdu: product.name_urdu || null,
           batchDepletions: itemBatchDepletions,
-        });
-
-        // Record inventory transaction
-        await trx('inventory_transactions').insert({
-          product_id: item.product_id,
-          transaction_type: 'SALE',
-          quantity_kg: sold_kg,
-          unit_cost: appliedCogsPerKg,
-          total_asset_value: lineCogs,
-          capital_equity_value: 0,
-          notes: `POS Sale (${targetCustomer.name})`,
-          created_by: userId,
         });
       }
     }
@@ -349,6 +371,10 @@ export async function processPOSCheckout(
       balanceDue = Math.max(0, Math.round((totalAmount - effectiveAmountPaid) * 100) / 100);
     }
 
+    const invoiceRequestedTotal = invoiceItemsToInsert.reduce((sum, it: any) => sum + Number(it.requested_qty || 0), 0);
+    const invoiceFulfilledTotal = invoiceItemsToInsert.reduce((sum, it: any) => sum + Number(it.fulfilled_qty || 0), 0);
+    const invoiceDeferredTotal = invoiceItemsToInsert.reduce((sum, it: any) => sum + Number(it.deferred_qty || 0), 0);
+
     // 2. Determine Next Sequential POS Bill Number
     const posRows = await trx('sales_invoices')
       .where('invoice_number', 'like', 'POS-%')
@@ -380,6 +406,9 @@ export async function processPOSCheckout(
         paid_amount: effectiveAmountPaid,
         cash_tendered: cashTendered,
         change_returned: changeReturned,
+        requested_qty: invoiceRequestedTotal,
+        fulfilled_qty: invoiceFulfilledTotal,
+        deferred_qty: invoiceDeferredTotal,
         status: balanceDue <= 0 ? 'PAID' : (effectiveAmountPaid > 0 ? 'PARTIAL' : 'UNPAID'),
         notes: totalAmount < 0
           ? `POS Refund (${targetCustomer.name})`
@@ -397,16 +426,31 @@ export async function processPOSCheckout(
     (invoice as any).balance_due = balanceDue;
     (invoice as any).split_cash_amount = isSplit ? splitCashNet : (isBank ? 0 : effectiveAmountPaid);
     (invoice as any).split_bank_amount = isSplit ? splitBankNet : (isBank ? effectiveAmountPaid : 0);
+    (invoice as any).requested_qty = invoiceRequestedTotal;
+    (invoice as any).fulfilled_qty = invoiceFulfilledTotal;
+    (invoice as any).deferred_qty = invoiceDeferredTotal;
 
     // 3. Insert Sales Invoice Items
-    const finalItems = invoiceItemsToInsert.map((i) => {
-      const rest = { ...(i as any) };
-      delete rest.batchDepletions;
-      return {
-        ...rest,
-        invoice_id: invoice.id,
-      };
-    });
+    const finalItems = invoiceItemsToInsert.map((i: any) => ({
+      invoice_id: invoice.id,
+      product_id: i.product_id,
+      size: i.size || 'Standard',
+      batch_id: i.batch_id,
+      quantity: i.quantity,
+      requested_qty: i.requested_qty ?? i.quantity,
+      fulfilled_qty: i.fulfilled_qty ?? i.quantity,
+      deferred_qty: i.deferred_qty ?? 0,
+      selected_unit: i.selected_unit,
+      actual_weight_per_unit: i.actual_weight_per_unit,
+      net_kg_processed: i.net_kg_processed,
+      applied_cogs_per_kg: i.applied_cogs_per_kg,
+      unit_price: i.unit_price,
+      total_price: i.total_price,
+      is_deferred: i.is_deferred ?? false,
+      estimated_cogs: i.estimated_cogs,
+      actual_cogs: i.actual_cogs,
+      name_urdu: i.name_urdu || null,
+    }));
     const insertedDbItems = await trx('sales_invoice_items').insert(finalItems).returning('*');
 
     // Record Strict Batch Lineage for POS sales
@@ -426,6 +470,25 @@ export async function processPOSCheckout(
     if (posLineageRecords.length > 0) {
       await trx('sales_invoice_item_batches').insert(posLineageRecords);
     }
+
+    // Insert shortfall (missing_qty) into pending_deliveries (backorder) queue linked to this POS receipt
+    for (let i = 0; i < invoiceItemsToInsert.length; i++) {
+      const itemMeta: any = invoiceItemsToInsert[i];
+      if (itemMeta.missing_qty > 0) {
+        const insertedItem = insertedDbItems[i];
+        await trx('pending_deliveries').insert({
+          sales_invoice_id: invoice.id,
+          sales_invoice_item_id: insertedItem.id,
+          product_id: itemMeta.product_id,
+          variant_id: itemMeta.variant_id || null,
+          pending_qty: itemMeta.missing_qty,
+          fulfilled_qty: 0,
+          status: 'PENDING',
+        });
+      }
+    }
+
+    (invoice as any).items = insertedDbItems;
 
     // 4. Create Customer Payment & Liquidity Inflow (Cash in Drawer OR Bank Balance OR Split)
     if (effectiveAmountPaid > 0) {

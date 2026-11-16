@@ -23,7 +23,6 @@ export const createProductSchema = z.object({
 
 
 export const updateProductSchema = createProductSchema
-  .omit({ opening_stock: true, opening_stock_kg: true, historical_wac: true }) // Day Zero stock fields are immutable
   .partial()
   .extend({
     is_active: z.boolean().optional(),

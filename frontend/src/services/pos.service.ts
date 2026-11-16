@@ -6,6 +6,7 @@ export interface POSCheckoutItem {
   quantity: number;
   selected_unit?: string;
   unit_price: number;
+  price?: number;
 }
 
 export interface POSCheckoutData {

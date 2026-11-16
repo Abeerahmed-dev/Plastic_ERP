@@ -4,7 +4,15 @@ export const checkoutItemSchema = z.object({
   product_id: z.string().uuid(),
   quantity: z.number().refine((val) => val !== 0, { message: 'Quantity cannot be zero' }),
   selected_unit: z.string().optional().default('KG'),
-  unit_price: z.number().nonnegative(),
+  unit_price: z.number().nonnegative().optional(),
+  price: z.number().nonnegative().optional(),
+}).transform((data) => {
+  const customPrice = data.price !== undefined ? data.price : (data.unit_price !== undefined ? data.unit_price : 0);
+  return {
+    ...data,
+    unit_price: customPrice,
+    price: customPrice,
+  };
 });
 
 export const checkoutSchema = z.object({

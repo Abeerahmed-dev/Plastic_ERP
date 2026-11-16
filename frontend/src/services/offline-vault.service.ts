@@ -144,7 +144,8 @@ class OfflineVaultService {
       items: (rec.items || rec.payload?.items || []).map((i: any) => ({
         product_id: i.product_id,
         quantity: Number(i.quantity) || 0,
-        unit_price: Number(i.unit_price) || 0,
+        unit_price: Number(i.price !== undefined ? i.price : i.unit_price) || 0,
+        price: Number(i.price !== undefined ? i.price : i.unit_price) || 0,
         selected_unit: i.selected_unit || 'KG',
       })),
       payment_method: rec.payment_method || rec.payload?.payment_method || 'CASH',

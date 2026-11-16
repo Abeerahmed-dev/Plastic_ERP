@@ -27,6 +27,9 @@ export interface Product {
   total_stock_kg?: number;
   is_active: boolean;
   notes: string | null;
+  has_transactions?: boolean;
+  transaction_count?: number;
+  historical_wac?: number;
   created_at: string;
   updated_at: string;
 }
@@ -50,12 +53,16 @@ export interface CreateProductData {
 export interface UpdateProductData {
   code?: string;
   name?: string;
+  name_urdu?: string;
   size?: string;
   low_stock_threshold?: number;
   description?: string;
   category_id?: string;
   cost_price?: number;
   sale_price?: number;
+  opening_stock?: number;
+  opening_stock_kg?: number;
+  historical_wac?: number;
   is_active?: boolean;
   notes?: string;
 }

@@ -15,6 +15,7 @@ router.get('/:id/returns/summary', purchasesController.getPurchaseInvoiceReturnS
 router.post('/:id/returns', purchasesController.createPurchaseReturn);
 router.post('/returns', purchasesController.createPurchaseReturn);
 router.post('/:id/update-stock-dc-and-prices', verifyRole(['OWNER', 'ADMIN']), purchasesController.updateStockDcAndPrices);
+router.post('/:id/void', verifyRole(['OWNER', 'ADMIN']), purchasesController.voidPurchaseInvoice);
 router.get('/:id', purchasesController.getPurchaseInvoiceById);
 router.post('/', purchasesController.createPurchaseInvoice);
 router.patch('/:id/status', verifyRole(['OWNER', 'ADMIN']), purchasesController.updatePurchaseInvoiceStatus);

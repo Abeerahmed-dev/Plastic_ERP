@@ -23,6 +23,7 @@ interface CartItem {
   quantity: number | string;
   selected_unit: string;
   unit_price: number | string;
+  price?: number | string;
   fixed_retail_price_per_kg: number;
   current_stock: number;
   bag_weight_kg: number;
@@ -119,14 +120,9 @@ export default function POSPage() {
   });
 
   const addToCart = (product: any) => {
-    const stockKg = Number(product.total_stock_kg ?? product.current_stock ?? 0);
-    if (stockKg <= 0) return;
-
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product_id === product.id);
       if (existingIndex >= 0) {
-        const existing = prev[existingIndex];
-        if (Number(existing.quantity) >= stockKg) return prev;
         return prev.map((item, idx) =>
           idx === existingIndex ? { ...item, quantity: (Number(item.quantity) || 0) + 1 } : item,
         );
@@ -134,7 +130,7 @@ export default function POSPage() {
 
       const bagWeight = Number(product.bag_weight_kg || 25.0);
       const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
-      const initialUnitPrice = isCashier ? fixedRetailKg : Number(product.sale_price || 0);
+      const initialUnitPrice = fixedRetailKg > 0 ? fixedRetailKg : Number(product.sale_price || 0);
 
       const productName = product.size ? `${product.name} - ${product.size}` : product.name;
 
@@ -148,6 +144,7 @@ export default function POSPage() {
           quantity: 1,
           selected_unit: 'KG',
           unit_price: initialUnitPrice,
+          price: initialUnitPrice,
           fixed_retail_price_per_kg: fixedRetailKg,
           current_stock: Number(product.total_stock_kg ?? product.current_stock ?? 0),
           bag_weight_kg: bagWeight,
@@ -163,6 +160,13 @@ export default function POSPage() {
         if (item.product_id !== productId) return item;
         const updated = { ...item, ...updates };
 
+        // Keep unit_price and price property synchronized
+        if (updates.price !== undefined && updates.unit_price === undefined) {
+          updated.unit_price = updates.price;
+        } else if (updates.unit_price !== undefined && updates.price === undefined) {
+          updated.price = updates.unit_price;
+        }
+
         // If unit changes, scale price proportionally based on bag weight
         if (updates.selected_unit && updates.selected_unit !== item.selected_unit) {
           const oldMultiplier =
@@ -173,8 +177,11 @@ export default function POSPage() {
             updates.selected_unit.toLowerCase() === 'bag' || updates.selected_unit.toLowerCase() === 'bora'
               ? item.bag_weight_kg
               : 1.0;
-          const ratePerKg = oldMultiplier > 0 ? (Number(item.unit_price) / oldMultiplier) : Number(item.unit_price);
-          updated.unit_price = Math.round(ratePerKg * newMultiplier * 100) / 100;
+          const currentPrice = Number(updated.price !== undefined ? updated.price : (updated.unit_price ?? item.unit_price ?? 0));
+          const ratePerKg = oldMultiplier > 0 ? (currentPrice / oldMultiplier) : currentPrice;
+          const scaledPrice = Math.round(ratePerKg * newMultiplier * 100) / 100;
+          updated.unit_price = scaledPrice;
+          updated.price = scaledPrice;
         }
 
         return updated;
@@ -191,7 +198,10 @@ export default function POSPage() {
   const hasCreditBalance = customerBalance < 0;
   const availableCredit = hasCreditBalance ? Math.abs(customerBalance) : 0;
 
-const subtotal = cart.reduce((acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0), 0);
+  const subtotal = cart.reduce(
+    (acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.price !== undefined ? item.price : item.unit_price) || 0),
+    0
+  );
   const effectiveDiscount = isCashier ? 0 : discount;
   const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
@@ -212,12 +222,16 @@ cart.every((item) => Number(item.quantity) > 0);
     mutationFn: () =>
       posService.checkout({
         customer_id: selectedCustomerId || undefined,
-        items: cart.map((i) => ({
-          product_id: i.product_id,
-          quantity: Number(i.quantity) || 0,
-          selected_unit: i.selected_unit,
-          unit_price: Number(i.unit_price) || 0,
-        })),
+        items: cart.map((i) => {
+          const itemPrice = Number(i.price !== undefined ? i.price : i.unit_price) || 0;
+          return {
+            product_id: i.product_id,
+            quantity: Number(i.quantity) || 0,
+            selected_unit: i.selected_unit,
+            unit_price: itemPrice,
+            price: itemPrice,
+          };
+        }),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
@@ -301,12 +315,16 @@ const handleOfflineCheckout = async () => {
     try {
       const orderData = {
         customer_id: selectedCustomerId || undefined,
-        items: cart.map((i) => ({
-          product_id: i.product_id,
-          quantity: Number(i.quantity) || 0,
-          selected_unit: i.selected_unit,
-          unit_price: i.unit_price,
-        })),
+        items: cart.map((i) => {
+          const itemPrice = Number(i.price !== undefined ? i.price : i.unit_price) || 0;
+          return {
+            product_id: i.product_id,
+            quantity: Number(i.quantity) || 0,
+            selected_unit: i.selected_unit,
+            unit_price: itemPrice,
+            price: itemPrice,
+          };
+        }),
         discount: effectiveDiscount,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
@@ -570,12 +588,12 @@ return (
                     onClick={() => addToCart(p)}
                     className={`border rounded-xl p-2.5 flex flex-col justify-between text-left transition-all duration-150 group relative min-h-[105px] max-h-[120px] overflow-hidden cursor-pointer ${
                       isOutOfStock
-? 'border-red-300 bg-red-50/80 shadow-[0_4px_14px_rgba(239,68,68,0.18)] cursor-not-allowed opacity-90 dark:bg-red-950/30 dark:border-red-900/50'
+                        ? 'border-amber-300/80 bg-amber-50/40 hover:border-amber-500 shadow-2xs hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] dark:bg-amber-950/20 dark:border-amber-900/40'
                         : 'bg-white border-slate-300/80 shadow-[0_6px_16px_rgba(15,23,42,0.22),0_2px_6px_rgba(15,23,42,0.12)] hover:border-blue-500 hover:shadow-[0_10px_24px_rgba(15,23,42,0.30),0_4px_10px_rgba(37,99,235,0.20)] hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98] dark:bg-[#121520] dark:border-[#23283B] hover:dark:border-blue-500/80 dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)]'
                     }`}
                     title={
                       isOutOfStock
-                        ? `${p.name} - Rs. ${displayPrice} / KG (${stockKg} KG Available - Click to sell)`
+                        ? `${p.name} - Rs. ${displayPrice} / KG (${stockKg} KG Available - Overdraft Sale)`
                         : `${p.name} - Rs. ${displayPrice} / KG (${stockKg} KG Available)`
                     }
                   >
@@ -583,13 +601,13 @@ return (
                     <div className="flex items-center justify-between gap-1 w-full mb-0.5">
                       <span
                         className={`text-[9px] font-bold px-1.5 py-0.5 rounded truncate max-w-[50%] ${
-isOutOfStock ? 'text-red-700 bg-red-100/80 dark:bg-red-900/40 dark:text-red-300' : 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400'
+                          isOutOfStock ? 'text-amber-800 bg-amber-100/80 dark:bg-amber-900/40 dark:text-amber-300' : 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400'
                         }`}
                       >
                         {p.category || p.category_name || 'Item'}
                       </span>
                       {isOutOfStock ? (
-                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 bg-rose-500 text-white shadow-2xs uppercase tracking-tight" title="Out of Stock (Click to sell anyway)">
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 bg-amber-500 text-white shadow-2xs uppercase tracking-tight" title="0 KG on shelf - Overdraft enabled">
                           {stockKg} KG
                         </span>
                       ) : (
@@ -609,7 +627,7 @@ isOutOfStock ? 'text-red-700 bg-red-100/80 dark:bg-red-900/40 dark:text-red-300'
                     <div className="my-auto py-0.5">
                       <p
                         className={`font-bold text-xs line-clamp-2 leading-snug transition-colors ${
-isOutOfStock ? 'text-red-950/80 dark:text-red-300' : 'text-slate-800 group-hover:text-blue-600 dark:text-slate-100 group-hover:dark:text-blue-400'
+                          isOutOfStock ? 'text-amber-950/90 dark:text-amber-200' : 'text-slate-800 group-hover:text-blue-600 dark:text-slate-100 group-hover:dark:text-blue-400'
                         }`}
                       >
                         {p.size ? `${p.name} - ${p.size}` : p.name}
@@ -627,35 +645,35 @@ isOutOfStock ? 'text-red-950/80 dark:text-red-300' : 'text-slate-800 group-hover
                     {/* Bottom: Price & Quick Add */}
                     <div
                       className={`flex items-end justify-between pt-1 border-t mt-0.5 w-full ${
-isOutOfStock ? 'border-red-200 dark:border-red-900/40' : 'border-slate-100 dark:border-[#1e2235]'
+                        isOutOfStock ? 'border-amber-200 dark:border-amber-900/40' : 'border-slate-100 dark:border-[#1e2235]'
                       }`}
                     >
                       <div>
                         <span
-className={`text-[8px] font-semibold uppercase block leading-none ${
-                            isOutOfStock ? 'text-red-400' : 'text-slate-400 dark:text-slate-500'
+                          className={`text-[8px] font-semibold uppercase block leading-none ${
+                            isOutOfStock ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-500'
                           }`}
                         >
                           Rate
                         </span>
                         <span
                           className={`font-black text-xs leading-tight ${
-isOutOfStock ? 'text-red-700 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'
+                            isOutOfStock ? 'text-amber-700 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
                           }`}
                         >
                           Rs. {displayPrice}
                           <span
-className={`text-[9px] font-medium ml-0.5 ${
-                              isOutOfStock ? 'text-red-400' : 'text-slate-500 dark:text-slate-400'
+                            className={`text-[9px] font-medium ml-0.5 ${
+                              isOutOfStock ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'
                             }`}
                           >
                             /KG
                           </span>
                         </span>
                       </div>
-{isOutOfStock ? (
-                        <div className="px-1.5 py-0.5 rounded bg-red-100 border border-red-200 text-red-700 text-[9px] font-extrabold uppercase shadow-2xs dark:bg-red-950/50 dark:border-red-800 dark:text-red-300">
-                          0 KG
+                      {isOutOfStock ? (
+                        <div className="w-5 h-5 rounded-md bg-amber-100 text-amber-700 group-hover:bg-amber-500 group-hover:text-white flex items-center justify-center text-[11px] font-black transition-colors shadow-2xs dark:bg-amber-950/50 dark:text-amber-400 dark:border dark:border-amber-800/50 group-hover:dark:bg-amber-600 group-hover:dark:text-white" title="Add to cart (Overdraft)">
+                          +
                         </div>
                       ) : (
                         <div className="w-5 h-5 rounded-md bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center text-[11px] font-black transition-colors shadow-2xs dark:bg-blue-950/50 dark:text-blue-400 dark:border dark:border-blue-800/50 group-hover:dark:bg-blue-600 group-hover:dark:text-white">
@@ -727,22 +745,37 @@ const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selec
 
               const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
               const floorPricePerUnit = floorPricePerKg * unitMultiplier;
-              const itemUnitPriceNum = Number(item.unit_price) || 0;
+              const itemUnitPriceNum = Number(item.price !== undefined ? item.price : item.unit_price) || 0;
               const sellingPricePerKg = unitMultiplier > 0 ? (itemUnitPriceNum / unitMultiplier) : itemUnitPriceNum;
               const isBelowFloor = sellingPricePerKg < floorPricePerKg - 0.01;
+
+              const itemQtyKg = (Number(item.quantity) || 0) * unitMultiplier;
+              const liveStockKg = Number(item.current_stock || 0);
+              const isOverdraft = itemQtyKg > liveStockKg;
+              const deferredQtyKg = Math.max(0, itemQtyKg - Math.max(0, liveStockKg));
 
               return (
                 <div
                   key={item.product_id}
                   className={`py-2 px-0.5 transition-all ${
-                    isBelowFloor ? 'bg-amber-50/50 -mx-1 px-1.5 rounded dark:bg-amber-950/30' : ''
+                    isBelowFloor || isOverdraft ? 'bg-amber-50/50 -mx-1 px-1.5 rounded dark:bg-amber-950/30' : ''
                   }`}
                 >
                   {/* Top: Product Name & Delete Button */}
                   <div className="flex justify-between items-center gap-1">
-                    <span className="font-bold text-slate-800 text-xs truncate dark:text-white" title={item.productName}>
-                      {item.productName}
-                    </span>
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="font-bold text-slate-800 text-xs truncate dark:text-white" title={item.productName}>
+                        {item.productName}
+                      </span>
+                      {isOverdraft && (
+                        <span
+                          className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 dark:bg-amber-950/60 dark:border-amber-700 dark:text-amber-300 uppercase tracking-tight shrink-0"
+                          title={`Available Stock: ${liveStockKg} KG | Backorder: ${deferredQtyKg.toFixed(1)} KG deferred`}
+                        >
+                          Overdraft
+                        </span>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.product_id)}
@@ -753,6 +786,13 @@ const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selec
                     </button>
                   </div>
 
+                  {isOverdraft && (
+                    <div className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50/90 p-1 rounded border border-amber-300/80 font-medium my-1 dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300">
+                      <AlertCircle className="w-3 h-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                      Backorder: {deferredQtyKg.toFixed(1)} KG deferred to pending delivery
+                    </div>
+                  )}
+
                   {isBelowFloor && (
                     <div className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50 p-1 rounded border border-amber-300 font-medium my-1 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300">
                       <AlertCircle className="w-3 h-3 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -760,7 +800,7 @@ const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selec
                     </div>
                   )}
 
-                  {/* Bottom: Unit, Quantity & Line Total Price (No editable price input) */}
+                  {/* Bottom: Unit, Quantity & Line Total Price (Editable custom price) */}
                   <div className="flex justify-between items-center gap-2 mt-1">
                     <div className="flex items-center gap-1.5">
                       <select
@@ -792,14 +832,39 @@ const unitMultiplier = (item.selected_unit.toLowerCase() === 'bag' || item.selec
                         className="w-14 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
                       />
 
-                      <span className="text-[11px] text-slate-500 font-semibold font-mono dark:text-slate-400">
-                        @ Rs. {item.unit_price}
-                      </span>
+                      <div className="flex items-center gap-0.5">
+                        <span className="text-[10px] text-slate-500 font-semibold font-mono dark:text-slate-400">
+                          @
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          min={0}
+                          value={(item.price !== undefined ? item.price : item.unit_price) === '' ? '' : (item.price !== undefined ? item.price : item.unit_price)}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const parsedVal = val === '' ? '' : (parseFloat(val) || 0);
+                            updateCartItem(item.product_id, {
+                              price: parsedVal,
+                              unit_price: parsedVal,
+                            });
+                          }}
+                          onBlur={() => {
+                            const cur = item.price !== undefined ? item.price : item.unit_price;
+                            if (cur === '' || Number(cur) < 0) {
+                              updateCartItem(item.product_id, { price: 0, unit_price: 0 });
+                            }
+                          }}
+                          className="w-16 text-center text-xs font-bold border border-slate-300 rounded py-0.5 px-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-white font-mono"
+                          title="Override selling price"
+                        />
+                      </div>
                     </div>
 
                     <div className="text-right shrink-0">
                       <span className="text-xs font-black text-slate-900 block font-mono dark:text-white">
-                        Rs. {((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)).toLocaleString()}
+                        Rs. {((Number(item.quantity) || 0) * (Number(item.price !== undefined ? item.price : item.unit_price) || 0)).toLocaleString()}
                       </span>
                     </div>
                   </div>
