@@ -41,29 +41,37 @@ export async function getProductTransactionCount(
   productId: string,
   client: Knex | Knex.Transaction = db
 ): Promise<number> {
-  const [sales] = await client('sales_invoice_items')
+  const salesQuery: any = client('sales_invoice_items')
     .where('product_id', productId)
-    .count<{ count: string }>('id as count');
+    .count('id as count');
+  const salesResult = typeof salesQuery?.first === 'function' ? await salesQuery.first() : await salesQuery;
+  const salesCount = Array.isArray(salesResult)
+    ? Number(salesResult[0]?.count || 0)
+    : Number(salesResult?.count || 0);
 
-  const [purchases] = await client('purchase_invoice_items')
+  const purchasesQuery: any = client('purchase_invoice_items')
     .where('product_id', productId)
-    .count<{ count: string }>('id as count');
+    .count('id as count');
+  const purchasesResult = typeof purchasesQuery?.first === 'function' ? await purchasesQuery.first() : await purchasesQuery;
+  const purchasesCount = Array.isArray(purchasesResult)
+    ? Number(purchasesResult[0]?.count || 0)
+    : Number(purchasesResult?.count || 0);
 
   let ledgerCount = 0;
   const hasTx = await client.schema.hasTable('inventory_transactions');
   if (hasTx) {
-    const [ledger] = await client('inventory_transactions')
+    const ledgerQuery: any = client('inventory_transactions')
       .where('product_id', productId)
       .where('transaction_type', '!=', 'OPENING_STOCK')
-      .count<{ count: string }>('id as count');
-    ledgerCount = parseInt(ledger?.count || '0', 10);
+      .count('id as count');
+    const ledgerResult = typeof ledgerQuery?.first === 'function' ? await ledgerQuery.first() : await ledgerQuery;
+    const ledgerVal = Array.isArray(ledgerResult)
+      ? Number(ledgerResult[0]?.count || 0)
+      : Number(ledgerResult?.count || 0);
+    ledgerCount = ledgerVal;
   }
 
-  return (
-    parseInt(sales?.count || '0', 10) +
-    parseInt(purchases?.count || '0', 10) +
-    ledgerCount
-  );
+  return salesCount + purchasesCount + ledgerCount;
 }
 
 /**

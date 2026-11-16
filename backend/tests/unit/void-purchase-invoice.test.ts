@@ -11,7 +11,7 @@ describe('Invoice Voiding Architecture Unit Tests', () => {
 
   describe('voidPurchaseInvoice', () => {
     it('should throw an error if purchase invoice does not exist', async () => {
-      const mockTrx: any = (tableName: string) => {
+      const mockTrx: any = (_tableName: string) => {
         const query: any = {
           where: () => query,
           forUpdate: () => query,
@@ -25,7 +25,7 @@ describe('Invoice Voiding Architecture Unit Tests', () => {
     });
 
     it('should throw an error if purchase invoice is already VOID', async () => {
-      const mockTrx: any = (tableName: string) => {
+      const mockTrx: any = (_tableName: string) => {
         const query: any = {
           where: () => query,
           forUpdate: () => query,
@@ -156,7 +156,7 @@ describe('Invoice Voiding Architecture Unit Tests', () => {
 
   describe('voidInvoice (Sales)', () => {
     it('should throw an error if sales invoice is not found', async () => {
-      const mockTrx: any = (tableName: string) => {
+      const mockTrx: any = (_tableName: string) => {
         const query: any = {
           where: () => query,
           forUpdate: () => query,
