@@ -3,8 +3,10 @@ import { Invoice, CreateInvoiceData } from '../types/invoice.types';
 import { ApiSuccess } from '../types/api.types';
 
 export const invoicesService = {
-  getInvoices: async (): Promise<Invoice[]> => {
-    const response = await api.get<ApiSuccess<Invoice[]>>('/invoices');
+  getInvoices: async (params?: any): Promise<Invoice[]> => {
+    const isParamObject = params && !params.queryKey && typeof params === 'object';
+    const queryParams = isParamObject ? params : undefined;
+    const response = await api.get<ApiSuccess<Invoice[]>>('/invoices', { params: queryParams });
     return response.data.data;
   },
 
@@ -26,6 +28,11 @@ export const invoicesService = {
   createSalesReturn: async (parentInvoiceId: string, data: { return_reason: string; items: { product_id: string; return_quantity: number }[] }): Promise<Invoice> => {
     const response = await api.post<ApiSuccess<Invoice>>(`/sales/${parentInvoiceId}/returns`, data);
     return response.data.data;
+  },
+
+  voidInvoice: async (id: string, voidReason?: string | null): Promise<any> => {
+    const response = await api.post<ApiSuccess<any>>(`/invoices/${id}/void`, { voidReason: voidReason || '' });
+    return response.data;
   }
 };
 

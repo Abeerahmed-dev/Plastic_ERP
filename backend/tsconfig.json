@@ -17,6 +17,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*", "tests/**/*", "knexfile.ts", "jest.config.ts"],
+  "include": ["src/**/*", "tests/**/*", "knexfile.ts"],
   "exclude": ["node_modules", "dist"]
 }

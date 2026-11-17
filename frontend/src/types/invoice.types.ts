@@ -2,6 +2,7 @@ export interface InvoiceItem {
   id: string;
   invoice_id: string;
   product_id: string;
+  size?: string;
   quantity: string | number;
   unit_price: string | number;
   total_price: string | number;
@@ -29,6 +30,13 @@ export interface Invoice {
   change_returned?: number | null;
   status: 'DRAFT' | 'UNPAID' | 'PARTIAL' | 'PAID' | 'CANCELLED';
   notes: string | null;
+  created_by?: string | null;
+  created_by_name?: string | null;
+  created_by_role?: string | null;
+  creator?: {
+    name?: string;
+    role?: string;
+  };
   created_at: string;
   updated_at: string;
   items?: InvoiceItem[];
@@ -37,8 +45,12 @@ export interface Invoice {
 
 export interface CreateInvoiceItemData {
   product_id: string;
+  size?: string;
   quantity: number;
   unit_price: number;
+  total?: number;
+  total_price?: number;
+  selected_unit?: string;
 }
 
 export interface CreateInvoiceData {

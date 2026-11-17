@@ -1,12 +1,17 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
 import { getCustomers, deactivateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 import { useAuthStore } from '../../store/auth.store';
 import CustomerFormModal from './CustomerFormModal';
+import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
+import { ProcessCashRefundModal } from '../../components/Modals/ProcessCashRefundModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
 
-const LIMIT = 20;
+const LIMIT = 100;
 
 function formatRs(n: number | string) {
   return `Rs. ${Number(n).toLocaleString('en-PK', { minimumFractionDigits: 0 })}`;
@@ -16,41 +21,23 @@ export default function CustomersListPage() {
   const { user, hasPermission } = useAuthStore();
   const userRole = (user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
-  const canWrite = isCashier || userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:write');
+  const canWrite = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:write'));
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:delete'));
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'CREDIT' | 'CASH'>('CREDIT');
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [city, setCity] = useState('');
-  const [debouncedCity, setDebouncedCity] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | undefined>();
-
-  // Debounce search
-  const handleSearch = (v: string) => {
-    setSearch(v);
-    clearTimeout((window as { _searchTimer?: ReturnType<typeof setTimeout> })._searchTimer);
-    (window as { _searchTimer?: ReturnType<typeof setTimeout> })._searchTimer = setTimeout(() => {
-      setDebouncedSearch(v);
-      setPage(1);
-    }, 350);
-  };
-
-  const handleCity = (v: string) => {
-    setCity(v);
-    clearTimeout((window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer);
-    (window as { _cityTimer?: ReturnType<typeof setTimeout> })._cityTimer = setTimeout(() => {
-      setDebouncedCity(v);
-      setPage(1);
-    }, 350);
-  };
+  const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
+  const [advanceTargetCustomer, setAdvanceTargetCustomer] = useState<Customer | null>(null);
+  const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [refundTargetCustomer, setRefundTargetCustomer] = useState<Customer | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['customers', page, debouncedSearch, debouncedCity, activeTab],
-    queryFn: () => getCustomers({ page, limit: LIMIT, search: debouncedSearch || undefined, city: debouncedCity || undefined, customer_type: activeTab }),
+    queryKey: ['customers', page, activeTab],
+    queryFn: () => getCustomers({ page, limit: LIMIT, customer_type: activeTab }),
   });
 
   const deactivateMutation = useMutation({
@@ -60,6 +47,38 @@ export default function CustomersListPage() {
 
   const customers = data?.data ?? [];
   const meta = data?.meta;
+
+  const normalizedCustomers = useMemo(() => {
+    return customers.map((c) => ({
+      ...c,
+      city: c.city || null,
+      name: c.name || '',
+      invoice_number: null,
+    }));
+  }, [customers]);
+
+  // Phase 1: Cascading filters hook
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    resetFilters,
+  } = useCascadingFilters(normalizedCustomers);
+
+  // Phase 3: Strict multi-condition filter before rendering
+  const filteredTableRows = useMemo(() => {
+    return normalizedCustomers.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+      return matchesCity && matchesName && matchesInvoice;
+    });
+  }, [normalizedCustomers, selectedCity, selectedName, selectedInvoice]);
 
   const openCreate = () => { setEditTarget(undefined); setModalOpen(true); };
   const openEdit = (c: Customer) => { setEditTarget(c); setModalOpen(true); };
@@ -87,9 +106,9 @@ export default function CustomersListPage() {
             {canWrite && (
               <button
                 onClick={openCreate}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition shadow-sm"
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 transition cursor-pointer"
               >
-                <Plus className="h-4 w-4" />
+                <Plus className="h-4 w-4 text-slate-950" />
                 Add Customer
               </button>
             )}
@@ -120,25 +139,20 @@ export default function CustomersListPage() {
           </button>
         </div>
 
-        {/* Search & City Filters */}
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px] max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search by name, phone, or code…"
-              className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
-          <div className="relative w-48">
-            <input
-              value={city}
-              onChange={(e) => handleCity(e.target.value)}
-              placeholder="Filter by city…"
-              className="w-full rounded-lg border border-gray-300 py-2 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
-            />
-          </div>
+        {/* Cascading Filter Bar */}
+        <div className="mt-4">
+          <CascadingFilterBar
+            selectedCity={selectedCity}
+            selectedName={selectedName}
+            onCityChange={setSelectedCity}
+            onNameChange={setSelectedName}
+            availableCities={availableCities}
+            availableNames={availableNames}
+            onReset={resetFilters}
+            showInvoice={false}
+            nameLabel="Customer Name"
+            namePlaceholder="Filter by customer name…"
+          />
         </div>
       </div>
 
@@ -150,8 +164,6 @@ export default function CustomersListPage() {
               <tr className="border-b border-gray-100 bg-gray-50 text-left">
                 <th className="px-4 py-3 font-semibold text-gray-600">Code</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Type</th>
-                <th className="px-4 py-3 font-semibold text-gray-600">Phone</th>
                 <th className="px-4 py-3 font-semibold text-gray-600">City</th>
                 {!isCashier && (
                   <>
@@ -159,7 +171,6 @@ export default function CustomersListPage() {
                     <th className="px-4 py-3 font-semibold text-gray-600 text-right">Advance (Credit)</th>
                   </>
                 )}
-                <th className="px-4 py-3 font-semibold text-gray-600 text-right">Net Volume (KG)</th>
                 <th className="px-4 py-3 font-semibold text-gray-600 text-center">Status</th>
                 {(canWrite || canDelete) && (
                   <th className="px-4 py-3 font-semibold text-gray-600 text-right">Actions</th>
@@ -169,30 +180,31 @@ export default function CustomersListPage() {
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-gray-400">
+                  <td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-gray-400">
                     Loading customers…
                   </td>
                 </tr>
               )}
               {isError && (
                 <tr>
-                  <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-red-500">
+                  <td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-red-500">
                     Failed to load customers.{' '}
                     <button onClick={() => refetch()} className="underline">Retry</button>
                   </td>
                 </tr>
               )}
-              {!isLoading && !isError && customers.length === 0 && (
+              {!isLoading && !isError && filteredTableRows.length === 0 && (
                 <tr>
-                  <td colSpan={isCashier ? 8 : 10} className="py-16 text-center text-gray-400">
-                    {debouncedSearch ? `No customers matching "${debouncedSearch}"` : 'No customers yet. Add your first one.'}
+                  <td colSpan={canWrite || canDelete ? 7 : 6} className="py-16 text-center text-gray-400">
+                    {selectedCity || selectedName
+                      ? 'No customers match the active cascading filters. Try resetting filters.'
+                      : 'No customers yet. Add your first one.'}
                   </td>
                 </tr>
               )}
-              {customers.map((c, idx) => {
-                const masterBalance = Number(c.outstanding_balance || 0);
-                const displayOutstanding = Math.max(0, masterBalance);
-                const displayAdvance = Math.abs(Math.min(0, masterBalance));
+              {filteredTableRows.map((c, idx) => {
+                const displayOutstanding = Number(c.outstanding_balance || 0);
+                const displayAdvance = Number(c.advance_credit || 0);
 
                 return (
                   <tr
@@ -202,23 +214,25 @@ export default function CustomersListPage() {
                     }`}
                   >
                     <td className="px-4 py-3">
-                      <span className="inline-block rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-semibold text-blue-700">
-                        {c.code}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          c.customer_type === 'CASH'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-indigo-100 text-indigo-800'
-                        }`}
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/customers/${c.id}`)}
+                        className="inline-block rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-semibold text-blue-700 hover:bg-blue-100 hover:text-blue-900 transition cursor-pointer"
+                        title="View Customer Profile & Statement of Account"
                       >
-                        {c.customer_type === 'CASH' ? 'Cash Entity' : 'Credit Account'}
-                      </span>
+                        {c.code}
+                      </button>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{c.phone ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/customers/${c.id}`)}
+                        className="font-semibold text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left transition"
+                        title="View Customer Profile & Statement of Account"
+                      >
+                        {c.name}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-gray-600">{c.city ?? '—'}</td>
                     {!isCashier && (
                       <>
@@ -232,20 +246,32 @@ export default function CustomersListPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <span
-                            className={`font-semibold ${
-                              displayAdvance > 0 ? 'text-emerald-600 font-bold' : 'text-gray-400'
-                            }`}
-                          >
-                            {formatRs(displayAdvance)}
-                          </span>
+                          <div className="flex items-center justify-end gap-2">
+                            <span
+                              className={`font-semibold ${
+                                displayAdvance > 0 ? 'text-amber-600 font-bold' : 'text-gray-400'
+                              }`}
+                            >
+                              {formatRs(displayAdvance)}
+                            </span>
+                            {displayAdvance > 0 && canWrite && (
+                              <button
+                                onClick={() => {
+                                  setRefundTargetCustomer(c);
+                                  setRefundModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-md bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 text-xs font-bold transition shadow-2xs cursor-pointer"
+                                title="Issue Cash Refund from Advance Wallet"
+                              >
+                                <ArrowDownLeft className="w-3.5 h-3.5 text-red-600" />
+                                Refund
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </>
                     )}
-                  <td className="px-4 py-3 text-right font-mono font-medium text-purple-700">
-                    {c.net_lifetime_volume_kg !== undefined ? `${c.net_lifetime_volume_kg.toLocaleString()} KG` : '0 KG'}
-                  </td>
-                  <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-3 text-center">
                     <span
                       className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         c.is_active
@@ -322,6 +348,28 @@ export default function CustomersListPage() {
       {modalOpen && (
         <CustomerFormModal customer={editTarget} onClose={closeModal} />
       )}
+
+      <LogAdvanceDepositModal
+        isOpen={advanceModalOpen}
+        entityType="customer"
+        customer={advanceTargetCustomer}
+        onClose={() => {
+          setAdvanceModalOpen(false);
+          setAdvanceTargetCustomer(null);
+        }}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['customers'] })}
+      />
+
+      <ProcessCashRefundModal
+        isOpen={refundModalOpen}
+        entityType="customer"
+        customer={refundTargetCustomer}
+        onClose={() => {
+          setRefundModalOpen(false);
+          setRefundTargetCustomer(null);
+        }}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['customers'] })}
+      />
     </div>
   );
 }

@@ -1,6 +1,21 @@
 import db from '../../db/knex';
 import { parseDateFilter, toDateOnlyString } from '../../shared/dateFilter';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
+import { computeCustomerNetBalance } from '../customers/customers.repository';
+import { computeSupplierNetBalance } from '../suppliers/suppliers.repository';
+import { getCashDrawerBalance, findAllBankAccounts } from '../bank-accounts/bank-accounts.repository';
+
+// Include estimated overdraft placeholder delta (estimated - actual) on unfulfilled/partially fulfilled non-return rows
+// so deferred stock is costed at estimated WAC until retroactive purchase reconciliation overwrites actual_cogs.
+const OVERDRAFT_ESTIMATED_DELTA_SQL =
+  'CASE WHEN COALESCE(sii.quantity, 0) >= 0 AND COALESCE(sii.actual_cogs, 0) >= 0 AND COALESCE(sii.estimated_cogs, 0) > COALESCE(sii.actual_cogs, 0) THEN (COALESCE(sii.estimated_cogs, 0) - COALESCE(sii.actual_cogs, 0)) ELSE 0 END';
+
+function buildTotalCogsSumSql(actualFallbackUnitCostSql?: string, alias = 'total_cogs'): string {
+  const realizedExpr = actualFallbackUnitCostSql
+    ? `COALESCE(sii.actual_cogs, CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(${actualFallbackUnitCostSql} AS NUMERIC))`
+    : 'COALESCE(sii.actual_cogs, 0)';
+  return `COALESCE(SUM(CAST(${realizedExpr} AS NUMERIC)), 0) + COALESCE(SUM(CAST(${OVERDRAFT_ESTIMATED_DELTA_SQL} AS NUMERIC)), 0) as ${alias}`;
+}
 
 export async function getDashboardMetrics() {
   const walkin = await db('customers').where({ phone: WALKIN_CUSTOMER_PHONE }).first();
@@ -77,7 +92,7 @@ export async function getInventoryLedgerReport() {
       'sii.product_id',
       db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity)) as total_kg_sold'),
       db.raw('SUM(sii.total_price) as total_revenue'),
-      db.raw('SUM(COALESCE(sii.net_kg_processed, sii.quantity) * COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)) as total_cogs')
+      db.raw(buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'total_cogs'))
     );
 
   const purchaseMap = new Map<string, number>();
@@ -95,6 +110,8 @@ export async function getInventoryLedgerReport() {
   }
 
   const allBatches = await db('inventory_batches')
+    .where('original_qty', '>', 0)
+    .andWhere('status', '!=', 'RETURNED')
     .orderBy('created_at', 'asc');
 
   const batchMap = new Map<string, any[]>();
@@ -160,124 +177,10 @@ export async function getInventoryLedgerReport() {
  * GET /api/reports/liquidity
  */
 export async function getLiquidityLedgerReport() {
-  // 1. Cash in from customers
-  const cashPayments = await db('customer_payments')
-    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
-    .andWhere('amount', '>', 0)
-    .sum('amount as total')
-    .first();
+  const cash_drawer = await getCashDrawerBalance();
 
-  // 2. Cash refunds out to customers
-  const customerRefunds = await db('customer_payments')
-    .where(function() {
-      this.whereIn('payment_method', ['CASH_REFUND', 'cash_refund'])
-        .orWhere(function() {
-          this.whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
-            .andWhere('amount', '<', 0);
-        });
-    })
-    .sum('amount as total')
-    .first();
-
-  // 3. Cash paid to suppliers directly from counter drawer
-  const supplierCash = await db('supplier_payments')
-    .whereIn('payment_method', ['CASH_DRAWER', 'Cash in Drawer'])
-    .sum('amount as total')
-    .first();
-
-  // 4. Petty cash expenses paid from drawer
-  const expensesCash = await db('expenses')
-    .whereIn('payment_method', ['Cash', 'CASH', 'CASH_DRAWER', 'Cash in Drawer'])
-    .sum('amount as total')
-    .first();
-
-  const totalIn = Number(cashPayments?.total || 0);
-  const totalRefunds = Math.abs(Number(customerRefunds?.total || 0));
-  const totalSupplier = Number(supplierCash?.total || 0);
-  const totalExpenses = Number(expensesCash?.total || 0);
-
-  const cash_drawer = Math.max(0, Math.round((totalIn - totalRefunds - totalSupplier - totalExpenses) * 100) / 100);
-
-  const bankInDirect = await db('customer_payments')
-    .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-    .sum('amount as total')
-    .first();
-
-  const bankInClearedCheques = await db('customer_payments')
-    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-    .andWhere('cheque_status', 'CLEARED')
-    .sum('amount as total')
-    .first();
-
-  const bankOutDirect = await db('supplier_payments')
-    .whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-    .sum('amount as total')
-    .first();
-
-  const bankOutClearedCheques = await db('supplier_payments')
-    .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-    .andWhere('cheque_status', 'CLEARED')
-    .sum('amount as total')
-    .first();
-
-  const bankInTotal = Number(bankInDirect?.total || 0) + Number(bankInClearedCheques?.total || 0);
-  const bankOutTotal = Number(bankOutDirect?.total || 0) + Number(bankOutClearedCheques?.total || 0);
-
-  // Dynamic Multi-Bank Account Funds Aggregation
-  const bankAccounts = await db('bank_accounts').where('is_active', true);
-  let bank_balances = 0;
-
-  if (bankAccounts.length > 0) {
-    const primaryId = bankAccounts[0].id;
-
-    // Aggregate customer payments per bank account
-    const custByBank = await db('customer_payments')
-      .where((qb) => {
-        qb.whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-          .orWhere((inner) => {
-            inner.whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-                 .andWhere('cheque_status', 'CLEARED');
-          });
-      })
-      .select('bank_account_id')
-      .sum('amount as total')
-      .groupBy('bank_account_id');
-
-    // Aggregate supplier payments per bank account
-    const suppByBank = await db('supplier_payments')
-      .where((qb) => {
-        qb.whereIn('payment_method', ['Bank Transfer', 'Online', 'BANK', 'BANK_TRANSFER'])
-          .orWhere((inner) => {
-            inner.whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
-                 .andWhere('cheque_status', 'CLEARED');
-          });
-      })
-      .select('bank_account_id')
-      .sum('amount as total')
-      .groupBy('bank_account_id');
-
-    const cMap = new Map<string | null, number>();
-    for (const c of custByBank) cMap.set(c.bank_account_id || null, Number(c.total || 0));
-
-    const sMap = new Map<string | null, number>();
-    for (const s of suppByBank) sMap.set(s.bank_account_id || null, Number(s.total || 0));
-
-    const unassignedIn = cMap.get(null) || 0;
-    const unassignedOut = sMap.get(null) || 0;
-
-    for (const acc of bankAccounts) {
-      let tIn = cMap.get(acc.id) || 0;
-      let tOut = sMap.get(acc.id) || 0;
-      if (acc.id === primaryId) {
-        tIn += unassignedIn;
-        tOut += unassignedOut;
-      }
-      const accBal = Number(acc.initial_balance || 0) + tIn - tOut;
-      bank_balances += accBal;
-    }
-  } else {
-    bank_balances = Math.max(0, bankInTotal - bankOutTotal);
-  }
+  const allBankAccounts = await findAllBankAccounts();
+  const bank_balances = allBankAccounts.reduce((sum, acc) => sum + (Number(acc.current_balance) || 0), 0);
 
   const pdcs = await db('customer_payments')
     .whereIn('payment_method', ['Cheque', 'CHEQUE', 'PDC', 'POST_DATED_CHEQUE'])
@@ -295,38 +198,80 @@ export async function getLiquidityLedgerReport() {
 
   const issued_post_dated_cheques = Number(issuedPdcs?.total || 0);
 
-  // Customer Market Receivables (Udhaar)
+  // Customer Market Receivables (Udhaar) & Customer Advance Wallet Liabilities
   const customers = await db('customers').select('id');
   let market_receivables = 0;
+  let customer_advances_liability = 0;
   for (const c of customers) {
-    const invResult = await db('sales_invoices')
-      .where('customer_id', c.id)
-      .sum('total_amount as total_inv')
-      .sum('paid_amount as total_paid')
-      .first();
-
-    const inv = Number(invResult?.total_inv || 0);
-    const paid = Number(invResult?.total_paid || 0);
-    const balance = inv - paid;
-    if (balance > 0) market_receivables += balance;
+    const netDetails = await computeCustomerNetBalance(c.id);
+    market_receivables += netDetails.outstanding_balance;
+    customer_advances_liability += netDetails.advance_credit;
   }
 
   // Inventory Asset Value (Unsold Stock Value in warehouse)
   const inventoryReport = await getInventoryLedgerReport();
   const total_inventory_value = inventoryReport.reduce((sum, item) => sum + Number(item.total_asset_value || 0), 0);
 
-  // Accounts Payable (Supplier debt owed to market)
-  const supplierInvoices = await db('purchase_invoices')
-    .sum('total_amount as total_inv')
-    .sum('paid_amount as total_paid')
-    .first();
+  // Accounts Payable (Supplier debt owed to market) & Supplier Advances Asset using Global Account Netting
+  const suppliers = await db('suppliers').select('id');
+  let total_accounts_payable = 0;
+  let supplier_advances_asset = 0;
+  for (const s of suppliers) {
+    const netDetails = await computeSupplierNetBalance(s.id);
+    total_accounts_payable += netDetails.outstanding_payable;
+    supplier_advances_asset += netDetails.advance_payable;
+  }
 
-  const suppInvTotal = Number(supplierInvoices?.total_inv || 0);
-  const suppPaidTotal = Number(supplierInvoices?.total_paid || 0);
-  const total_accounts_payable = Math.max(0, suppInvTotal - suppPaidTotal);
+  // ── Pending OPEX Liability (Option B: Isolated Unpaid Operational Expenses) ──
+  // Check 'expense_records' or 'expenses' for unpaid/pending operational expenses
+  const expTable = (await db.schema.hasTable('expense_records'))
+    ? 'expense_records'
+    : ((await db.schema.hasTable('expenses')) ? 'expenses' : null);
+
+  let pending_expenses_liability = 0;
+  if (expTable) {
+    const hasStatus = await db.schema.hasColumn(expTable, 'status');
+    const hasPaidAmount = await db.schema.hasColumn(expTable, 'paid_amount');
+    const hasPurchaseId = await db.schema.hasColumn(expTable, 'purchase_id');
+
+    const pendingExpensesQuery = db(expTable);
+    if (hasPurchaseId) {
+      if (typeof (pendingExpensesQuery as any).whereNull === 'function') {
+        pendingExpensesQuery.whereNull('purchase_id');
+      } else {
+        pendingExpensesQuery.where('purchase_id', null);
+      }
+    }
+    if (hasStatus) {
+      pendingExpensesQuery.whereIn('status', ['PENDING', 'UNPAID', 'pending', 'unpaid']);
+    } else {
+      pendingExpensesQuery.where('payment_method', 'UNPAID');
+    }
+
+    if (hasPaidAmount) {
+      const res: any = await pendingExpensesQuery
+        .select(db.raw('COALESCE(SUM(GREATEST(0, amount - COALESCE(paid_amount, 0))), 0) as total'))
+        .first();
+      pending_expenses_liability = Number(res?.total || 0);
+    } else {
+      const res: any = await pendingExpensesQuery.sum('amount as total').first();
+      pending_expenses_liability = Number(res?.total || 0);
+    }
+  }
 
   const total_liquid = cash_drawer + bank_balances;
-  const net_business_capital = (total_liquid + market_receivables + total_inventory_value) - total_accounts_payable;
+  const total_assets =
+    total_liquid +
+    market_receivables +
+    total_inventory_value +
+    supplier_advances_asset +
+    post_dated_cheques;
+  const total_liabilities =
+    total_accounts_payable +
+    customer_advances_liability +
+    issued_post_dated_cheques +
+    pending_expenses_liability;
+  const net_business_capital = total_assets - total_liabilities;
 
   return {
     cash_drawer: Math.round(cash_drawer * 100) / 100,
@@ -336,9 +281,15 @@ export async function getLiquidityLedgerReport() {
     market_receivables: Math.round(market_receivables * 100) / 100,
     total_inventory_value: Math.round(total_inventory_value * 100) / 100,
     total_accounts_payable: Math.round(total_accounts_payable * 100) / 100,
+    customer_advances_liability: Math.round(customer_advances_liability * 100) / 100,
+    supplier_advances_asset: Math.round(supplier_advances_asset * 100) / 100,
+    pending_expenses_liability: Math.round(pending_expenses_liability * 100) / 100,
+    pending_opex_liability: Math.round(pending_expenses_liability * 100) / 100,
     total_liquid: Math.round(total_liquid * 100) / 100,
+    total_assets: Math.round(total_assets * 100) / 100,
+    total_liabilities: Math.round(total_liabilities * 100) / 100,
     net_business_capital: Math.round(net_business_capital * 100) / 100,
-    total_market_capital: Math.round((total_liquid + post_dated_cheques + market_receivables) * 100) / 100,
+    total_market_capital: Math.round((total_liquid + post_dated_cheques + market_receivables + supplier_advances_asset) * 100) / 100,
   };
 }
 
@@ -350,32 +301,54 @@ export async function getLiquidityReceivablesDetail() {
   const list = [];
 
   for (const c of customers) {
-    const invResult = await db('sales_invoices')
-      .where('customer_id', c.id)
-      .sum('total_amount as total_inv')
-      .sum('paid_amount as total_paid')
-      .first();
+    const netDetails = await computeCustomerNetBalance(c.id);
 
-    const inv = Number(invResult?.total_inv || 0);
-    const paid = Number(invResult?.total_paid || 0);
-    const opening = Number(c.opening_balance || 0);
-    const totalReceivable = Math.round((opening + inv - paid) * 100) / 100;
-
-    if (totalReceivable > 0) {
+    if (netDetails.outstanding_balance > 0 || netDetails.advance_credit > 0) {
       list.push({
         customer_id: c.id,
         name: c.name,
         code: c.code,
         phone: c.phone || 'N/A',
         city: c.city || 'N/A',
-        opening_balance: opening,
-        invoice_balance: Math.round((inv - paid) * 100) / 100,
-        total_receivable: totalReceivable,
+        opening_balance: netDetails.opening_balance,
+        invoice_balance: Math.round((netDetails.total_billed - netDetails.opening_balance) * 100) / 100,
+        total_receivable: netDetails.outstanding_balance,
+        advance_credit: netDetails.advance_credit,
+        net_balance: netDetails.net_balance,
       });
     }
   }
 
   return list.sort((a, b) => b.total_receivable - a.total_receivable);
+}
+
+/**
+ * GET /api/reports/liquidity/customer-advances
+ */
+export async function getLiquidityCustomerAdvancesDetail() {
+  const customers = await db('customers').select('*');
+  const list = [];
+
+  for (const c of customers) {
+    const netDetails = await computeCustomerNetBalance(c.id);
+
+    if (netDetails.advance_credit > 0) {
+      list.push({
+        customer_id: c.id,
+        name: c.name,
+        code: c.code,
+        phone: c.phone || 'N/A',
+        city: c.city || 'N/A',
+        opening_balance: netDetails.opening_balance,
+        total_billed: netDetails.total_billed,
+        total_paid: netDetails.total_paid,
+        advance_credit: netDetails.advance_credit,
+        net_balance: netDetails.net_balance,
+      });
+    }
+  }
+
+  return list.sort((a, b) => b.advance_credit - a.advance_credit);
 }
 
 /**
@@ -386,32 +359,109 @@ export async function getLiquidityPayablesDetail() {
   const list = [];
 
   for (const s of suppliers) {
-    const invResult = await db('purchase_invoices')
-      .where('supplier_id', s.id)
-      .sum('total_amount as total_inv')
-      .sum('paid_amount as total_paid')
-      .first();
+    const netDetails = await computeSupplierNetBalance(s.id);
 
-    const inv = Number(invResult?.total_inv || 0);
-    const paid = Number(invResult?.total_paid || 0);
-    const opening = Number(s.opening_payable || s.opening_balance || 0);
-    const totalPayable = Math.round((opening + inv - paid) * 100) / 100;
-
-    if (totalPayable > 0) {
+    if (netDetails.outstanding_payable > 0 || netDetails.advance_payable > 0) {
       list.push({
         supplier_id: s.id,
         name: s.name,
         code: s.code,
         phone: s.phone || 'N/A',
         city: s.city || 'N/A',
-        opening_payable: opening,
-        invoice_balance: Math.round((inv - paid) * 100) / 100,
-        total_payable: totalPayable,
+        opening_payable: netDetails.opening_payable,
+        invoice_balance: Math.round((netDetails.total_billed - netDetails.opening_payable) * 100) / 100,
+        total_payable: netDetails.outstanding_payable,
+        advance_payable: netDetails.advance_payable,
+        net_balance: netDetails.net_balance,
       });
     }
   }
 
   return list.sort((a, b) => b.total_payable - a.total_payable);
+}
+
+/**
+ * GET /api/reports/liquidity/pending-expenses
+ */
+export async function getLiquidityPendingExpensesDetail() {
+  const expTable = (await db.schema.hasTable('expense_records'))
+    ? 'expense_records'
+    : ((await db.schema.hasTable('expenses')) ? 'expenses' : null);
+
+  if (!expTable) return [];
+
+  const hasStatus = await db.schema.hasColumn(expTable, 'status');
+  const hasPaidAmount = await db.schema.hasColumn(expTable, 'paid_amount');
+  const hasPurchaseId = await db.schema.hasColumn(expTable, 'purchase_id');
+
+  let query = db(`${expTable} as e`);
+  if (hasPurchaseId) {
+    if (typeof (query as any).whereNull === 'function') {
+      query = query.whereNull('e.purchase_id');
+    } else {
+      query = query.where('e.purchase_id', null);
+    }
+  }
+  if (hasStatus) {
+    query = query.whereIn('e.status', ['PENDING', 'UNPAID', 'pending', 'unpaid']);
+  } else {
+    query = query.where('e.payment_method', 'UNPAID');
+  }
+
+  const rows = await query
+    .select(
+      'e.id',
+      'e.category',
+      'e.description',
+      'e.expense_date',
+      'e.amount',
+      hasPaidAmount ? 'e.paid_amount' : db.raw('0 as paid_amount'),
+      hasPaidAmount
+        ? db.raw('ROUND(CAST(e.amount - COALESCE(e.paid_amount, 0) AS numeric), 2) as remaining_amount')
+        : 'e.amount as remaining_amount',
+      hasStatus ? 'e.status' : db.raw("'PENDING' as status")
+    )
+    .orderBy('e.expense_date', 'desc');
+
+  return rows.map((r: any) => ({
+    id: r.id,
+    category: r.category,
+    description: r.description || 'Pending OPEX',
+    expense_date: r.expense_date,
+    amount: Number(r.amount || 0),
+    paid_amount: Number(r.paid_amount || 0),
+    remaining_amount: Number(r.remaining_amount !== undefined ? r.remaining_amount : r.amount || 0),
+    status: r.status,
+  }));
+}
+
+/**
+ * GET /api/reports/liquidity/supplier-advances
+ */
+export async function getLiquiditySupplierAdvancesDetail() {
+  const suppliers = await db('suppliers').select('*');
+  const list = [];
+
+  for (const s of suppliers) {
+    const netDetails = await computeSupplierNetBalance(s.id);
+
+    if (netDetails.advance_payable > 0) {
+      list.push({
+        supplier_id: s.id,
+        name: s.name,
+        code: s.code,
+        phone: s.phone || 'N/A',
+        city: s.city || 'N/A',
+        opening_payable: netDetails.opening_payable,
+        total_billed: netDetails.total_billed,
+        total_paid: netDetails.total_paid,
+        advance_payable: netDetails.advance_payable,
+        net_balance: netDetails.net_balance,
+      });
+    }
+  }
+
+  return list.sort((a, b) => b.advance_payable - a.advance_payable);
 }
 
 /**
@@ -441,21 +491,22 @@ export async function getLiquidityUnsoldStockDetail() {
 export async function getSalesMarginReport(productId?: string, timeFilter?: string) {
   const now = new Date();
   let startDate: Date | null = null;
-  let endDate: Date = now;
+  const endDate: Date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
   if (timeFilter === 'today') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   } else if (timeFilter === 'last_7_days') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
   } else if (timeFilter === 'last_2_days') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
   } else if (timeFilter === 'this_month') {
-    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   }
 
   let query = db('sales_invoice_items as sii')
     .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
+    .whereNot('si.status', 'CANCELLED')
     .select(
       'si.id as invoice_id',
       'si.total_amount',
@@ -466,12 +517,16 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
       'sii.total_price',
       'sii.net_kg_processed',
       'sii.applied_cogs_per_kg',
+      'sii.estimated_cogs',
+      'sii.actual_cogs',
       'p.rolling_avg_cost_per_kg',
       'p.cost_price as product_cost_price'
     );
 
   if (startDate) {
-    query = query.where('si.created_at', '>=', startDate).andWhere('si.created_at', '<=', endDate);
+    query = query
+      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [startDate.toISOString().split('T')[0]])
+      .andWhereRaw('COALESCE(si.date, si.created_at::date) <= ?', [endDate.toISOString().split('T')[0]]);
   }
 
   if (productId) {
@@ -492,7 +547,15 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
 
     const kg = Number(r.net_kg_processed || r.quantity || 0);
     const appliedCogs = Number(r.applied_cogs_per_kg || r.rolling_avg_cost_per_kg || r.product_cost_price || 0);
-    total_cogs += kg * appliedCogs;
+    const actualCogsVal = (r.actual_cogs !== null && r.actual_cogs !== undefined) ? Number(r.actual_cogs) : null;
+    const estimatedCogsVal = Number(r.estimated_cogs || 0);
+    const itemCogs =
+      Number(r.quantity || 0) >= 0 &&
+      (actualCogsVal ?? 0) >= 0 &&
+      estimatedCogsVal > (actualCogsVal ?? 0)
+        ? estimatedCogsVal
+        : (actualCogsVal !== null ? actualCogsVal : (kg * appliedCogs));
+    total_cogs += itemCogs;
 
     if (!processedInvoices.has(r.invoice_id)) {
       processedInvoices.add(r.invoice_id);
@@ -536,7 +599,7 @@ export async function getCashierTallyReport(userId: string) {
   const paymentsResult = await db('customer_payments')
     .where('created_by', userId)
     .where('created_at', '>=', startOfDay)
-    .whereIn('payment_method', ['CASH', 'CASH_DRAWER', 'Cash'])
+    .whereIn('payment_method', ['CASH', 'CASH_DRAWER', 'Cash', 'CASH_REFUND'])
     .sum('amount as total')
     .count('id as count')
     .first();
@@ -575,29 +638,39 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
       .whereNot('si.status', 'CANCELLED')
       .select(db.raw('SUM(CAST(si.total_amount AS NUMERIC)) as total'));
 
-    let cogsQuery = db('sales_invoice_items as sii')
-      .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
-      .leftJoin('products as p', 'sii.product_id', 'p.id')
-      .whereNot('si.status', 'CANCELLED')
-      .select(db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'));
+    const cogsQuery = db('sales_invoice_items as sii')
+      .whereIn('sii.invoice_id', function () {
+        this.select('si.id')
+          .from('sales_invoices as si')
+          .whereNot('si.status', 'CANCELLED')
+          .modify((qb: any) => {
+            if (sDateObj) {
+              qb.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
+            }
+            if (eDateObj) {
+              qb.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+            }
+          });
+      })
+      .select(db.raw(buildTotalCogsSumSql(undefined, 'total_cogs')));
 
+    const hasPurchaseIdCol = await db.schema.hasColumn('expenses', 'purchase_id');
     let expensesQuery = db('expenses as e')
       .select(db.raw('SUM(CAST(e.amount AS NUMERIC)) as total'));
 
+    if (hasPurchaseIdCol) {
+      expensesQuery = expensesQuery.whereNull('e.purchase_id');
+    }
+
     if (sDateObj) {
       salesQuery = salesQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
-      cogsQuery = cogsQuery.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
       expensesQuery = expensesQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj]);
     }
 
     if (eDateObj) {
       salesQuery = salesQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
-      cogsQuery = cogsQuery.whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
       expensesQuery = expensesQuery.whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj]);
     }
-
-    console.log('[DEBUG Knex] Sales Query SQL:', salesQuery.toSQL().toNative());
-    console.log('[DEBUG Knex] Expenses Query SQL:', expensesQuery.toSQL().toNative());
 
     const [salesRes, cogsRes, expRes] = await Promise.all([
       salesQuery.first(),
@@ -605,12 +678,10 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
       expensesQuery.first(),
     ]);
 
-    console.log('[DEBUG Knex] Sales Res:', salesRes);
-    console.log('[DEBUG Knex] Expenses Res:', expRes);
-
     const total_sales = Math.round(Number((salesRes as any)?.total || 0) * 100) / 100;
     const total_cogs = Math.round(Number((cogsRes as any)?.total_cogs || 0) * 100) / 100;
     const total_expenses = Math.round(Number((expRes as any)?.total || 0) * 100) / 100;
+
     const gross_profit = Math.round((total_sales - total_cogs) * 100) / 100;
     const net_profit = Math.round((gross_profit - total_expenses) * 100) / 100;
     const rawMargin = total_sales > 0 ? (net_profit / total_sales) : 0;
@@ -631,29 +702,23 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
 }
 
 export async function getCashLedgerReport(startDate?: string, endDate?: string) {
-  const { startDate: sDateObj, endDate: eDateObj } = parseDateFilter(startDate, endDate);
-
-  let query = db('customer_payments as cp')
-    .join('customers as c', 'cp.customer_id', 'c.id')
+  let custQuery = db('customer_payments as cp')
+    .leftJoin('customers as c', 'cp.customer_id', 'c.id')
     .leftJoin('sales_invoices as si', 'cp.invoice_id', 'si.id')
     .leftJoin('sales_invoice_items as sii', 'si.id', 'sii.invoice_id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
-    .where(function() {
-      this.whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer', 'CASH_REFUND', 'cash_refund'])
-        .orWhere('cp.amount', '<', 0);
-    })
+    .whereIn('cp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer', 'CASH_REFUND', 'cash_refund'])
     .select(
       'cp.id',
       'cp.payment_date as date',
       'cp.created_at',
+      'cp.payment_number',
+      'si.invoice_number',
+      'si.notes as invoice_notes',
       'cp.payment_method',
       'cp.notes',
       'c.name as customer_name',
-      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN 'CUSTOMER REFUND' ELSE 'CASH SALE' END as entry_type"),
-      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN CONCAT('Cash Refund to ', c.name, COALESCE(CONCAT(' (', cp.notes, ')'), '')) ELSE CONCAT('Cash Payment from ', c.name, COALESCE(CONCAT(' (Inv #', si.invoice_number, ')'), '')) END as description"),
       'cp.amount as amount',
-      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN 0 ELSE ABS(cp.amount) END as cash_in"),
-      db.raw("CASE WHEN cp.payment_method IN ('CASH_REFUND', 'cash_refund') OR cp.amount < 0 THEN ABS(cp.amount) ELSE 0 END as cash_out"),
       db.raw(`
         COALESCE(
           json_agg(
@@ -673,40 +738,298 @@ export async function getCashLedgerReport(startDate?: string, endDate?: string) 
       'cp.id',
       'cp.payment_date',
       'cp.created_at',
+      'cp.payment_number',
       'cp.payment_method',
       'cp.notes',
       'c.name',
       'si.invoice_number',
+      'si.notes',
       'cp.amount'
     )
     .orderBy('cp.created_at', 'desc');
 
-  if (sDateObj) {
-    query = query.whereRaw('COALESCE(cp.payment_date, cp.created_at::date) >= ?', [sDateObj]);
+  let suppQuery = db('supplier_payments as sp')
+    .leftJoin('suppliers as s', 'sp.supplier_id', 's.id')
+    .whereIn('sp.payment_method', ['CASH', 'Cash', 'CASH_DRAWER', 'Cash in Drawer', 'CASH_REFUND'])
+    .select(
+      'sp.id',
+      'sp.payment_date as date',
+      'sp.created_at',
+      'sp.payment_number',
+      'sp.notes',
+      's.name as supplier_name',
+      'sp.amount'
+    )
+    .orderBy('sp.created_at', 'desc');
+
+  const hasExpPay = await db.schema.hasTable('expense_payments');
+  const hasStatus = await db.schema.hasColumn('expenses', 'status');
+  let expQueryBuilder = db('expenses as e')
+    .whereIn('e.payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER']);
+  if (hasStatus) {
+    expQueryBuilder = expQueryBuilder.whereIn('e.status', ['PAID', 'PARTIAL']);
   }
 
-  if (eDateObj) {
-    query = query.whereRaw('COALESCE(cp.payment_date, cp.created_at::date) <= ?', [eDateObj]);
+  let expQuery = hasExpPay
+    ? db('expense_payments as ep')
+        .join('expenses as e', 'ep.expense_id', 'e.id')
+        .whereIn('ep.payment_method', ['CASH', 'Cash', 'Cash in Drawer', 'CASH_DRAWER'])
+        .select(
+          'e.id',
+          'ep.payment_date as date',
+          'ep.created_at',
+          'e.category',
+          'e.description',
+          'ep.amount'
+        )
+        .orderBy('ep.created_at', 'desc')
+    : expQueryBuilder
+        .select(
+          'e.id',
+          'e.expense_date as date',
+          'e.created_at',
+          'e.category',
+          'e.description',
+          'e.amount as amount'
+        )
+        .orderBy('e.created_at', 'desc');
+
+  let transferQuery = db('cash_drawer_ledger as cdl')
+    .where(function() {
+      this.whereNull('cdl.reference_id')
+        .orWhereILike('cdl.description', '%transfer%');
+    })
+    .select(
+      'cdl.id',
+      'cdl.transaction_date as date',
+      'cdl.created_at',
+      'cdl.type',
+      'cdl.description',
+      'cdl.amount'
+    )
+    .orderBy('cdl.created_at', 'desc');
+
+  const hasEmpLedger = await db.schema.hasTable('employee_ledger');
+  let empCashQuery = hasEmpLedger
+    ? db('employee_ledger as el')
+        .leftJoin('employees as emp', 'el.employee_id', 'emp.id')
+        .where('el.payment_method', 'CASH')
+        .whereIn('el.transaction_type', ['ADVANCE', 'PAYMENT'])
+        .whereNull('el.expense_id')
+        .select(
+          'el.id',
+          'el.date as date',
+          'el.created_at',
+          'el.transaction_type',
+          'el.description',
+          'el.amount',
+          'emp.name as employee_name',
+          'emp.employee_id as employee_code'
+        )
+        .orderBy('el.created_at', 'desc')
+    : null;
+
+  if (startDate) {
+    const startDateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
+    custQuery = custQuery.where(function () {
+      this.where('cp.created_at', '>=', startDate).orWhereRaw('cp.payment_date::text >= ?', [startDateOnly]);
+    });
+    suppQuery = suppQuery.where(function () {
+      this.where('sp.created_at', '>=', startDate).orWhereRaw('sp.payment_date::text >= ?', [startDateOnly]);
+    });
+    expQuery = expQuery.where(function () {
+      this.where('e.created_at', '>=', startDate).orWhereRaw('e.expense_date::text >= ?', [startDateOnly]);
+    });
+    transferQuery = transferQuery.where(function () {
+      this.where('cdl.created_at', '>=', startDate).orWhereRaw('cdl.transaction_date::text >= ?', [startDateOnly]);
+    });
+    if (empCashQuery) {
+      empCashQuery = empCashQuery.where(function () {
+        this.where('el.created_at', '>=', startDate).orWhereRaw('el.date::text >= ?', [startDateOnly]);
+      });
+    }
   }
 
-  const rows = await query;
+  if (endDate) {
+    const endDateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+    const endTimestamp = endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`;
+    custQuery = custQuery.where(function () {
+      this.where('cp.created_at', '<=', endTimestamp).orWhereRaw('cp.payment_date::text <= ?', [endDateOnly]);
+    });
+    suppQuery = suppQuery.where(function () {
+      this.where('sp.created_at', '<=', endTimestamp).orWhereRaw('sp.payment_date::text <= ?', [endDateOnly]);
+    });
+    expQuery = expQuery.where(function () {
+      this.where('e.created_at', '<=', endTimestamp).orWhereRaw('e.expense_date::text <= ?', [endDateOnly]);
+    });
+    transferQuery = transferQuery.where(function () {
+      this.where('cdl.created_at', '<=', endTimestamp).orWhereRaw('cdl.transaction_date::text <= ?', [endDateOnly]);
+    });
+    if (empCashQuery) {
+      empCashQuery = empCashQuery.where(function () {
+        this.where('el.created_at', '<=', endTimestamp).orWhereRaw('el.date::text <= ?', [endDateOnly]);
+      });
+    }
+  }
 
-  return rows.map((item) => {
+  const [custRows, suppRows, expRows, transferRows, empCashRows] = await Promise.all([
+    custQuery,
+    suppQuery,
+    expQuery,
+    transferQuery.catch(() => []),
+    empCashQuery ? empCashQuery.catch(() => []) : Promise.resolve([]),
+  ]);
+
+  const results: any[] = [];
+
+  for (const item of custRows) {
     const rawOrderDetails = typeof item.order_details === 'string'
       ? JSON.parse(item.order_details)
       : (Array.isArray(item.order_details) ? item.order_details : []);
 
-    return {
-      id: item.id,
-      date: item.date,
-      created_at: item.created_at,
-      entry_type: item.entry_type || 'CASH SALE',
-      description: item.description,
-      amount: Number(item.amount || item.cash_in || 0),
-      cash_in: Number(item.cash_in || item.amount || 0),
-      order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
-    };
-  });
+    const amt = Number(item.amount || 0);
+    const isRefund = amt < 0;
+
+    const isPos = Boolean(
+      (item.payment_number && item.payment_number.includes('POS')) ||
+      (item.invoice_number && item.invoice_number.startsWith('POS')) ||
+      (item.notes && item.notes.toLowerCase().includes('pos')) ||
+      (item.invoice_notes && item.invoice_notes.toLowerCase().includes('pos'))
+    );
+
+    if (isRefund) {
+      results.push({
+        id: item.id,
+        date: item.date,
+        created_at: item.created_at,
+        entry_type: 'CASH REFUND',
+        source: 'OUTFLOW',
+        source_type: 'OUTFLOW',
+        transaction_type: 'WITHDRAWAL',
+        description: `Customer Cash Refund: ${item.customer_name || 'Customer'}${item.invoice_number ? ` (Inv #${item.invoice_number})` : ''}`,
+        amount: Math.abs(amt),
+        cash_out: Math.abs(amt),
+        cash_in: 0,
+        order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
+      });
+    } else {
+      const source: 'POS' | 'CUSTOMER_PAYMENT' = isPos ? 'POS' : 'CUSTOMER_PAYMENT';
+      results.push({
+        id: item.id,
+        date: item.date,
+        created_at: item.created_at,
+        entry_type: isPos ? 'POS SALE' : 'CASH PAYMENT',
+        source,
+        source_type: source,
+        transaction_type: 'DEPOSIT',
+        description: isPos
+          ? `Walk-in POS Sale: ${item.customer_name || 'Counter Customer'}`
+          : `Cash Payment from ${item.customer_name || 'Customer'}${item.invoice_number ? ` (Inv #${item.invoice_number})` : ''}`,
+        amount: amt,
+        cash_in: amt,
+        cash_out: 0,
+        order_details: Array.isArray(rawOrderDetails) ? rawOrderDetails : [],
+      });
+    }
+  }
+
+  for (const sp of suppRows) {
+    const amt = Number(sp.amount || 0);
+    if (amt >= 0) {
+      results.push({
+        id: sp.id,
+        date: sp.date,
+        created_at: sp.created_at,
+        entry_type: 'SUPPLIER PAYMENT',
+        source: 'OUTFLOW',
+        source_type: 'OUTFLOW',
+        transaction_type: 'WITHDRAWAL',
+        description: `Cash Payment to Supplier: ${sp.supplier_name || 'Vendor'}${sp.payment_number ? ` (${sp.payment_number})` : ''}`,
+        amount: amt,
+        cash_out: amt,
+        cash_in: 0,
+        order_details: [],
+      });
+    } else {
+      results.push({
+        id: sp.id,
+        date: sp.date,
+        created_at: sp.created_at,
+        entry_type: 'SUPPLIER REFUND',
+        source: 'CUSTOMER_PAYMENT',
+        source_type: 'CUSTOMER_PAYMENT',
+        transaction_type: 'DEPOSIT',
+        description: `Supplier Cash Refund: ${sp.supplier_name || 'Vendor'}`,
+        amount: Math.abs(amt),
+        cash_in: Math.abs(amt),
+        cash_out: 0,
+        order_details: [],
+      });
+    }
+  }
+
+  for (const exp of expRows) {
+    const amt = Number(exp.amount || 0);
+    results.push({
+      id: exp.id,
+      date: exp.date,
+      created_at: exp.created_at,
+      entry_type: 'EXPENSE',
+      source: 'OUTFLOW',
+      source_type: 'OUTFLOW',
+      transaction_type: 'WITHDRAWAL',
+      description: `Cash Expense: ${exp.category || 'General'}${exp.description ? ` (${exp.description})` : ''}`,
+      amount: amt,
+      cash_out: amt,
+      cash_in: 0,
+      order_details: [],
+    });
+  }
+
+  for (const t of (transferRows || [])) {
+    const amt = Number(t.amount || 0);
+    const isInflow = String(t.type || '').toUpperCase() === 'INFLOW' || String(t.type || '').toUpperCase() === 'DEPOSIT';
+    const isCapital = t.description && (
+      t.description.toLowerCase().includes('capital') ||
+      t.description.toLowerCase().includes('float') ||
+      t.description.toLowerCase().includes('opening')
+    );
+    results.push({
+      id: t.id,
+      date: t.date,
+      created_at: t.created_at,
+      entry_type: isCapital ? 'OWNER CAPITAL' : 'BANK TRANSFER',
+      source: isInflow ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
+      source_type: isInflow ? 'CUSTOMER_PAYMENT' : 'OUTFLOW',
+      transaction_type: isInflow ? 'DEPOSIT' : 'WITHDRAWAL',
+      description: t.description || (isInflow ? 'Internal Bank Transfer to Drawer' : 'Internal Transfer from Drawer to Bank'),
+      amount: amt,
+      cash_in: isInflow ? amt : 0,
+      cash_out: isInflow ? 0 : amt,
+      order_details: [],
+    });
+  }
+
+  for (const emp of (empCashRows || [])) {
+    const amt = Number(emp.amount || 0);
+    results.push({
+      id: emp.id,
+      date: emp.date,
+      created_at: emp.created_at,
+      entry_type: 'STAFF SALARY / ADVANCE',
+      source: 'OUTFLOW',
+      source_type: 'OUTFLOW',
+      transaction_type: 'WITHDRAWAL',
+      description: `Staff Payout: ${emp.employee_name || 'Staff'}${emp.employee_code ? ` (${emp.employee_code})` : ''} - ${emp.description || emp.transaction_type}`,
+      amount: amt,
+      cash_out: amt,
+      cash_in: 0,
+      order_details: [],
+    });
+  }
+
+  results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return results;
 }
 
 export async function getPdcReport() {
@@ -798,7 +1121,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
     const eDateOnly = toDateOnlyString(eDateObj);
 
     // 1. Gross Sales & Delivery Revenue Query
-    let salesQuery = db('sales_invoices as si')
+    const salesQuery = db('sales_invoices as si')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
         this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
@@ -811,7 +1134,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
     // 2. Sales Returns Query
-    let returnsQuery = db('sales_invoices as si')
+    const returnsQuery = db('sales_invoices as si')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
         this.where('si.invoice_type', 'CREDIT_NOTE')
@@ -822,23 +1145,28 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
 
-    // 3. COGS Query
-    let cogsQuery = db('sales_invoice_items as sii')
-      .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
-      .leftJoin('products as p', 'sii.product_id', 'p.id')
-      .whereNot('si.status', 'CANCELLED')
-      .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+    // 3. COGS Query (sums realized actual_cogs plus remaining estimated overdraft COGS placeholders)
+    const cogsQuery = db('sales_invoice_items as sii')
+      .whereIn('sii.invoice_id', function () {
+        this.select('si.id')
+          .from('sales_invoices as si')
+          .whereNot('si.status', 'CANCELLED')
+          .where(function () {
+            this.whereNull('si.invoice_type')
+              .orWhere('si.invoice_type', 'SALE')
+              .orWhere('si.invoice_type', 'CREDIT_NOTE')
+              .orWhere('si.invoice_type', 'RETURN');
+          })
+          .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
+          .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
       })
       .select(
-        db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
-        )
-      )
-      .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
-      .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj]);
+        db.raw(buildTotalCogsSumSql(undefined, 'total_cogs'))
+      );
 
-    // 4. Operating Expenses Query
+    // 4. Operating Expenses Query (Inbound freight is capitalized into inventory/COGS and excluded from OPEX)
+    const hasPurchaseIdCol = await db.schema.hasColumn('expenses', 'purchase_id');
+
     let expensesQuery = db('expenses as e')
       .select(db.raw('SUM(CAST(COALESCE(e.amount, 0) AS NUMERIC)) as total_expenses'))
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) >= ?', [sDateObj])
@@ -851,6 +1179,11 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereRaw('COALESCE(e.expense_date, e.created_at::date) <= ?', [eDateObj])
       .groupBy('category')
       .orderBy('total', 'desc');
+
+    if (hasPurchaseIdCol) {
+      expensesQuery = expensesQuery.whereNull('e.purchase_id');
+      expensesBreakdownQuery = expensesBreakdownQuery.whereNull('e.purchase_id');
+    }
 
     const [salesRes, returnsRes, cogsRes, expRes, breakdownRes] = await Promise.all([
       salesQuery.first(),
@@ -909,7 +1242,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
     const sDateObj = filter.startDate || defaultStart;
     const eDateObj = filter.endDate || defaultEnd;
 
-    let query = db('sales_invoices as si')
+    const query = db('sales_invoices as si')
       .innerJoin('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
       .leftJoin('customers as c', 'si.customer_id', 'c.id')
       .leftJoin('products as p', 'sii.product_id', 'p.id')
@@ -935,6 +1268,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
       .whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj])
       .whereRaw('COALESCE(si.date, si.created_at::date) <= ?', [eDateObj])
       .orderBy('si.created_at', 'desc');
+
 
     const rows = await query;
 
@@ -973,7 +1307,10 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .leftJoin('categories as c', 'p.category_id', 'c.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .groupBy('p.id', 'p.name', 'c.name', 'p.rolling_avg_cost_per_kg', 'p.cost_price')
       .select(
@@ -983,7 +1320,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_kg_sold'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'total_cogs')
         )
       );
 
@@ -994,7 +1331,10 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .leftJoin('products as p', 'sii.product_id', 'p.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .groupBy('cust.id', 'cust.name')
       .select(
@@ -1003,7 +1343,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as total_volume_kg'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as total_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as total_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'total_cogs')
         )
       );
 
@@ -1013,14 +1353,17 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .leftJoin('products as p', 'sii.product_id', 'p.id')
       .whereNot('si.status', 'CANCELLED')
       .where(function () {
-        this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
+        this.whereNull('si.invoice_type')
+          .orWhere('si.invoice_type', 'SALE')
+          .orWhere('si.invoice_type', 'CREDIT_NOTE')
+          .orWhere('si.invoice_type', 'RETURN');
       })
       .groupByRaw('COALESCE(si.date, si.created_at::date)')
       .select(
         db.raw('COALESCE(si.date, si.created_at::date) as date'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as daily_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0) AS NUMERIC)) as daily_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, p.rolling_avg_cost_per_kg, p.cost_price, 0)', 'daily_cogs')
         )
       )
       .orderByRaw('COALESCE(si.date, si.created_at::date) ASC');
@@ -1128,19 +1471,23 @@ export async function getInventoryValuationReport() {
         'p.id',
         'p.name as product_name',
         'p.code',
+        'p.size',
         'c.name as category',
         'p.total_stock_kg',
         'p.rolling_avg_cost_per_kg',
-        'p.cost_price'
+        'p.cost_price',
+        'p.low_stock_threshold'
       )
       .orderBy('p.name', 'asc');
 
-    // Fetch inventory batches / FIFO price buckets
+    // Fetch inventory batches / FIFO price buckets (strictly excluding fully returned batches)
     let batchesRaw: any[] = [];
     const hasBatchesTable = await db.schema.hasTable('inventory_batches');
     if (hasBatchesTable) {
       batchesRaw = await db('inventory_batches as ib')
         .leftJoin('purchase_invoices as pi', 'ib.purchase_invoice_id', 'pi.id')
+        .where('ib.original_qty', '>', 0)
+        .andWhere('ib.status', '!=', 'RETURNED')
         .select(
           'ib.id as bucket_id',
           'ib.product_id',
@@ -1189,7 +1536,7 @@ export async function getInventoryValuationReport() {
         db.raw('SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC)) as lifetime_kg_sold'),
         db.raw('SUM(CAST(COALESCE(sii.total_price, 0) AS NUMERIC)) as lifetime_revenue'),
         db.raw(
-          'SUM(CAST(COALESCE(sii.net_kg_processed, sii.quantity) AS NUMERIC) * CAST(COALESCE(sii.applied_cogs_per_kg, 0) AS NUMERIC)) as lifetime_cogs'
+          buildTotalCogsSumSql('COALESCE(sii.applied_cogs_per_kg, 0)', 'lifetime_cogs')
         )
       );
 
@@ -1215,6 +1562,23 @@ export async function getInventoryValuationReport() {
     const purchasesMap = new Map<string, number>();
     for (const p of purchasesAgg) {
       purchasesMap.set(p.product_id, Math.round(Number(p.lifetime_kg_acquired || 0) * 100) / 100);
+    }
+
+    // Fetch Lifetime Acquired stock strictly from non-returned batches (WHERE original_qty > 0 AND status != 'RETURNED')
+    const batchAcquiredMap = new Map<string, number>();
+    if (hasBatchesTable) {
+      const batchAcquiredAgg = await db('inventory_batches')
+        .where('original_qty', '>', 0)
+        .andWhere('status', '!=', 'RETURNED')
+        .groupBy('product_id')
+        .select(
+          'product_id',
+          db.raw('SUM(CAST(original_qty AS NUMERIC)) as lifetime_batch_acquired')
+        );
+
+      for (const b of batchAcquiredAgg) {
+        batchAcquiredMap.set(b.product_id, Math.round(Number(b.lifetime_batch_acquired || 0) * 100) / 100);
+      }
     }
 
     let total_warehouse_capital = 0;
@@ -1243,22 +1607,35 @@ export async function getInventoryValuationReport() {
 
       const salesData = salesMap.get(r.id) || { kgSold: 0, revenue: 0, cogs: 0 };
       const acquiredFromPurchases = purchasesMap.get(r.id) || 0;
-      const lifetime_kg_acquired = acquiredFromPurchases > 0 ? acquiredFromPurchases : Math.round((stock_on_hand + salesData.kgSold) * 100) / 100;
+      const acquiredFromBatches = batchAcquiredMap.get(r.id);
+      const lifetime_kg_acquired = acquiredFromBatches !== undefined && acquiredFromBatches > 0
+        ? acquiredFromBatches
+        : (acquiredFromPurchases > 0 ? acquiredFromPurchases : Math.round((stock_on_hand + salesData.kgSold) * 100) / 100);
       const lifetime_kg_sold = salesData.kgSold;
 
       const profit = salesData.revenue - salesData.cogs;
       const all_time_gross_margin = salesData.revenue > 0 ? Math.round((profit / salesData.revenue) * 10000) / 100 : 0;
 
+      const low_stock_threshold = Math.round(Number(r.low_stock_threshold || 0) * 100) / 100;
+      const is_low_stock = low_stock_threshold > 0 ? stock_on_hand <= low_stock_threshold : stock_on_hand <= 0;
+      const deficit_kg = low_stock_threshold > 0 && stock_on_hand < low_stock_threshold
+        ? Math.max(0, Math.round((low_stock_threshold - stock_on_hand) * 100) / 100)
+        : 0;
+
       return {
         id: r.id,
         product_name: r.product_name || 'Unnamed Product',
         code: r.code || '',
+        size: r.size || '',
         category: r.category || 'General',
         current_stock_kg: stock_on_hand,
         stock_on_hand,
         current_wac,
         asset_value,
         total_asset_value: asset_value,
+        low_stock_threshold,
+        is_low_stock,
+        deficit_kg,
         buckets,
         lifetime_kg_sold,
         lifetime_kg_acquired,

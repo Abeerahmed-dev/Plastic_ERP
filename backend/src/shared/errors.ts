@@ -51,3 +51,22 @@ export class ConflictError extends AppError {
     this.name = 'ConflictError';
   }
 }
+
+export class InsufficientStockError extends AppError {
+  public readonly remainingStock: number;
+
+  constructor(remainingStock: number, message?: string) {
+    const msg = message || `Transaction failed: Another user just purchased this stock. Remaining: ${remainingStock}`;
+    super(msg, 400);
+    this.name = 'InsufficientStockError';
+    this.remainingStock = remainingStock;
+  }
+}
+
+export class InsufficientLiquidityError extends AppError {
+  constructor(message = 'INSUFFICIENT_LIQUIDITY: Cannot withdraw more cash than the account holds.') {
+    super(message, 400);
+    this.name = 'InsufficientLiquidityError';
+  }
+}
+

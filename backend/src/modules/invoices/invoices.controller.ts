@@ -1,13 +1,41 @@
 import { Request, Response, NextFunction } from 'express';
 import * as invoicesService from './invoices.service';
 import { createInvoiceSchema, createSalesReturnSchema } from './invoices.schemas';
+import { createExchangeSchema } from '../exchanges/exchanges.schemas';
+import * as exchangesService from '../exchanges/exchanges.service';
 import { ok } from '../../shared/apiResponse';
 import { ValidationError, ForbiddenError } from '../../shared/errors';
 
-export async function listInvoices(_req: Request, res: Response, next: NextFunction) {
+export async function listInvoices(req: Request, res: Response, next: NextFunction) {
   try {
-    const invoices = await invoicesService.getInvoices();
+    const queryFilter: { created_by?: string; is_pos_only?: boolean } = {};
+    if (req.query.type === 'pos' || req.query.is_pos_only === 'true') {
+      queryFilter.is_pos_only = true;
+    }
+
+    const invoices = await invoicesService.getInvoices(queryFilter);
     res.json(ok(invoices));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getUnpaidInvoices(req: Request, res: Response, next: NextFunction) {
+  try {
+    const customer_id = req.query.customer_id as string;
+
+    const queryFilter: { created_by?: string; customer_id?: string; is_pos_only?: boolean } = {};
+    if (req.query.type === 'pos' || req.query.is_pos_only === 'true') {
+      queryFilter.is_pos_only = true;
+    }
+
+    const invoices = await invoicesService.getInvoices(queryFilter);
+    const unpaidInvoices = invoices.filter((inv: any) => {
+      const matchCustomer = customer_id ? inv.customer_id === customer_id : true;
+      return matchCustomer && ['UNPAID', 'PARTIAL'].includes(inv.status);
+    });
+
+    res.json(ok(unpaidInvoices));
   } catch (error) {
     next(error);
   }
@@ -22,12 +50,26 @@ export async function getInvoice(req: Request, res: Response, next: NextFunction
   }
 }
 
-export async function createInvoice(req: Request, res: Response, _next: NextFunction) {
+export async function createInvoice(req: Request, res: Response, next: NextFunction) {
   try {
+    // Strict SKU Enforcement: Size/Variant is compulsory for all line items
+    if (!req.body?.items || !Array.isArray(req.body.items) || req.body.items.length === 0) {
+      throw new ValidationError('At least one item is required');
+    }
+    for (const item of req.body.items) {
+      if (!item.product_id) {
+        throw new ValidationError('Size/Variant is compulsory');
+      }
+      if (item.size !== undefined && (item.size === null || String(item.size).trim() === '')) {
+        throw new ValidationError('Size/Variant is compulsory');
+      }
+    }
+
     const parsed = createInvoiceSchema.safeParse(req.body);
     if (!parsed.success) {
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
     }
+
 
     const userRole = (req.user?.roleName || (req.user as any)?.role || '').toUpperCase();
     const isCashier = userRole === 'CASHIER';
@@ -44,8 +86,7 @@ export async function createInvoice(req: Request, res: Response, _next: NextFunc
     const invoice = await invoicesService.createInvoice(parsed.data, userId);
     res.status(201).json(ok(invoice));
   } catch (error: any) {
-    console.error("SALES API CRASH:", error);
-    res.status(500).json({ error: error.message || "Internal Server Error", detail: error.detail });
+    next(error);
   }
 }
 
@@ -57,6 +98,7 @@ export async function getInvoiceReturnSummary(req: Request, res: Response, next:
     next(error);
   }
 }
+
 
 export async function createSalesReturn(req: Request, res: Response, next: NextFunction) {
   try {
@@ -72,4 +114,61 @@ export async function createSalesReturn(req: Request, res: Response, next: NextF
     next(error);
   }
 }
+
+export async function getPendingDeliveries(req: Request, res: Response, next: NextFunction) {
+  try {
+    const deliveries = await invoicesService.getPendingDeliveries(req.query as any);
+    res.json(ok(deliveries));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createInvoiceExchange(req: Request, res: Response, next: NextFunction) {
+  try {
+    const payload = createExchangeSchema.parse({
+      ...req.body,
+      invoice_id: req.params.id,
+    });
+    const userId = req.user?.id;
+    const exchange = await exchangesService.createExchange(payload, userId);
+    res.status(201).json(ok(exchange));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function syncOfflineInvoices(req: Request, res: Response, next: NextFunction) {
+  try {
+    const rawData = req.body;
+    const userId = (req as any).user?.id;
+    const synced = await invoicesService.syncOfflineInvoices(rawData, userId);
+    res.status(201).json(ok(synced));
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function voidInvoice(req: Request, res: Response, next: NextFunction) {
+  try {
+    const invoiceId = req.params.id;
+    const { voidReason } = req.body || {};
+    const userId = req.user?.id;
+
+    const voided = await invoicesService.voidInvoice(invoiceId, voidReason, userId);
+    res.json(ok(voided));
+  } catch (error: any) {
+    if (error.message?.includes('not found')) {
+      res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+}
+
+
+
 

@@ -2,7 +2,8 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
-import { UnauthorizedError } from '../../shared/errors';
+import { ValidationError, UnauthorizedError } from '../../shared/errors';
+import { sendPasswordResetEmail } from '../../services/mail.service';
 import {
   findUserByEmail,
   findUserById,
@@ -10,6 +11,10 @@ import {
   findRefreshToken,
   revokeRefreshToken,
   revokeAllUserRefreshTokens,
+  savePasswordResetToken,
+  findPasswordResetToken,
+  markPasswordResetTokenUsed,
+  updateUserPassword,
 } from './auth.repository';
 
 export interface LoginResult {
@@ -68,7 +73,7 @@ function buildAccessToken(user: {
 export async function login(email: string, password: string): Promise<LoginResult> {
   const user = await findUserByEmail(email);
 
-  if (!user || !user.is_active) {
+  if (!user || !user.is_active || !user.password_hash || !user.email || !user.role_id || !user.role_name) {
     throw new UnauthorizedError('Invalid email or password');
   }
 
@@ -77,7 +82,16 @@ export async function login(email: string, password: string): Promise<LoginResul
     throw new UnauthorizedError('Invalid email or password');
   }
 
-  const accessToken = buildAccessToken(user);
+  const validUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role_id: user.role_id,
+    role_name: user.role_name,
+    permissions: user.permissions,
+  };
+
+  const accessToken = buildAccessToken(validUser);
 
   // Refresh token = random UUID; store its hash
   const rawRefreshToken = crypto.randomUUID();
@@ -90,11 +104,11 @@ export async function login(email: string, password: string): Promise<LoginResul
     access_token: accessToken,
     refresh_token: rawRefreshToken,
     user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role_name,
-      permissions: user.permissions,
+      id: validUser.id,
+      name: validUser.name,
+      email: validUser.email,
+      role: validUser.role_name,
+      permissions: validUser.permissions,
     },
   };
 }
@@ -112,11 +126,20 @@ export async function refresh(rawRefreshToken: string): Promise<{ access_token: 
   }
 
   const user = await findUserById(stored.user_id);
-  if (!user || !user.is_active) {
+  if (!user || !user.is_active || !user.email || !user.role_id || !user.role_name) {
     throw new UnauthorizedError('User not found or inactive');
   }
 
-  const accessToken = buildAccessToken(user);
+  const validUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role_id: user.role_id,
+    role_name: user.role_name,
+    permissions: user.permissions,
+  };
+
+  const accessToken = buildAccessToken(validUser);
   return { access_token: accessToken };
 }
 
@@ -147,8 +170,81 @@ export async function getMe(userId: string): Promise<MeResult> {
   return {
     id: user.id,
     name: user.name,
-    email: user.email,
-    role: user.role_name,
+    email: user.email || '',
+    role: user.role_name || '',
     permissions: user.permissions,
+  };
+}
+
+/**
+ * Forgot Password — generate a secure reset token and send reset email.
+ */
+export async function forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+  const normalizedEmail = email.toLowerCase().trim();
+  const user = await findUserByEmail(normalizedEmail);
+
+  const genericMessage = 'If your email is registered in our system, a password reset link has been sent. Please check your inbox.';
+
+  if (!user || !user.is_active || !user.email) {
+    return {
+      success: true,
+      message: genericMessage,
+    };
+  }
+
+  // Generate 64-char hex random token
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  await savePasswordResetToken(user.id, tokenHash, expiresAt);
+
+  const resetUrl = `${env.FRONTEND_URL.replace(/\/$/, '')}/reset-password?token=${rawToken}`;
+  await sendPasswordResetEmail(user.email, resetUrl, user.name);
+
+  return {
+    success: true,
+    message: genericMessage,
+  };
+}
+
+/**
+ * Reset Password — verify reset token and update user's password.
+ */
+export async function resetPassword(
+  token: string,
+  newPassword: string,
+): Promise<{ success: boolean; message: string }> {
+  if (!token?.trim()) {
+    throw new ValidationError('Password reset token is required');
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new ValidationError('New password must be at least 6 characters');
+  }
+
+  const tokenHash = hashToken(token.trim());
+  const tokenRecord = await findPasswordResetToken(tokenHash);
+
+  if (!tokenRecord) {
+    throw new ValidationError('Invalid or expired password reset link. Please request a new one.');
+  }
+
+  // Hash new password with bcrypt
+  const saltRounds = 10;
+  const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+
+  // Update password in DB
+  await updateUserPassword(tokenRecord.user_id, newPasswordHash);
+
+  // Invalidate this reset token
+  await markPasswordResetTokenUsed(tokenHash);
+
+  // Revoke all existing sessions/refresh tokens for security
+  await revokeAllUserRefreshTokens(tokenRecord.user_id);
+
+  return {
+    success: true,
+    message: 'Your password has been reset successfully. You can now login with your new password.',
   };
 }

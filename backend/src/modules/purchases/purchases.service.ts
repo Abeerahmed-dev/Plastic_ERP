@@ -18,3 +18,42 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
 export async function updatePurchaseInvoiceStatus(id: string, updateData: { status?: string; paid_amount?: number }) {
   return await repo.updatePurchaseInvoiceStatus(id, updateData);
 }
+
+export async function processPurchaseReturn(
+  input: {
+    parent_invoice_id: string;
+    items?: repo.PurchaseReturnItemInput[];
+    line_items?: repo.PurchaseReturnItemInput[];
+    return_reason?: string;
+  },
+  userId?: string
+) {
+  return await repo.processPurchaseReturn(input, userId);
+}
+
+export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
+  return await repo.getPurchaseInvoiceReturnSummary(parentInvoiceId);
+}
+
+export async function getRecentPurchasesForStockUpdate(limit: number = 20) {
+  return await repo.getRecentPurchasesForStockUpdate(limit);
+}
+
+export async function updateStockDcAndPrices(
+  purchaseId: string,
+  payload: {
+    delivery_charges?: number;
+    items: Array<{
+      product_id: string;
+      selling_price: number;
+    }>;
+  },
+  userId?: string
+) {
+  return await repo.updateStockDcAndPrices(purchaseId, payload, userId);
+}
+
+export async function voidPurchaseInvoice(id: string, voidReason?: string, userId?: string) {
+  return await repo.voidPurchaseInvoice(id, voidReason, userId);
+}
+

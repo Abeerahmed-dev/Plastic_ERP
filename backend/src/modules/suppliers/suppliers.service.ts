@@ -6,7 +6,8 @@ import {
   createSupplier,
   updateSupplier,
   softDeleteSupplier,
-  getSupplierLedger as repoGetSupplierLedger,
+  getSupplierStatement as repoGetSupplierStatement,
+  getSupplierRefundableCredits as repoGetSupplierRefundableCredits,
   SupplierWithBalance,
 } from './suppliers.repository';
 import { PaginationMeta } from '../../shared/apiResponse';
@@ -35,7 +36,7 @@ export async function getSupplier(id: string): Promise<SupplierWithBalance> {
 
 export async function addSupplier(
   data: CreateSupplierInput,
-  createdBy: string,
+  createdBy?: string,
 ): Promise<SupplierWithBalance> {
   return createSupplier(data, createdBy);
 }
@@ -55,7 +56,17 @@ export async function deactivateSupplier(id: string): Promise<void> {
   await softDeleteSupplier(id);
 }
 
-export async function getSupplierLedger(id: string) {
+export async function getSupplierStatement(id: string) {
   await getSupplier(id);
-  return repoGetSupplierLedger(id);
+  return repoGetSupplierStatement(id);
 }
+
+export async function getSupplierLedger(id: string) {
+  return getSupplierStatement(id);
+}
+
+export async function getSupplierRefundableCredits(id: string) {
+  await getSupplier(id);
+  return repoGetSupplierRefundableCredits(id);
+}
+

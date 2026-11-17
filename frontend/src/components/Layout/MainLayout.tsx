@@ -1,11 +1,15 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { settingsService } from '../../services/settings.service';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LogOut, Users, Box, FileText, Truck, Tag, HandCoins,
+  LogOut, Users, Box, FileText, Truck, Tag,
   ShoppingCart, LayoutDashboard, PieChart, Receipt, Boxes,
-  ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings,
+  ChevronDown, ChevronRight, TrendingUp, Menu, X, Settings, ArrowLeftRight,
+  Moon, Sun,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/auth.store';
+import { useThemeStore } from '../../store/theme.store';
 import { authService } from '../../services/auth.service';
 import type { AuthUser } from '../../types/auth.types';
 import sabirLogo from '../../assets/sabirlogo.png';
@@ -31,7 +35,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     heading: 'Sales',
     items: [
       { to: '/invoices', label: 'Sales Invoices', icon: FileText, permission: 'sales:read' },
-      { to: '/payments', label: 'Cust. Payments', icon: HandCoins, permission: 'payments:read' },
       { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:read' },
     ],
   },
@@ -39,8 +42,7 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     heading: 'Purchases',
     items: [
       { to: '/purchases', label: 'Purchasing', icon: Truck, permission: 'purchases:read' },
-      { to: '/supplier-payments', label: 'Party Payments', icon: HandCoins, permission: 'payments:read' },
-      { to: '/suppliers', label: 'Parties', icon: Truck, permission: 'suppliers:read' },
+      { to: '/suppliers', label: 'Party', icon: Truck, permission: 'suppliers:read' },
     ],
   },
   {
@@ -48,6 +50,8 @@ const navSections: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/products', label: 'Products', icon: Box, permission: 'products:read' },
       { to: '/categories', label: 'Categories', icon: Tag, permission: 'products:read' },
+      { to: '/stocks', label: 'Stocks', icon: Boxes, permission: 'products:read' },
+      { to: '/exchange', label: 'Exchange', icon: ArrowLeftRight, permission: 'products:read' },
     ],
   },
   {
@@ -61,7 +65,6 @@ const navSections: { heading: string; items: NavItem[] }[] = [
         children: [
           { to: '/reports/income-statement', label: 'Income Statement', icon: TrendingUp, permission: null },
           { to: '/reports/margin-analytics', label: 'Margin Analytics', icon: TrendingUp, permission: null },
-          { to: '/reports/inventory-valuation', label: 'Inventory Valuation', icon: Boxes, permission: null },
           { to: '/reports', label: 'Financial Reports', icon: PieChart, permission: null },
         ],
       },
@@ -70,8 +73,23 @@ const navSections: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'Management',
     items: [
-      { to: '/employees', label: 'Store Staff', icon: Users, permission: null },
+      { to: '/employees', label: 'Staff', icon: Users, permission: null },
       { to: '/settings', label: 'Settings', icon: Settings, permission: null },
+    ],
+  },
+];
+
+const accountantNavSections: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: 'Accountant Menu',
+    items: [
+      { to: '/customers', label: 'Customer', icon: Users, permission: null },
+      { to: '/suppliers', label: 'Party', icon: Truck, permission: null },
+      { to: '/purchases', label: 'Purchasing Invoice', icon: FileText, permission: null },
+      { to: '/products', label: 'Products', icon: Box, permission: null },
+      { to: '/categories', label: 'Categories', icon: Tag, permission: null },
+      { to: '/expenses', label: 'Expenses', icon: Receipt, permission: null },
+      { to: '/stocks', label: 'Stocks', icon: Boxes, permission: null },
     ],
   },
 ];
@@ -81,9 +99,22 @@ function SidebarLink({ item, onClick }: { item: NavItem; onClick?: () => void })
   const location = useLocation();
   if (!item.to) return null;
 
+  const searchParams = new URLSearchParams(location.search);
+  const isPosTab = searchParams.get('type') === 'pos';
+  const isPosRoute =
+    location.pathname.startsWith('/pos-invoices') ||
+    location.pathname.startsWith('/pos/invoices') ||
+    ((location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && isPosTab);
+
   const isActive =
-    item.to === '/dashboard'
+    item.to === '/pos-invoices' || item.to === '/invoices?type=pos'
+      ? isPosRoute
+      : item.to === '/invoices'
+      ? (location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && !isPosRoute
+      : item.to === '/dashboard'
       ? location.pathname === '/dashboard' || location.pathname === '/'
+      : item.to === '/reports'
+      ? location.pathname === '/reports' || location.pathname === '/reports/'
       : location.pathname.startsWith(item.to);
 
   return (
@@ -153,6 +184,8 @@ type SidebarContentProps = {
 
 function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: SidebarContentProps) {
   const isCashierRole = (user?.role || '').toUpperCase() === 'CASHIER';
+  const isAccountantRole = (user?.role || '').toUpperCase() === 'ACCOUNTANT';
+  const sectionsToRender = isAccountantRole ? accountantNavSections : navSections;
 
   return (
     <div className="flex flex-col h-full bg-slate-900 text-slate-100">
@@ -165,16 +198,18 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
         />
         <div>
           <p className="font-bold text-white text-sm leading-tight tracking-tight">Sabir Plastic Store</p>
-          <p className="text-[11px] text-amber-400 font-medium leading-tight">ERP System</p>
+          <p className="text-[11px] text-amber-400 font-medium leading-tight">
+            {isAccountantRole ? 'Accountant Portal' : 'ERP System'}
+          </p>
         </div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-        {navSections.map((section) => {
+        {sectionsToRender.map((section) => {
           const visibleItems = section.items.filter((item) => {
             if (isCashierRole) {
-              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers', '/settings', '/expenses', '/employees'];
+              const hidden = ['/reports', '/purchases', '/users', '/supplier-payments', '/suppliers', '/settings', '/expenses', '/employees', '/products', '/categories'];
               if (item.to && hidden.some((h) => item.to!.startsWith(h))) return false;
               if (!item.to && item.label === 'Reports') return false;
             }
@@ -231,7 +266,14 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
 }
 
 /* ─── Route Title Mapping Helper ─── */
-const getPageTitle = (pathname: string): { title: string; subtitle?: string } => {
+const getPageTitle = (pathname: string, search?: string): { title: string; subtitle?: string } => {
+  const isPosInvoices =
+    pathname.startsWith('/pos-invoices') ||
+    pathname.startsWith('/pos/invoices') ||
+    ((pathname.startsWith('/invoices') || pathname.startsWith('/sales')) && new URLSearchParams(search || '').get('type') === 'pos');
+  if (isPosInvoices) {
+    return { title: 'POS Sale Invoices', subtitle: 'Retail Walk-in Counter Sale History' };
+  }
   if (pathname === '/dashboard' || pathname === '/') {
     return { title: 'Dashboard', subtitle: 'Overview & Business Analytics' };
   }
@@ -262,6 +304,9 @@ const getPageTitle = (pathname: string): { title: string; subtitle?: string } =>
   if (pathname.startsWith('/categories') || pathname.startsWith('/uom')) {
     return { title: 'Categories', subtitle: 'Product Classifications' };
   }
+  if (pathname.startsWith('/exchange')) {
+    return { title: 'Product Exchange', subtitle: 'Product-to-Product Inventory Exchange' };
+  }
   if (pathname.startsWith('/expenses')) {
     return { title: 'Operating Expenses', subtitle: 'Overheads & Expense Ledger' };
   }
@@ -271,8 +316,8 @@ const getPageTitle = (pathname: string): { title: string; subtitle?: string } =>
   if (pathname.startsWith('/reports/margin-analytics') || pathname.startsWith('/reports/sales-margin')) {
     return { title: 'Margin Analytics', subtitle: 'Sales & Profit Margin Analytics' };
   }
-  if (pathname.startsWith('/reports/inventory-valuation')) {
-    return { title: 'Inventory Valuation', subtitle: 'WAC Valuation & FIFO Batches' };
+  if (pathname === '/stocks' || pathname.startsWith('/stocks/') || pathname.startsWith('/reports/inventory-valuation')) {
+    return { title: 'Stocks', subtitle: 'Stock on Hand, Sizes & Valuation' };
   }
   if (pathname.startsWith('/reports')) {
     return { title: 'Financial Reports', subtitle: 'Financial & Inventory Intelligence' };
@@ -293,12 +338,21 @@ const getPageTitle = (pathname: string): { title: string; subtitle?: string } =>
 /* ─── Main Layout ─── */
 export const MainLayout = () => {
   const { user, clearAuth, hasPermission } = useAuthStore();
+  const { theme, toggleTheme } = useThemeStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
-  const currentPage = getPageTitle(location.pathname);
+  const { data: featureAccess } = useQuery({
+    queryKey: ['cashier-feature-access'],
+    queryFn: () => settingsService.getCashierFeatureAccess(),
+    enabled: !!user && isCashier,
+    staleTime: 60000,
+    retry: false,
+  });
+  const isAccountant = (user?.role || '').toUpperCase() === 'ACCOUNTANT';
+  const currentPage = getPageTitle(location.pathname, location.search);
 
   const handleLogout = async () => {
     try {
@@ -307,83 +361,119 @@ export const MainLayout = () => {
       console.error('Logout error:', error);
     } finally {
       clearAuth();
-      navigate('/login');
+      navigate('/login', { replace: true, state: null });
     }
   };
+
+  const isPOSPage = location.pathname.startsWith('/pos');
+  const hideSidebar = isPOSPage;
 
   /* ─── Cashier: horizontal top-nav ─── */
   if (isCashier) {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
+      <div className="min-h-screen bg-slate-50 flex flex-col print:bg-white print:m-0 print:p-0">
         <nav className="bg-slate-900 shadow-md border-b border-slate-800 shrink-0 print:hidden">
-          <div className="w-full px-4 sm:px-6">
-            <div className="flex items-center justify-between h-16 gap-4">
-              {/* Brand Logo & Title */}
-              <div className="flex items-center gap-3 shrink-0">
-                <img
-                  src={sabirLogo}
-                  alt="Sabir Plastic"
-                  className="h-9 w-auto object-contain shrink-0 drop-shadow"
-                />
-                <div className="hidden sm:flex flex-col">
-                  <span className="font-bold text-sm text-white tracking-tight leading-none">
-                    Sabir Plastic Store
-                  </span>
-                  <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
-                    Cashier Terminal
-                  </span>
+            <div className="w-full px-4 sm:px-6">
+              <div className="flex items-center justify-between h-16 gap-4">
+                {/* Brand Logo & Title */}
+                <div className="flex items-center gap-3 shrink-0">
+                  <img
+                    src={sabirLogo}
+                    alt="Sabir Plastic"
+                    className="h-9 w-auto object-contain shrink-0 drop-shadow"
+                  />
+                  <div className="hidden sm:flex flex-col">
+                    <span className="font-bold text-sm text-white tracking-tight leading-none">
+                      Sabir Plastic Store
+                    </span>
+                    <span className="text-[11px] font-semibold text-amber-400 leading-none mt-1">
+                      Cashier Terminal
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Navigation Links */}
-              <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                {[
-                  { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
-                  { to: '/invoices', label: 'Sales Invoices', icon: FileText },
-                  { to: '/purchases', label: 'Purchasing', icon: Truck },
-                  { to: '/products', label: 'Products', icon: Box },
-                  { to: '/categories', label: 'Categories', icon: Tag },
-                ].map(({ to, label, icon: Icon }) => {
-                  const isActive = to === '/pos' ? location.pathname === '/pos' : location.pathname.startsWith(to);
-                  return (
-                    <Link
-                      key={to}
-                      to={to}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
-                        isActive
-                          ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/20'
-                          : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      <span>{label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
+                {/* Navigation Links */}
+                <div className="flex items-center gap-2 overflow-x-auto min-w-0 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  {[
+                    { to: '/pos', label: 'POS Billing', icon: ShoppingCart },
+                    { to: '/pos-invoices', label: 'POS Sale Invoices', icon: FileText },
+                    { to: '/invoices', label: 'Sales Invoices', icon: FileText },
+                    ...(featureAccess?.customer_access ? [{ to: '/customers', label: 'Customers', icon: Users }] : []),
+                    ...(featureAccess?.party_access ? [{ to: '/suppliers', label: 'Party', icon: Truck }] : []),
+                    { to: '/exchange', label: 'Exchange', icon: ArrowLeftRight },
+                    { to: '/stocks', label: 'Stocks', icon: Boxes },
+                  ].map(({ to, label, icon: Icon }) => {
+                    const searchParams = new URLSearchParams(location.search);
+                    const isPosTab = searchParams.get('type') === 'pos';
+                    const isPosRoute =
+                      location.pathname.startsWith('/pos-invoices') ||
+                      location.pathname.startsWith('/pos/invoices') ||
+                      ((location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && isPosTab);
 
-              {/* User Profile & Logout */}
-              <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
-                <div className="hidden md:flex flex-col items-end">
-                  <span className="text-xs font-semibold text-slate-200 leading-none">{user?.name}</span>
-                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-none mt-1">
-                    {user?.role}
-                  </span>
+                    const isSalesInvoicesRoute =
+                      (location.pathname.startsWith('/invoices') || location.pathname.startsWith('/sales')) && !isPosTab;
+
+                    const isActive =
+                      to === '/pos'
+                        ? location.pathname === '/pos'
+                        : to === '/pos-invoices'
+                        ? isPosRoute
+                        : to === '/invoices'
+                        ? isSalesInvoicesRoute
+                        : location.pathname.startsWith(to);
+                    return (
+                      <Link
+                        key={to}
+                        to={to}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                          isActive
+                            ? 'bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-amber-300'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        <span>{label}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
-                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-sm shrink-0">
-                  {user?.name?.charAt(0).toUpperCase()}
+
+                {/* User Profile & Logout */}
+                <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
+                  {/* Theme Quick Toggle */}
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+                    title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  >
+                    {theme === 'dark' ? (
+                      <Sun className="h-4 w-4 text-amber-400" />
+                    ) : (
+                      <Moon className="h-4 w-4 text-purple-400" />
+                    )}
+                  </button>
+
+                  <div className="hidden md:flex flex-col items-end">
+                    <span className="text-xs font-semibold text-slate-200 leading-none">{user?.name}</span>
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider leading-none mt-1">
+                      {user?.role}
+                    </span>
+                  </div>
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-sm shrink-0">
+                    {user?.name?.charAt(0).toUpperCase()}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
-                  title="Sign out"
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
               </div>
             </div>
-          </div>
-        </nav>
+          </nav>
 
         <div className="flex-1 overflow-auto">
           <Outlet />
@@ -392,13 +482,11 @@ export const MainLayout = () => {
     );
   }
 
-  const isPOSPage = location.pathname.startsWith('/pos');
-
-  /* ─── Owner / Admin: fixed sidebar layout ─── */
+  /* ─── Owner / Admin / Accountant: fixed sidebar layout ─── */
   return (
-    <div className="min-h-screen bg-slate-100 flex">
+    <div className="min-h-screen bg-slate-50 flex print:bg-white print:m-0 print:p-0">
       {/* Desktop fixed sidebar - hidden on POS page */}
-      {!isPOSPage && (
+      {!hideSidebar && (
         <aside className="hidden lg:flex flex-col w-60 shrink-0 fixed top-0 left-0 h-screen bg-slate-900 border-r border-slate-800 z-30 shadow-md print:hidden">
           <SidebarContent
             user={user}
@@ -409,8 +497,8 @@ export const MainLayout = () => {
       )}
 
       {/* Mobile sidebar overlay - hidden on POS page */}
-      {!isPOSPage && mobileSidebarOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+      {!hideSidebar && mobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex print:hidden">
           <div
             className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm"
             onClick={() => setMobileSidebarOpen(false)}
@@ -433,9 +521,9 @@ export const MainLayout = () => {
       )}
 
       {/* Right: slim topbar + page content (full width when on POS) */}
-      <div className={`flex flex-col flex-1 ${!isPOSPage ? 'lg:ml-60' : ''} min-h-screen min-w-0 overflow-x-hidden`}>
+      <div className={`flex flex-col flex-1 ${!hideSidebar ? 'lg:ml-60' : ''} min-h-screen min-w-0 overflow-x-hidden print:ml-0 print:p-0`}>
         {/* Top bar */}
-        <header className="relative sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 justify-between shrink-0 shadow-sm print:hidden">
+        <header className="sticky top-0 z-20 bg-slate-900 border-b border-slate-800 h-16 flex items-center px-4 sm:px-6 justify-between shrink-0 shadow-sm print:hidden">
           {/* Left: Hamburger & Brand logo */}
           <div className="flex items-center gap-2.5 z-10">
             {!isPOSPage && (
@@ -492,19 +580,57 @@ export const MainLayout = () => {
             </div>
           )}
 
-          {/* Right: Go to SBS ERP + User info chip */}
+          {/* Right: POS Sale Invoices + Walk-in POS + Go to SBS ERP + User info chip */}
           <div className="flex items-center gap-2.5 z-10">
-            {/* Go to SBS ERP button: Only for Admin / Owner on POS screen */}
-            {isPOSPage && !isCashier && (
+            {/* POS Sale Invoices button: directly beside Go to SBS ERP */}
+            {isPOSPage && (
+              <Link
+                to="/pos-invoices"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-100 border border-amber-500/40 font-bold text-xs sm:text-sm shadow-md transition-all active:scale-95"
+                title="View POS Sale Invoices History"
+              >
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span>POS Sale Invoices</span>
+              </Link>
+            )}
+
+            {/* Walk-in POS button: In top navbar on all pages */}
+            {!isPOSPage && !isAccountant && (
+              <Link
+                to="/pos"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md shadow-amber-500/20 transition-all active:scale-95 mr-1"
+                title="Open Walk-in POS Terminal"
+              >
+                <ShoppingCart className="w-4 h-4 text-slate-950" />
+                <span>Walk-in POS</span>
+              </Link>
+            )}
+
+            {/* Go to SPS ERP button: Only for Admin / Owner on POS screen */}
+            {isPOSPage && !isCashier && !isAccountant && (
               <Link
                 to="/dashboard"
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-bold text-xs sm:text-sm shadow-md transition-all active:scale-95 mr-1"
-                title="Return to SBS ERP Dashboard"
+                title="Return to SPS ERP Dashboard"
               >
                 <LayoutDashboard className="w-4 h-4 text-slate-950" />
-                <span>Go to SBS ERP</span>
+                <span>Go to SPS ERP</span>
               </Link>
             )}
+
+            {/* Theme Quick Toggle */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-all cursor-pointer mr-1"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="h-4 w-4 text-amber-400" />
+              ) : (
+                <Moon className="h-4 w-4 text-purple-400" />
+              )}
+            </button>
 
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-sm font-semibold text-slate-200">{user?.name}</span>

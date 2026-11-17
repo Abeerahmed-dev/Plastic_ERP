@@ -1,6 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, DollarSign, Calendar, ArrowDownLeft, ArrowUpRight, RefreshCw, ChevronDown, ChevronRight, ShoppingBag } from 'lucide-react';
+import {
+  X,
+  DollarSign,
+  Calendar,
+  ArrowDownLeft,
+  ArrowUpRight,
+  RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  ShoppingBag,
+  Users,
+  Layers,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-react';
 import api from '../../services/api';
 
 interface CashBookModalProps {
@@ -26,6 +41,9 @@ export interface CashLedgerEntry {
   cash_in?: number;
   cash_out?: number;
   running_balance?: number;
+  source?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
+  source_type?: 'POS' | 'CUSTOMER_PAYMENT' | 'OUTFLOW';
+  transaction_type?: 'DEPOSIT' | 'WITHDRAWAL';
   order_details: OrderDetailItem[];
 }
 
@@ -36,6 +54,11 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+
+  // 3-Way Cash Flow Triangulation Filters
+  const [filterPos, setFilterPos] = useState<boolean>(true);
+  const [filterCust, setFilterCust] = useState<boolean>(true);
+  const [filterOutflows, setFilterOutflows] = useState<boolean>(true);
 
   const getDateRange = () => {
     const now = new Date();
@@ -89,49 +112,143 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
     }));
   };
 
-  if (!isOpen) return null;
+  // 3-Way Segregated Filtering
+  const filteredEntries = useMemo(() => {
+    return entries.filter((item) => {
+      const isDeposit = item.transaction_type === 'DEPOSIT' || Number(item.cash_in || 0) > 0 || (item.entry_type && item.entry_type.includes('SALE'));
+      const isWithdrawal = item.transaction_type === 'WITHDRAWAL' || Number(item.cash_out || 0) > 0 || item.source === 'OUTFLOW';
+      const isPos = item.source === 'POS' || item.source_type === 'POS' || (item.entry_type && item.entry_type.includes('POS'));
+      const isCust = item.source === 'CUSTOMER_PAYMENT' || item.source_type === 'CUSTOMER_PAYMENT' || (!isPos && isDeposit);
 
-  const totalCashIn = entries.reduce(
-    (sum, e) => sum + (Number(e.cash_in || 0) > 0 ? Number(e.cash_in) : Number(e.amount || 0) > 0 ? Number(e.amount) : 0),
-    0
-  );
-  const totalCashOut = entries.reduce(
-    (sum, e) => sum + (Number(e.cash_out || 0) > 0 ? Number(e.cash_out) : Number(e.amount || 0) < 0 ? Math.abs(Number(e.amount)) : 0),
-    0
-  );
-  const netCashBalance = totalCashIn - totalCashOut;
+      if (isDeposit && isPos) return filterPos;
+      if (isDeposit && isCust) return filterCust;
+      if (isWithdrawal) return filterOutflows;
+      return true;
+    });
+  }, [entries, filterPos, filterCust, filterOutflows]);
+
+  // Dynamic Cash Flow Stats & Insights
+  const stats = useMemo(() => {
+    let posTotal = 0;
+    let posCount = 0;
+    let custTotal = 0;
+    let custCount = 0;
+    let outflowTotal = 0;
+    let outflowCount = 0;
+
+    for (const item of entries) {
+      const isDeposit = item.transaction_type === 'DEPOSIT' || Number(item.cash_in || 0) > 0 || (item.entry_type && item.entry_type.includes('SALE'));
+      const isWithdrawal = item.transaction_type === 'WITHDRAWAL' || Number(item.cash_out || 0) > 0 || item.source === 'OUTFLOW';
+      const isPos = item.source === 'POS' || item.source_type === 'POS' || (item.entry_type && item.entry_type.includes('POS'));
+
+      const inAmt = Number(item.cash_in || (isDeposit ? item.amount : 0) || 0);
+      const outAmt = Number(item.cash_out || (isWithdrawal ? item.amount : 0) || 0);
+
+      if (isDeposit && isPos) {
+        posTotal += inAmt;
+        posCount++;
+      } else if (isDeposit) {
+        custTotal += inAmt;
+        custCount++;
+      } else if (isWithdrawal) {
+        outflowTotal += outAmt;
+        outflowCount++;
+      }
+    }
+
+    let filteredInflow = 0;
+    let filteredOutflow = 0;
+
+    for (const item of filteredEntries) {
+      const isDeposit = item.transaction_type === 'DEPOSIT' || Number(item.cash_in || 0) > 0 || (item.entry_type && item.entry_type.includes('SALE'));
+      const isWithdrawal = item.transaction_type === 'WITHDRAWAL' || Number(item.cash_out || 0) > 0 || item.source === 'OUTFLOW';
+
+      if (isDeposit) {
+        filteredInflow += Number(item.cash_in || item.amount || 0);
+      } else if (isWithdrawal) {
+        filteredOutflow += Number(item.cash_out || item.amount || 0);
+      }
+    }
+
+    return {
+      posTotal: Math.round(posTotal * 100) / 100,
+      posCount,
+      custTotal: Math.round(custTotal * 100) / 100,
+      custCount,
+      outflowTotal: Math.round(outflowTotal * 100) / 100,
+      outflowCount,
+      filteredInflow: Math.round(filteredInflow * 100) / 100,
+      filteredOutflow: Math.round(filteredOutflow * 100) / 100,
+      netFilteredTotal: Math.round((filteredInflow - filteredOutflow) * 100) / 100,
+    };
+  }, [entries, filteredEntries]);
+
+  const selectOnly = (type: 'POS' | 'CUST' | 'OUTFLOW') => {
+    setFilterPos(type === 'POS');
+    setFilterCust(type === 'CUST');
+    setFilterOutflows(type === 'OUTFLOW');
+  };
+
+  const selectAll = () => {
+    setFilterPos(true);
+    setFilterCust(true);
+    setFilterOutflows(true);
+  };
+
+  const periodLabel = filter === 'today' ? 'today' : filter === 'yesterday' ? 'yesterday' : 'this period';
+
+  // Dynamic Owner Insight Text
+  const getOwnerInsight = () => {
+    if (filterPos && !filterCust && !filterOutflows) {
+      return `We made Rs. ${stats.posTotal.toLocaleString()} strictly from walk-in POS ${periodLabel}.`;
+    }
+    if (!filterPos && filterCust && !filterOutflows) {
+      return `We collected Rs. ${stats.custTotal.toLocaleString()} strictly from customer payments ${periodLabel}.`;
+    }
+    if (!filterPos && !filterCust && filterOutflows) {
+      return `Total cash outflows were Rs. ${stats.outflowTotal.toLocaleString()} ${periodLabel}.`;
+    }
+    if (filterPos && filterCust && !filterOutflows) {
+      return `Total gross cash collections: Rs. ${(stats.posTotal + stats.custTotal).toLocaleString()} ${periodLabel} (POS: Rs. ${stats.posTotal.toLocaleString()} + Customer: Rs. ${stats.custTotal.toLocaleString()}).`;
+    }
+    return `Net drawer cash flow ${periodLabel}: Rs. ${stats.netFilteredTotal.toLocaleString()} (Inflows: +Rs. ${stats.filteredInflow.toLocaleString()}, Outflows: -Rs. ${stats.filteredOutflow.toLocaleString()}).`;
+  };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 flex flex-col max-h-[85vh]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 flex flex-col max-h-[88vh] dark:bg-[#121520] dark:border-[#23283B]">
         {/* Header */}
-        <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between shrink-0">
+        <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between shrink-0 dark:from-[#092218] dark:to-[#0c2e22] dark:border-b dark:border-emerald-500/30">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/10 rounded-xl">
-              <DollarSign className="w-6 h-6 text-white" />
+            <div className="p-2 bg-white/10 rounded-xl dark:bg-emerald-950/60 dark:border dark:border-emerald-500/40">
+              <DollarSign className="w-6 h-6 text-white dark:text-emerald-400" />
             </div>
             <div>
               <h2 className="text-xl font-bold leading-tight">Cash Drawer Audit Ledger</h2>
-              <p className="text-xs text-emerald-100 font-medium">Audit of physical cash sales, receipts & cash refunds</p>
+              <p className="text-xs text-emerald-100 dark:text-emerald-300/80 font-medium">
+                Audit of physical cash sales, customer payments & outflows
+              </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+            className="p-1.5 text-white/80 hover:text-white hover:bg-white/10 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Filter & Summary Bar */}
-        <div className="p-4 bg-emerald-50/80 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-4 shrink-0">
+        {/* Period Selector Bar */}
+        <div className="p-3 bg-emerald-50/80 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-3 shrink-0 dark:bg-[#0c181f] dark:border-[#23283B]">
           <div className="flex flex-wrap items-center gap-2">
-            <Calendar className="w-4 h-4 text-emerald-700" />
-            <span className="text-xs font-bold text-emerald-900">Period:</span>
+            <Calendar className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+            <span className="text-xs font-bold text-emerald-900 dark:text-emerald-300">Period:</span>
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value as FilterType)}
-              className="text-xs bg-white border border-emerald-300 rounded-lg px-3 py-1.5 font-bold text-emerald-900 focus:outline-none cursor-pointer"
+              className="text-xs bg-white border border-emerald-300 rounded-lg px-3 py-1.5 font-bold text-emerald-900 focus:outline-none cursor-pointer dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
             >
               <option value="today">Today (Shift Audit)</option>
               <option value="yesterday">Yesterday</option>
@@ -146,61 +263,212 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                   type="date"
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="text-xs bg-white border border-emerald-300 rounded-lg px-2 py-1 font-medium text-emerald-900 focus:outline-none"
+                  className="text-xs bg-white border border-emerald-300 rounded-lg px-2 py-1 font-medium text-emerald-900 focus:outline-none dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
                 />
-                <span className="text-xs text-emerald-700 font-bold">to</span>
+                <span className="text-xs text-emerald-700 dark:text-emerald-400 font-bold">to</span>
                 <input
                   type="date"
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="text-xs bg-white border border-emerald-300 rounded-lg px-2 py-1 font-medium text-emerald-900 focus:outline-none"
+                  className="text-xs bg-white border border-emerald-300 rounded-lg px-2 py-1 font-medium text-emerald-900 focus:outline-none dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
                 />
               </div>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
-            <span className="px-3 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-900 font-mono text-xs flex items-center gap-1.5">
-              <ArrowDownLeft className="w-4 h-4 text-emerald-600" />
-              Inflow: +Rs. {totalCashIn.toLocaleString()}
+          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 border border-emerald-300 font-mono text-xs flex items-center gap-1 dark:bg-[#092218] dark:border-emerald-500/60 dark:text-emerald-300">
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              Inflow: Rs. {stats.filteredInflow.toLocaleString()}
             </span>
-            {totalCashOut > 0 && (
-              <span className="px-3 py-1.5 rounded-xl bg-red-100 border border-red-300 text-red-900 font-mono text-xs flex items-center gap-1.5">
-                <ArrowUpRight className="w-4 h-4 text-red-600" />
-                Refunds: -Rs. {totalCashOut.toLocaleString()}
-              </span>
-            )}
-            <span className="px-3 py-1.5 rounded-xl bg-slate-900 text-white font-mono text-xs flex items-center gap-1.5 shadow-xs">
-              <DollarSign className="w-4 h-4 text-emerald-400" />
-              Net Drawer: Rs. {netCashBalance.toLocaleString()}
+            <span className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-900 border border-rose-300 font-mono text-xs flex items-center gap-1 dark:bg-[#25101a] dark:border-rose-500/60 dark:text-rose-300">
+              <TrendingDown className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              Outflow: Rs. {stats.filteredOutflow.toLocaleString()}
+            </span>
+            <span className="px-3 py-1 rounded-lg bg-slate-900 text-white font-mono text-xs flex items-center gap-1.5 shadow-xs dark:bg-[#161925] dark:border dark:border-[#2D3349]">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+              Net Drawer: Rs. {stats.netFilteredTotal.toLocaleString()}
             </span>
           </div>
         </div>
 
+        {/* 3-Way Cash Segregation Filters */}
+        <div className="p-3.5 bg-slate-50 border-b border-slate-200 shrink-0 space-y-2.5 dark:bg-[#0F111A] dark:border-[#23283B]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Layers className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
+                Cash Segregation Filters:
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => selectOnly('POS')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                  filterPos && !filterCust && !filterOutflows
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs dark:bg-emerald-600 dark:border-emerald-500'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-[#161925] dark:text-slate-300 dark:border-[#23283B] hover:dark:bg-[#1e2337]'
+                }`}
+              >
+                Only POS
+              </button>
+              <button
+                onClick={() => selectOnly('CUST')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                  !filterPos && filterCust && !filterOutflows
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs dark:bg-blue-600 dark:border-blue-500'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-[#161925] dark:text-slate-300 dark:border-[#23283B] hover:dark:bg-[#1e2337]'
+                }`}
+              >
+                Only Customer
+              </button>
+              <button
+                onClick={() => selectOnly('OUTFLOW')}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                  !filterPos && !filterCust && filterOutflows
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs dark:bg-rose-600 dark:border-rose-500'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-[#161925] dark:text-slate-300 dark:border-[#23283B] hover:dark:bg-[#1e2337]'
+                }`}
+              >
+                Only Outflows
+              </button>
+              <button
+                onClick={selectAll}
+                className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-md hover:bg-slate-200 transition cursor-pointer dark:text-slate-400 hover:dark:text-white hover:dark:bg-[#1e2337]"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          {/* 3 Explicit Toggle Checkboxes */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* Filter 1: Inflow: POS */}
+            <button
+              type="button"
+              onClick={() => setFilterPos((v) => !v)}
+              className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                filterPos
+                  ? 'bg-emerald-50/90 border-emerald-400 ring-2 ring-emerald-500/20 text-emerald-950 shadow-2xs dark:bg-[#092218] dark:border-emerald-400 dark:ring-emerald-500/30 dark:text-white dark:shadow-[0_0_12px_rgba(52,211,153,0.3)]'
+                  : 'bg-white border-slate-200 text-slate-400 opacity-60 hover:opacity-100 dark:bg-[#161925] dark:border-[#23283B] dark:text-slate-500'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={filterPos}
+                  onChange={() => {}}
+                  className="w-4 h-4 text-emerald-600 rounded-md border-slate-300 pointer-events-none"
+                />
+                <div>
+                  <span className="text-xs font-bold flex items-center gap-1">
+                    <ShoppingBag className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    Inflow: POS
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Walk-in counter sales</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-bold font-mono text-emerald-700 dark:text-emerald-300 block">
+                  Rs. {stats.posTotal.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">{stats.posCount} entries</span>
+              </div>
+            </button>
+
+            {/* Filter 2: Inflow: Customer Payments */}
+            <button
+              type="button"
+              onClick={() => setFilterCust((v) => !v)}
+              className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                filterCust
+                  ? 'bg-blue-50/90 border-blue-400 ring-2 ring-blue-500/20 text-blue-950 shadow-2xs dark:bg-[#0c1b2b] dark:border-sky-400 dark:ring-sky-500/30 dark:text-white dark:shadow-[0_0_12px_rgba(56,189,248,0.3)]'
+                  : 'bg-white border-slate-200 text-slate-400 opacity-60 hover:opacity-100 dark:bg-[#161925] dark:border-[#23283B] dark:text-slate-500'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={filterCust}
+                  onChange={() => {}}
+                  className="w-4 h-4 text-blue-600 rounded-md border-slate-300 pointer-events-none"
+                />
+                <div>
+                  <span className="text-xs font-bold flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400" />
+                    Inflow: Customer & Capital
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Ledger payments & deposits</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-bold font-mono text-blue-700 dark:text-sky-300 block">
+                  Rs. {stats.custTotal.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">{stats.custCount} entries</span>
+              </div>
+            </button>
+
+            {/* Filter 3: Outflows */}
+            <button
+              type="button"
+              onClick={() => setFilterOutflows((v) => !v)}
+              className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                filterOutflows
+                  ? 'bg-rose-50/90 border-rose-400 ring-2 ring-rose-500/20 text-rose-950 shadow-2xs dark:bg-[#25101a] dark:border-pink-500 dark:ring-pink-500/30 dark:text-white dark:shadow-[0_0_12px_rgba(244,114,182,0.3)]'
+                  : 'bg-white border-slate-200 text-slate-400 opacity-60 hover:opacity-100 dark:bg-[#161925] dark:border-[#23283B] dark:text-slate-500'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={filterOutflows}
+                  onChange={() => {}}
+                  className="w-4 h-4 text-rose-600 rounded-md border-slate-300 pointer-events-none"
+                />
+                <div>
+                  <span className="text-xs font-bold flex items-center gap-1">
+                    <ArrowUpRight className="w-3.5 h-3.5 text-rose-600 dark:text-pink-400" />
+                    Outflows
+                  </span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Expenses & supplier payouts</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs font-bold font-mono text-rose-700 dark:text-pink-300 block">
+                  (Rs. {stats.outflowTotal.toLocaleString()})
+                </span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">{stats.outflowCount} entries</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
         {/* Ledger Table View */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-4">
           {isLoading ? (
-            <div className="py-12 text-center text-emerald-600 font-medium animate-pulse">
+            <div className="py-12 text-center text-emerald-600 dark:text-emerald-400 font-medium animate-pulse">
               Loading cash ledger statement...
             </div>
-          ) : entries.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200">
-              No cash transactions recorded for this period.
+          ) : filteredEntries.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200 dark:bg-[#121520] dark:border-[#23283B] dark:text-slate-400">
+              No transactions match the selected filters.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs dark:border-[#23283B]">
               <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
+                <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
                   <tr>
                     <th className="p-3 w-8"></th>
                     <th className="p-3">Date & Time</th>
-                    <th className="p-3">Transaction Type</th>
+                    <th className="p-3">Category</th>
                     <th className="p-3">Description</th>
-                    <th className="p-3 text-right">Amount (Rs)</th>
+                    <th className="p-3 text-right">Amount (PKR)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {entries.flatMap((item) => {
+                <tbody className="divide-y divide-slate-100 text-slate-700 dark:divide-[#23283B] dark:text-slate-200">
+                  {filteredEntries.flatMap((item) => {
                     const isExpanded = !!expandedRows[item.id];
                     const hasLineItems = Array.isArray(item.order_details) && item.order_details.length > 0;
                     const isRefund = item.entry_type === 'CUSTOMER REFUND' || Number(item.amount) < 0;
@@ -209,20 +477,25 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                       ? new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                       : new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-                    const rawAmount = Number(item.amount || item.cash_in || 0);
-                    const displayAmount = isRefund ? Math.abs(Number(item.cash_out || item.amount || 0)) : rawAmount;
+                    const isDeposit = item.transaction_type === 'DEPOSIT' || Number(item.cash_in || 0) > 0 || (item.entry_type && item.entry_type.includes('SALE'));
+                    const isPos = item.source === 'POS' || item.source_type === 'POS' || (item.entry_type && item.entry_type.includes('POS'));
+                    const isWithdrawal = item.transaction_type === 'WITHDRAWAL' || Number(item.cash_out || 0) > 0 || item.source === 'OUTFLOW';
+
+                    const amountVal = isDeposit
+                      ? Number(item.cash_in || item.amount || 0)
+                      : Number(item.cash_out || item.amount || 0);
 
                     return [
                       /* Parent Row */
                       <tr
                         key={item.id}
                         onClick={() => toggleRow(item.id)}
-                        className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                        className="hover:bg-slate-50/80 transition-colors cursor-pointer dark:hover:bg-[#1A1E2E]"
                       >
                         <td className="p-3 text-center">
                           {hasLineItems ? (
                             isExpanded ? (
-                              <ChevronDown className="w-4 h-4 text-emerald-600 inline" />
+                              <ChevronDown className="w-4 h-4 text-emerald-600 dark:text-emerald-400 inline" />
                             ) : (
                               <ChevronRight className="w-4 h-4 text-slate-400 inline" />
                             )
@@ -230,43 +503,61 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                             <span className="w-4 h-4 inline-block" />
                           )}
                         </td>
-                        <td className="p-3 font-mono text-slate-600 whitespace-nowrap">
+                        <td className="p-3 font-mono text-slate-600 whitespace-nowrap dark:text-slate-400">
                           {dateStr}
                         </td>
                         <td className="p-3 font-bold whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                              isRefund
-                                ? 'bg-red-100 text-red-800 border-red-200'
-                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            }`}
-                          >
-                            {isRefund ? 'CUSTOMER REFUND' : 'CASH SALE'}
-                          </span>
+                          {isDeposit && isPos ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold inline-flex items-center gap-1 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-500/50">
+                              <ShoppingBag className="w-2.5 h-2.5" />
+                              POS SALE
+                            </span>
+                          ) : isDeposit ? (
+                            item.entry_type === 'OWNER CAPITAL' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] bg-purple-100 text-purple-800 border border-purple-200 font-semibold inline-flex items-center gap-1 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-500/50">
+                                <Sparkles className="w-2.5 h-2.5 text-purple-600 dark:text-purple-400" />
+                                OWNER CAPITAL
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] bg-blue-100 text-blue-800 border border-blue-200 font-semibold inline-flex items-center gap-1 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-500/50">
+                                <Users className="w-2.5 h-2.5" />
+                                CUSTOMER INFLOW
+                              </span>
+                            )
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[10px] bg-rose-100 text-rose-800 border border-rose-200 font-semibold inline-flex items-center gap-1 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-500/50">
+                              <ArrowUpRight className="w-2.5 h-2.5" />
+                              {item.entry_type || 'OUTFLOW'}
+                            </span>
+                          )}
                         </td>
-                        <td className="p-3 font-medium text-slate-800">
+                        <td className="p-3 font-medium text-slate-800 dark:text-white">
                           {item.description}
                         </td>
-                        <td
-                          className={`p-3 text-right font-mono font-bold whitespace-nowrap ${
-                            isRefund ? 'text-red-600' : 'text-emerald-600'
-                          }`}
-                        >
-                          {isRefund ? `-Rs. ${displayAmount.toLocaleString()}` : `+Rs. ${displayAmount.toLocaleString()}`}
+                        <td className="p-3 text-right font-mono font-bold whitespace-nowrap">
+                          {isDeposit ? (
+                            <span className="text-emerald-600 dark:text-emerald-400">
+                              +Rs. {amountVal.toLocaleString()}
+                            </span>
+                          ) : (
+                            <span className="text-rose-600 dark:text-rose-400">
+                              -Rs. {amountVal.toLocaleString()}
+                            </span>
+                          )}
                         </td>
                       </tr>,
 
                       /* Expanded Child Row */
                       isExpanded && (
-                        <tr key={`detail-${item.id}`} className="bg-slate-50/80 border-b border-slate-200">
+                        <tr key={`detail-${item.id}`} className="bg-slate-50/80 border-b border-slate-200 dark:bg-[#0c0e14] dark:border-[#23283B]">
                           <td colSpan={5} className="p-3">
-                            <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-inner space-y-2">
-                              <div className="text-xs font-bold text-slate-700 flex items-center justify-between border-b border-slate-100 pb-2">
-                                <span className="flex items-center gap-1.5 text-emerald-800">
+                            <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-inner space-y-2 dark:bg-[#161925] dark:border-[#23283B]">
+                              <div className="text-xs font-bold text-slate-700 flex items-center justify-between border-b border-slate-100 pb-2 dark:text-slate-200 dark:border-[#23283B]">
+                                <span className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-400">
                                   <ShoppingBag className="w-4 h-4 text-emerald-600" />
                                   Line-Item Receipt Breakdown ({item.order_details.length} item{item.order_details.length > 1 ? 's' : ''})
                                 </span>
-                                <span className="text-[11px] text-slate-400 font-mono">Order Drill-Down</span>
+                                <span className="text-[11px] text-slate-400 font-mono dark:text-slate-500">Order Drill-Down</span>
                               </div>
 
                               {item.order_details.length === 0 ? (
@@ -275,7 +566,7 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                                 </div>
                               ) : (
                                 <table className="w-full text-xs text-left">
-                                  <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-200">
+                                  <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:bg-[#0F111A] dark:text-slate-400 dark:border-[#23283B]">
                                     <tr>
                                       <th className="py-2 px-3">Product Name</th>
                                       <th className="py-2 px-3 text-right">Quantity / KG</th>
@@ -292,17 +583,17 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
                                       const total = Number(detail.total || (Number(detail.qty || detail.net_kg || 0) * price));
 
                                       return (
-                                        <tr key={idx} className="hover:bg-slate-50/50">
-                                          <td className="py-2 px-3 font-semibold text-slate-900">
+                                        <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-[#1A1E2E]">
+                                          <td className="py-2 px-3 font-semibold text-slate-900 dark:text-white">
                                             {detail.product_name}
                                           </td>
-                                          <td className="py-2 px-3 text-right font-mono font-medium">
+                                          <td className="py-2 px-3 text-right font-mono font-medium dark:text-slate-300">
                                             {qtyStr}
                                           </td>
-                                          <td className="py-2 px-3 text-right font-mono text-slate-600">
+                                          <td className="py-2 px-3 text-right font-mono text-slate-600 dark:text-slate-400">
                                             Rs. {price.toLocaleString()}
                                           </td>
-                                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">
+                                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                                             Rs. {total.toLocaleString()}
                                           </td>
                                         </tr>
@@ -323,18 +614,50 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center shrink-0">
+        {/* Dynamic Filtered Total & Owner Insight Bar */}
+        <div className="p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-slate-50 border-t border-emerald-200 shrink-0 dark:from-[#092218] dark:via-[#0c1e28] dark:to-[#121520] dark:border-emerald-500/30">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-emerald-600 text-white shadow-2xs dark:bg-emerald-500/20 dark:border dark:border-emerald-400/80 dark:text-emerald-400 dark:shadow-[0_0_10px_rgba(52,211,153,0.3)]">
+                <Sparkles className="w-4 h-4" />
+              </span>
+              <div>
+                <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block dark:text-emerald-400">
+                  Owner Cash Insights
+                </span>
+                <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  {getOwnerInsight()}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block dark:text-slate-400">
+                  Dynamic Filtered Total ({filteredEntries.length} items)
+                </span>
+                <span className={`text-base font-black font-mono tabular-nums ${
+                  stats.netFilteredTotal >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
+                }`}>
+                  {stats.netFilteredTotal >= 0 ? `+Rs. ${stats.netFilteredTotal.toLocaleString()}` : `-Rs. ${Math.abs(stats.netFilteredTotal).toLocaleString()}`}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Action Footer */}
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center shrink-0 dark:bg-[#0F111A] dark:border-[#23283B]">
           <button
             onClick={() => refetch()}
-            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-2xs dark:bg-[#161925] dark:border-[#2D3349] dark:text-slate-200 hover:dark:bg-[#1E2438]"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+            <RefreshCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             Refresh Statement
           </button>
           <button
             onClick={onClose}
-            className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+            className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer dark:bg-[#1E2438] dark:border dark:border-[#2D3349] hover:dark:bg-[#28304a] dark:text-white"
           >
             Close Audit Statement
           </button>
@@ -344,3 +667,4 @@ export const CashBookModal: React.FC<CashBookModalProps> = ({ isOpen, onClose })
   );
 };
 
+export default CashBookModal;

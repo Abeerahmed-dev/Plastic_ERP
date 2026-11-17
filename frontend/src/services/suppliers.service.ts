@@ -1,6 +1,7 @@
 import api from './api';
 import { Supplier, CreateSupplierData, UpdateSupplierData, SupplierFilters } from '../types/supplier.types';
 import { ApiSuccess, PaginationMeta } from '../types/api.types';
+import { RefundableCreditSource } from '../types/payment.types';
 
 export async function getSuppliers(filters: SupplierFilters = {}): Promise<{
   data: Supplier[];
@@ -28,3 +29,14 @@ export async function updateSupplier(id: string, data: UpdateSupplierData): Prom
 export async function deactivateSupplier(id: string): Promise<void> {
   await api.delete(`/suppliers/${id}`);
 }
+
+export async function getSupplierStatement(id: string): Promise<any[]> {
+  const res = await api.get<ApiSuccess<any[]>>(`/suppliers/${id}/statement`);
+  return res.data.data;
+}
+
+export async function getSupplierRefundableCredits(id: string): Promise<RefundableCreditSource[]> {
+  const res = await api.get<ApiSuccess<RefundableCreditSource[]>>(`/suppliers/${id}/refundable-credits`);
+  return res.data.data;
+}
+
