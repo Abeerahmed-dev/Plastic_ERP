@@ -83,6 +83,17 @@ export default function IncomeStatementPage() {
   };
 
   const handlePrint = () => {
+    const wasDark = document.documentElement.classList.contains('dark');
+    if (wasDark) {
+      document.documentElement.classList.remove('dark');
+    }
+    const handleAfter = () => {
+      if (wasDark) {
+        document.documentElement.classList.add('dark');
+      }
+      window.removeEventListener('afterprint', handleAfter);
+    };
+    window.addEventListener('afterprint', handleAfter);
     window.print();
   };
 

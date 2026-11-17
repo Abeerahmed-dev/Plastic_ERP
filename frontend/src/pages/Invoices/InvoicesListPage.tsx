@@ -1,25 +1,58 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, FileText, RotateCcw } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Plus, FileText, RotateCcw, ShoppingCart, Printer, CheckCircle2, ArrowLeft, UserCheck, ShieldCheck, User, Clock } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
+import { posService, POSHeldOrder } from '../../services/pos.service';
 import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
+import { HeldInvoicesModal } from './HeldInvoicesModal';
 import { ProcessReturnModal } from './ProcessReturnModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
+import { CascadingFilterBar } from '../../components/CascadingFilterBar';
+import { useCascadingFilters } from '../../hooks/useCascadingFilters';
+import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
+import { getCustomers } from '../../services/customers.service';
 import { Pagination } from '../../components/Common/Pagination';
+import { printThermalReceipt } from '../../utils/printThermal';
 
-export default function InvoicesListPage() {
+interface InvoicesListPageProps {
+  defaultType?: 'erp' | 'pos' | 'all';
+}
+
+export default function InvoicesListPage({ defaultType }: InvoicesListPageProps = {}) {
   const { user, hasPermission } = useAuthStore();
   const userRole = (user?.roleName || user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
 
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const typeParam = searchParams.get('type');
+
+  const initialTab = (defaultType || (typeParam === 'pos' ? 'pos' : typeParam === 'all' ? 'all' : 'erp')) as 'erp' | 'pos' | 'all';
+  const [activeTab, setActiveTab] = useState<'erp' | 'pos' | 'all'>(
+    ['erp', 'pos', 'all'].includes(initialTab) ? initialTab : 'erp'
+  );
+
+  useEffect(() => {
+    if (defaultType && defaultType !== activeTab) {
+      setActiveTab(defaultType);
+    } else if (typeParam && ['erp', 'pos', 'all'].includes(typeParam) && typeParam !== activeTab) {
+      setActiveTab(typeParam as 'erp' | 'pos' | 'all');
+    }
+  }, [defaultType, typeParam, activeTab]);
+
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 20;
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState<'ALL' | 'ADMIN' | 'CASHIER'>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailData | null>(null);
+  const [isHeldModalOpen, setIsHeldModalOpen] = useState(false);
+  const [resumedHeldData, setResumedHeldData] = useState<any>(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [printingInvoiceId, setPrintingInvoiceId] = useState<string | null>(null);
 
   const [returnInvoiceId, setReturnInvoiceId] = useState<string | null>(null);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -31,10 +64,148 @@ export default function InvoicesListPage() {
     queryFn: invoicesService.getInvoices,
   });
 
+  const { data: allHeldOrders = [], isLoading: isLoadingHeldOrders, refetch: refetchHeldOrders } = useQuery({
+    queryKey: ['posHeldOrders'],
+    queryFn: () => posService.getHeldOrders(),
+  });
+
+  const erpHeldOrders = useMemo(() => {
+    return allHeldOrders.filter((o) =>
+      o.reference_note?.startsWith('[ERP]') ||
+      (o.items && o.items.some((i: any) => i.selected_family_name || i.selected_variant_id))
+    );
+  }, [allHeldOrders]);
+
+  const { data: customersResponse } = useQuery({
+    queryKey: ['customers', { page: 1, limit: 100 }],
+    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    staleTime: 30000,
+  });
+  const customersList = customersResponse?.data || [];
+
+  // Summary counts
+  const { erpCount, posCount, allCount, erpTotal, posTotal } = useMemo(() => {
+    let erp = 0;
+    let pos = 0;
+    let eTotal = 0;
+    let pTotal = 0;
+
+    for (const inv of invoices) {
+      const isPos = String(inv.invoice_number || '').startsWith('POS-') || (inv.notes && inv.notes.includes('POS'));
+      const amt = Number(inv.total_amount || 0);
+      if (isPos) {
+        pos++;
+        pTotal += amt;
+      } else {
+        erp++;
+        eTotal += amt;
+      }
+    }
+
+    return {
+      erpCount: erp,
+      posCount: pos,
+      allCount: invoices.length,
+      erpTotal: eTotal,
+      posTotal: pTotal,
+    };
+  }, [invoices]);
+
+  // Filter invoices based on active tab
+  const activeInvoices = useMemo(() => {
+    if (activeTab === 'pos') {
+      return invoices.filter((inv: any) =>
+        String(inv.invoice_number || '').startsWith('POS-') || (inv.notes && inv.notes.includes('POS'))
+      );
+    }
+    if (activeTab === 'erp') {
+      return invoices.filter((inv: any) =>
+        !String(inv.invoice_number || '').startsWith('POS-') && !(inv.notes && inv.notes.includes('POS'))
+      );
+    }
+    return invoices;
+  }, [invoices, activeTab]);
+
+  // Role counts and filtering (Admin vs Cashier)
+  const roleCounts = useMemo(() => {
+    let admin = 0;
+    let cashier = 0;
+    for (const inv of activeInvoices) {
+      const role = (inv.created_by_role || inv.creator?.role || 'ADMIN').toUpperCase();
+      if (role === 'CASHIER') {
+        cashier++;
+      } else {
+        admin++;
+      }
+    }
+    return {
+      all: activeInvoices.length,
+      admin,
+      cashier,
+    };
+  }, [activeInvoices]);
+
+  const roleFilteredInvoices = useMemo(() => {
+    if (selectedRoleFilter === 'ALL') return activeInvoices;
+    return activeInvoices.filter((inv: any) => {
+      const role = (inv.created_by_role || inv.creator?.role || 'ADMIN').toUpperCase();
+      if (selectedRoleFilter === 'CASHIER') {
+        return role === 'CASHIER';
+      }
+      return role === 'ADMIN' || role === 'OWNER';
+    });
+  }, [activeInvoices, selectedRoleFilter]);
+
+  const normalizedInvoices = useMemo(() => {
+    return roleFilteredInvoices.map((inv: any) => ({
+      ...inv,
+      city: inv.city || inv.customer_city || null,
+      name: inv.customer_name || inv.name || '',
+      invoice_number: inv.invoice_number || '',
+    }));
+  }, [roleFilteredInvoices]);
+
+  // Cascading filters hook (dynamically bound to filtered invoices)
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    availableInvoices,
+    resetFilters,
+  } = useCascadingFilters(normalizedInvoices);
+
+  const handleResetFilters = () => {
+    resetFilters();
+    setSelectedStatus('All');
+    setCurrentPage(1);
+  };
+
+  const handleTabChange = (tab: 'erp' | 'pos' | 'all') => {
+    setActiveTab(tab);
+    setCurrentPage(1);
+    setSelectedRoleFilter('ALL');
+    setSelectedStatus('All');
+    resetFilters();
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tab === 'erp') {
+        next.delete('type');
+      } else {
+        next.set('type', tab);
+      }
+      return next;
+    });
+  };
+
   const handleOpenInvoice = async (id: string) => {
     try {
       const detail = await invoicesService.getInvoice(id);
-      setSelectedInvoice(detail as any);
+      setDetailModalInvoice(detail as any);
       setIsDetailModalOpen(true);
     } catch (err) {
       console.error('Failed to fetch invoice details:', err);
@@ -46,14 +217,50 @@ export default function InvoicesListPage() {
     setIsReturnModalOpen(true);
   };
 
-  const filteredInvoices = invoices.filter(
-    (i) =>
-      i.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.customer_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handlePrintThermal = async (invoice: any) => {
+    try {
+      setPrintingInvoiceId(invoice.id);
+      const detail = await invoicesService.getInvoice(invoice.id);
+      const items = (detail as any)?.items || [];
+      await printThermalReceipt({
+        invoice: detail,
+        items,
+        cashierName: (detail as any)?.creator?.name || (detail as any)?.created_by_name || user?.name || 'Cashier',
+        customerName: (detail as any)?.customer_name || 'Walk-In Customer',
+      });
+    } catch (err) {
+      console.error('Failed to print thermal receipt:', err);
+    } finally {
+      setPrintingInvoiceId(null);
+    }
+  };
 
-  const totalPages = Math.ceil(filteredInvoices.length / PAGE_SIZE) || 1;
-  const paginatedInvoices = filteredInvoices.slice(
+  // Strict multi-condition filter before rendering
+  const filteredTableRows = useMemo(() => {
+    return normalizedInvoices.filter((row: any) => {
+      const matchesCity = selectedCity ? row.city === selectedCity : true;
+      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
+
+      const isReturned =
+        Boolean(row.has_returns) ||
+        Number(row.returned_quantity || 0) > 0 ||
+        (Array.isArray(row.linked_credit_notes) && row.linked_credit_notes.length > 0) ||
+        Number(row.linked_returns_total || 0) > 0;
+
+      let matchesStatus = true;
+      if (selectedStatus === 'Returned') {
+        matchesStatus = isReturned;
+      } else if (selectedStatus === 'Standard') {
+        matchesStatus = !isReturned;
+      }
+
+      return matchesCity && matchesName && matchesInvoice && matchesStatus;
+    });
+  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice, selectedStatus]);
+
+  const totalPages = Math.ceil(filteredTableRows.length / PAGE_SIZE) || 1;
+  const paginatedInvoices = filteredTableRows.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   );
@@ -97,15 +304,29 @@ export default function InvoicesListPage() {
       return <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-black text-red-800 border border-red-300">CREDIT NOTE</span>;
     }
 
+    if (invoice.balance_due !== undefined && Number(invoice.balance_due) < 0) {
+      return <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 border border-amber-300">OVERPAID</span>;
+    }
+
     const totalAmt = Number(invoice.total_amount || 0);
     const paidAmt = Number(invoice.paid_amount || 0);
     if (totalAmt > 0 && paidAmt >= totalAmt) {
-      return <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">Paid</span>;
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+          <CheckCircle2 className="w-3 h-3" />
+          Paid
+        </span>
+      );
     }
 
     switch (invoice.status) {
       case 'PAID':
-        return <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">Paid</span>;
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+            <CheckCircle2 className="w-3 h-3" />
+            Paid
+          </span>
+        );
       case 'PARTIAL':
         return <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">Partial</span>;
       case 'UNPAID':
@@ -118,41 +339,174 @@ export default function InvoicesListPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header section */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Sales Invoices & Credit Notes</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Create sales invoices and process strict invoice-anchored returns (Credit Notes).
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                {activeTab === 'pos'
+                  ? 'POS Sale Invoices (Retail Counter)'
+                  : activeTab === 'erp'
+                    ? 'ERP Sales Invoices & Credit Notes'
+                    : 'All Sales Invoices'}
+              </h1>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${activeTab === 'pos'
+                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                : activeTab === 'erp'
+                  ? 'bg-blue-100 text-blue-900 border-blue-300'
+                  : 'bg-slate-100 text-slate-800 border-slate-300'
+                }`}>
+                {activeTab === 'pos' ? `${posCount} POS Bills` : activeTab === 'erp' ? `${erpCount} ERP Invoices` : `${allCount} Total Invoices`}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              {activeTab === 'pos'
+                ? 'Walk-in cash-and-carry retail counter sales history with instant thermal slip printing.'
+                : activeTab === 'erp'
+                  ? 'B2B commercial sales invoices, customer ledger balances, and strict invoice-anchored credit notes.'
+                  : 'Unified view of commercial B2B sales and retail POS sales history.'}
+            </p>
+          </div>
         </div>
-        {canWrite && (
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-all"
+
+        {/* Action Buttons */}
+        {activeTab === 'pos' ? (
+          <Link
+            to="/pos"
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 text-sm font-bold shadow-sm transition-all active:scale-95 group w-fit"
+            title="Return to POS Billing Screen"
           >
-            <Plus className="-ml-1 mr-2 h-5 w-5" />
-            Create Invoice
+            <ArrowLeft className="w-4 h-4 text-amber-400 transition-transform group-hover:-translate-x-1" />
+            <span>Back to POS</span>
+          </Link>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsPaymentModalOpen(true)}
+              className="inline-flex items-center justify-center rounded-xl bg-white border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-xs hover:bg-slate-50 transition-all cursor-pointer"
+            >
+              <Plus className="-ml-1 mr-1.5 h-4 w-4 text-slate-500" />
+              Record Payment
+            </button>
+
+            {canWrite && erpHeldOrders.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsHeldModalOpen(true)}
+                className="inline-flex items-center justify-center rounded-xl bg-amber-50 border border-amber-300 px-3.5 py-2.5 text-sm font-bold text-amber-900 shadow-2xs hover:bg-amber-100 transition-all cursor-pointer"
+                title="View and resume held wholesale invoices"
+              >
+                <Clock className="-ml-1 mr-1.5 h-4 w-4 text-amber-600" />
+                Held Invoices ({erpHeldOrders.length})
+              </button>
+            )}
+
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => {
+                  setResumedHeldData(null);
+                  setIsModalOpen(true);
+                }}
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+              >
+                <Plus className="-ml-1 mr-1.5 h-4 w-4 text-slate-950" />
+                Create Invoice
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Role Filter Bar (Admin vs Cashier) */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 pl-1">
+            <UserCheck className="w-4 h-4 text-slate-400" />
+            Generated By:
+          </span>
+          <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+            <button
+              type="button"
+              onClick={() => { setSelectedRoleFilter('ALL'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${selectedRoleFilter === 'ALL'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60 dark:text-slate-400 hover:dark:text-white hover:dark:bg-slate-800/60'
+                }`}
+            >
+              <span>All</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${selectedRoleFilter === 'ALL' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-700'
+                }`}>
+                {roleCounts.all}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedRoleFilter('ADMIN'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${selectedRoleFilter === 'ADMIN'
+                ? 'bg-purple-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-purple-700 hover:bg-purple-50/60 dark:text-slate-400 hover:dark:text-purple-300 hover:dark:bg-purple-950/40'
+                }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-purple-300" />
+              <span>Admin / Owner</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${selectedRoleFilter === 'ADMIN' ? 'bg-purple-800 text-purple-100' : 'bg-purple-100 text-purple-800'
+                }`}>
+                {roleCounts.admin}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedRoleFilter('CASHIER'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${selectedRoleFilter === 'CASHIER'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50/60 dark:text-slate-400 hover:dark:text-blue-300 hover:dark:bg-blue-950/40'
+                }`}
+            >
+              <User className="w-3.5 h-3.5 text-blue-300" />
+              <span>Cashier</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${selectedRoleFilter === 'CASHIER' ? 'bg-blue-700 text-blue-100' : 'bg-blue-100 text-blue-800'
+                }`}>
+                {roleCounts.cashier}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {selectedRoleFilter !== 'ALL' && (
+          <button
+            type="button"
+            onClick={() => { setSelectedRoleFilter('ALL'); setCurrentPage(1); }}
+            className="text-xs text-slate-500 hover:text-slate-800 font-semibold underline underline-offset-2 flex items-center gap-1 cursor-pointer pr-1 self-start sm:self-center"
+          >
+            Show All Invoices
           </button>
         )}
       </div>
 
-      {/* Toolbar */}
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div className="relative max-w-md w-full">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <Search className="h-5 w-5 text-slate-400" />
-          </div>
-          <input
-            type="text"
-            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
-            placeholder="Search by invoice number, credit note, or customer..."
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setCurrentPage(1);
-            }}
-          />
-        </div>
+      {/* Cascading Filter Bar */}
+      <div className="mb-6">
+        <CascadingFilterBar
+          selectedCity={selectedCity}
+          selectedName={selectedName}
+          selectedInvoice={selectedInvoice}
+          selectedStatus={selectedStatus}
+          onCityChange={(c) => { setSelectedCity(c); setCurrentPage(1); }}
+          onNameChange={(n) => { setSelectedName(n); setCurrentPage(1); }}
+          onInvoiceChange={(inv) => { setSelectedInvoice(inv); setCurrentPage(1); }}
+          onStatusChange={(st) => { setSelectedStatus(st); setCurrentPage(1); }}
+          availableCities={availableCities}
+          availableNames={availableNames}
+          availableInvoices={availableInvoices}
+          statusOptions={['All', 'Standard', 'Returned']}
+          showStatus={true}
+          statusLabel="Status"
+          onReset={handleResetFilters}
+          showInvoice={true}
+          nameLabel={activeTab === 'pos' ? 'Walk-in / Customer' : 'Customer'}
+          namePlaceholder={activeTab === 'pos' ? 'Filter by POS customer…' : 'Filter by customer…'}
+        />
       </div>
 
       {/* Main Table Card */}
@@ -162,10 +516,13 @@ export default function InvoicesListPage() {
             <thead className="bg-slate-50/50">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Invoice / Credit Note
+                  {activeTab === 'pos' ? 'POS Bill Number' : 'Invoice / Credit Note'}
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Customer
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Billed By
                 </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Date
@@ -173,14 +530,11 @@ export default function InvoicesListPage() {
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Amount
                 </th>
-                {!isCashier && (
+                {activeTab !== 'pos' && (
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     Balance Due
                   </th>
                 )}
-                <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Status
-                </th>
                 <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Actions
                 </th>
@@ -189,50 +543,89 @@ export default function InvoicesListPage() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading ? (
                 <tr>
-                  <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
                     <div className="flex flex-col items-center justify-center">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                       <span className="mt-2">Loading invoices...</span>
                     </div>
                   </td>
                 </tr>
-              ) : filteredInvoices.length === 0 ? (
+              ) : filteredTableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isCashier ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
-                    No invoices found.
+                  <td colSpan={activeTab === 'pos' ? 6 : 7} className="px-6 py-12 text-center text-sm text-slate-500">
+                    {selectedCity || selectedName || selectedInvoice || selectedStatus !== 'All'
+                      ? 'No invoices match the active cascading filters. Try resetting filters.'
+                      : selectedRoleFilter !== 'ALL'
+                        ? `No invoices generated by ${selectedRoleFilter === 'CASHIER' ? 'Cashier' : 'Admin / Owner'} found.`
+                        : activeTab === 'pos'
+                          ? 'No POS sale invoices found.'
+                          : activeTab === 'erp'
+                            ? 'No ERP sales invoices found.'
+                            : 'No invoices found.'}
                   </td>
                 </tr>
               ) : (
                 paginatedInvoices.map((invoice) => {
+                  const isPos = String(invoice.invoice_number || '').startsWith('POS-') || (invoice.notes && invoice.notes.includes('POS'));
                   const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
+                  const hasReturns = Boolean(invoice.has_returns) || Number((invoice as any).returned_quantity || 0) > 0 || (Array.isArray((invoice as any).linked_credit_notes) && (invoice as any).linked_credit_notes.length > 0) || Number((invoice as any).linked_returns_total || 0) > 0;
                   const balanceDue = Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.paid_amount || 0));
+                  const isPrinting = printingInvoiceId === invoice.id;
 
                   return (
                     <tr
                       key={invoice.id}
-                      className={`transition-colors ${
-                        isCreditNote ? 'bg-red-50/70 border-l-4 border-l-red-500' : 'hover:bg-slate-50/50'
-                      }`}
+                      className={`transition-colors ${isCreditNote
+                        ? 'bg-red-50/70 border-l-4 border-l-red-500'
+                        : isPos
+                          ? 'hover:bg-amber-50/30 hover:dark:bg-[#1a1710]'
+                          : 'hover:bg-slate-50/50 hover:dark:bg-[#151928]'
+                        }`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <button
                             onClick={() => handleOpenInvoice(invoice.id)}
-                            className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 transition-colors cursor-pointer"
+                            className="flex items-center text-left group p-1.5 -ml-1.5 rounded-xl hover:bg-purple-50 hover:dark:bg-purple-950/40 hover:dark:ring-1 hover:dark:ring-purple-500/30 transition-colors cursor-pointer"
                             title="Click to view detailed line items"
                           >
-                            <div className={`h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl group-hover:scale-105 transition-all shadow-xs ${
-                              isCreditNote ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'
-                            }`}>
-                              {isCreditNote ? <RotateCcw className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                            <div className={`h-10 w-10 flex-shrink-0 flex items-center justify-center rounded-xl group-hover:scale-105 transition-all shadow-xs ${isCreditNote
+                              ? 'bg-red-100 text-red-700'
+                              : isPos
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-400'
+                                : 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400'
+                              }`}>
+                              {isCreditNote ? (
+                                <RotateCcw className="h-5 w-5" />
+                              ) : isPos ? (
+                                <ShoppingCart className="h-5 w-5" />
+                              ) : (
+                                <FileText className="h-5 w-5" />
+                              )}
                             </div>
                             <div className="ml-3">
-                              <div className={`text-sm font-bold font-mono group-hover:underline flex items-center ${
-                                isCreditNote ? 'text-red-900 group-hover:text-red-700' : 'text-slate-900 group-hover:text-purple-700'
-                              }`}>
-                                {invoice.invoice_number}
+                              <div className={`text-sm font-bold font-mono group-hover:underline flex items-center gap-1.5 ${isCreditNote
+                                ? 'text-red-900 group-hover:text-red-700 dark:text-rose-300 group-hover:dark:text-rose-200'
+                                : isPos
+                                  ? 'text-amber-950 group-hover:text-amber-700 dark:text-amber-300 group-hover:dark:text-amber-200'
+                                  : 'text-slate-900 group-hover:text-purple-700 dark:text-white group-hover:dark:text-purple-300'
+                                }`}>
+                                <span>{invoice.invoice_number}</span>
+                                {hasReturns && (
+                                  <span
+                                    className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 border border-red-200"
+                                    title="Customer return processed for this sales invoice"
+                                  >
+                                    Returned
+                                  </span>
+                                )}
+                                {isPos && (
+                                  <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-200/80 text-amber-900">
+                                    POS
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-[10px] text-purple-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
                                 View details →
                               </div>
                             </div>
@@ -241,36 +634,97 @@ export default function InvoicesListPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-slate-900">{invoice.customer_name}</div>
+                        <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
+                          <span>{invoice.customer_name}</span>
+                          {invoice.customer_name?.toLowerCase().includes('walk-in') && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                              Walk-in
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-slate-500">{invoice.customer_code}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-slate-900">
-                          {new Date(invoice.date).toLocaleDateString()}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-slate-800">
+                            {invoice.creator?.name || invoice.created_by_name || 'System'}
+                          </span>
+                          {(() => {
+                            const role = (invoice.created_by_role || invoice.creator?.role || 'ADMIN').toUpperCase();
+                            if (role === 'CASHIER') {
+                              return (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                  Cashier
+                                </span>
+                              );
+                            }
+                            if (role === 'OWNER') {
+                              return (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                  Owner
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                Admin
+                              </span>
+                            );
+                          })()}
                         </div>
                       </td>
-                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isCreditNote ? 'text-red-700 font-bold font-mono' : 'text-slate-900'}`}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-slate-900">
+                          {new Date(invoice.date || invoice.created_at).toLocaleDateString('en-GB')}
+                        </div>
+                        {invoice.created_at && (
+                          <div className="text-[10px] text-slate-400">
+                            {new Date(invoice.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
+                      </td>
+                      <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isCreditNote ? 'text-red-700 font-bold font-mono' : 'text-slate-900 font-semibold'}`}>
                         {formatCurrency(invoice.total_amount)}
                       </td>
-                      {!isCashier && (
+                      {activeTab !== 'pos' && (
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-rose-600">
                           {formatCurrency(balanceDue)}
                         </td>
                       )}
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {getStatusBadge(invoice)}
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-xs">
-                        {!isCreditNote && canWrite && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isPos && (
+                            <button
+                              onClick={() => handlePrintThermal(invoice)}
+                              disabled={isPrinting}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg border border-amber-200 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                              title="Print 80mm Thermal Slip"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-amber-700" />
+                              <span>{isPrinting ? 'Printing…' : 'Print Slip'}</span>
+                            </button>
+                          )}
+
                           <button
-                            onClick={() => handleInitiateReturn(invoice.id)}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg border border-red-200 transition-all active:scale-95 shadow-2xs"
-                            title="Process Sales Return & Issue Credit Note"
+                            onClick={() => handleOpenInvoice(invoice.id)}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                            title="View Full Invoice Details"
                           >
-                            <RotateCcw className="w-3.5 h-3.5 text-red-600" />
-                            Return
+                            <FileText className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Details</span>
                           </button>
-                        )}
+
+                          {!isCreditNote && canWrite && (
+                            <button
+                              onClick={() => handleInitiateReturn(invoice.id)}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg border border-red-200 transition-all active:scale-95 shadow-2xs cursor-pointer"
+                              title="Process Sales Return & Issue Credit Note"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-red-600" />
+                              <span>Return</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -284,7 +738,7 @@ export default function InvoicesListPage() {
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
-          totalItems={filteredInvoices.length}
+          totalItems={filteredTableRows.length}
           pageSize={PAGE_SIZE}
           onPageChange={setCurrentPage}
         />
@@ -292,17 +746,39 @@ export default function InvoicesListPage() {
 
       <InvoiceFormModal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        initialHeldData={resumedHeldData}
+        onClose={() => {
+          setIsModalOpen(false);
+          setResumedHeldData(null);
+        }}
         onSuccess={() => {
           setIsModalOpen(false);
+          setResumedHeldData(null);
           refetch();
+          refetchHeldOrders();
+        }}
+      />
+
+      <HeldInvoicesModal
+        isOpen={isHeldModalOpen}
+        onClose={() => setIsHeldModalOpen(false)}
+        heldOrders={erpHeldOrders}
+        isLoading={isLoadingHeldOrders}
+        onResume={(order) => {
+          setResumedHeldData(order);
+          setIsHeldModalOpen(false);
+          setIsModalOpen(true);
+        }}
+        onDelete={async (id) => {
+          await posService.deleteHeldOrder(id);
+          refetchHeldOrders();
         }}
       />
 
       <InvoiceDetailModal
         isOpen={isDetailModalOpen}
         onClose={() => setIsDetailModalOpen(false)}
-        invoice={selectedInvoice}
+        invoice={detailModalInvoice}
         type="sales"
         onProcessReturn={(invId) => handleInitiateReturn(invId)}
       />
@@ -320,7 +796,17 @@ export default function InvoicesListPage() {
           }}
         />
       )}
+
+      <RecordPaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        type="CUSTOMER"
+        entityType="customer"
+        customers={customersList}
+        onSuccess={() => {
+          refetch();
+        }}
+      />
     </div>
   );
 }
-

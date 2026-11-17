@@ -197,18 +197,23 @@ export async function updateCustomer(
   id: string,
   data: UpdateCustomerInput,
 ): Promise<CustomerWithBalance | undefined> {
+  const updatePayload: Record<string, any> = {
+    ...data,
+    email: data.email || null,
+    updated_at: new Date(),
+  };
+
+  if (data.opening_balance !== undefined) {
+    updatePayload.opening_balance = Number(data.opening_balance || 0);
+  }
+
   const [row] = await db('customers')
     .where({ id })
-    .update({
-      ...data,
-      email: data.email || null,
-      updated_at: new Date(),
-    })
+    .update(updatePayload)
     .returning('*');
 
   if (!row) return undefined;
-  const outstanding_balance = await computeOutstandingBalance(id);
-  return { ...row, outstanding_balance };
+  return findCustomerById(id);
 }
 
 /**

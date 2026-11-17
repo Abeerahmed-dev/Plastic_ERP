@@ -25,7 +25,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   Accountant: [
     'customers:read', 'customers:write',
     'suppliers:read', 'suppliers:write',
-    'products:read',
+    'products:read', 'products:write',
     'inventory:read',
     'sales:read', 'sales:write',
     'purchases:read', 'purchases:write',

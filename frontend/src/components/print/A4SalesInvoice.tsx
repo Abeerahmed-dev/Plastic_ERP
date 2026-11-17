@@ -94,6 +94,15 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
     ? Number(data.balance_due)
     : Math.round((netFinalInvoiceTotal - paidAmount) * 100) / 100;
 
+  const isDuplicate = Boolean(
+    data.isDuplicate ||
+    data.duplicate ||
+    data.is_duplicate ||
+    data.copyType === 'DUPLICATE' ||
+    data.copy_type === 'DUPLICATE'
+  );
+  const copyBadgeText = data.copyLabel || (isDuplicate ? 'Duplicate' : 'Original');
+
   // ── Group Line Items by Base Product Name ──
   const rawItems: any[] = data.items || data.order_details || [];
 
@@ -259,7 +268,10 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
     : (isCreditNote ? 'CREDIT NOTE' : 'SALE BILL');
 
   return (
-    <div className="w-full max-w-[210mm] mx-auto bg-white text-black p-6 font-sans box-border print:w-full print:max-w-none print:p-2 print:m-0 break-inside-avoid page-break-inside-avoid">
+    <div
+      className="w-full max-w-[210mm] mx-auto bg-white text-black p-6 font-sans box-border print:w-full print:max-w-none print:p-2 print:m-0 break-inside-avoid page-break-inside-avoid"
+      style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}
+    >
       {/* ── Top Header Brand matching POS Slip (Logo, Title, Address Box, Two-Tone Banner) ── */}
       <div className="text-center mb-3">
         {/* SPS Logo */}
@@ -288,7 +300,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
             {billTypeTitle}
           </div>
           <div className="w-1/2 bg-white text-black py-1 px-2 text-center tracking-wider flex items-center justify-center border-l-2 border-black">
-            Original
+            {copyBadgeText}
           </div>
         </div>
       </div>

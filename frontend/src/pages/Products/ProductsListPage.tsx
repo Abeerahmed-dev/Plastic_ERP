@@ -13,12 +13,13 @@ export default function ProductsListPage() {
   const userRole = (user?.roleName || user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
+  const isAccountant = userRole === 'ACCOUNTANT';
   
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const canWrite = isCashier || isOwner || hasPermission('products:write');
+  const canWrite = isCashier || isOwner || isAccountant || hasPermission('products:write');
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products'],

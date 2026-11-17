@@ -1,9 +1,53 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
 import { requirePermission } from '../../middleware/requirePermission';
-import { checkoutController, getTodayCashTallyController, getCashierShiftAuditController } from './pos.controller';
+import {
+  checkoutController,
+  getTodayCashTallyController,
+  getCashierShiftAuditController,
+  getPosInvoicesController,
+  getHeldOrdersController,
+  createHeldOrderController,
+  deleteHeldOrderController,
+} from './pos.controller';
+import * as invoicesController from '../invoices/invoices.controller';
 
 const router = Router();
+
+router.get(
+  '/held-orders',
+  requireAuth,
+  requirePermission('sales:read'),
+  getHeldOrdersController
+);
+
+router.post(
+  '/held-orders',
+  requireAuth,
+  requirePermission('sales:write'),
+  createHeldOrderController
+);
+
+router.delete(
+  '/held-orders/:id',
+  requireAuth,
+  requirePermission('sales:write'),
+  deleteHeldOrderController
+);
+
+router.get(
+  '/',
+  requireAuth,
+  requirePermission('sales:read'),
+  getPosInvoicesController
+);
+
+router.get(
+  '/invoices',
+  requireAuth,
+  requirePermission('sales:read'),
+  getPosInvoicesController
+);
 
 router.get(
   '/today-tally',
@@ -20,10 +64,24 @@ router.get(
 );
 
 router.post(
+  '/',
+  requireAuth,
+  requirePermission('sales:write'),
+  checkoutController
+);
+
+router.post(
   '/checkout',
   requireAuth,
   requirePermission('sales:write'),
   checkoutController
+);
+
+router.post(
+  '/rollback/:id',
+  requireAuth,
+  requirePermission('sales:write'),
+  invoicesController.voidInvoice
 );
 
 export { router as posRouter };

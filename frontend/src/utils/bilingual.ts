@@ -19,14 +19,9 @@ const URDU_DICTIONARY: Record<string, string> = {
   'd-cut': 'ڈی کٹ بیگ',
   'w-cut': 'ڈبلیو کٹ بیگ',
   'garbage bag': 'کچرا بیگ / ڈسٹ بن بیگ',
-<<<<<<< Updated upstream
   'newspaper': 'اخبار / ریپنگ پیپر',
   'korean newspaper': 'کورین اخبار',
   'other': 'متفرق پلاسٹک',
-};
-
-export function getUrduProductName(name?: string, nameUrdu?: string, category?: string): string {
-=======
   'zipper bag': 'زپر بیگ',
   'zipper': 'زپر بیگ',
   'shopper': 'شاپر / شاپنگ بیگ',
@@ -239,39 +234,12 @@ function translateToken(token: string): string {
 
 export function getUrduProductName(name?: string, nameUrdu?: string, _category?: string): string {
   // 1. Explicit user/database provided Urdu name
->>>>>>> Stashed changes
   if (nameUrdu && nameUrdu.trim()) {
     return nameUrdu.trim();
   }
 
   if (!name) return '';
 
-<<<<<<< Updated upstream
-  const cleanName = name.toLowerCase().trim();
-  
-  // Direct dictionary match
-  if (URDU_DICTIONARY[cleanName]) {
-    return URDU_DICTIONARY[cleanName];
-  }
-
-  // Partial match in dictionary
-  for (const [key, val] of Object.entries(URDU_DICTIONARY)) {
-    if (cleanName.includes(key)) {
-      return val;
-    }
-  }
-
-  // Category fallback
-  if (category) {
-    const cleanCat = category.toLowerCase().trim();
-    if (URDU_DICTIONARY[cleanCat]) {
-      return URDU_DICTIONARY[cleanCat];
-    }
-  }
-
-  // Generic natural Urdu transliteration/fallback
-  return name;
-=======
   // 2. If name itself is already in Urdu/Arabic script, return it
   if (/[\u0600-\u06FF]/.test(name)) {
     return name.trim();
@@ -290,5 +258,4 @@ export function getUrduProductName(name?: string, nameUrdu?: string, _category?:
     if (/^[\s\-_/]+$/.test(t)) return t;
     return translateToken(t);
   }).join('');
->>>>>>> Stashed changes
 }

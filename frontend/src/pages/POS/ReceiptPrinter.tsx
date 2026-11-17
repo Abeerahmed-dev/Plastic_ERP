@@ -53,7 +53,7 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
         ref={ref}
         id="thermal-pos-receipt"
         className="hidden print:block bg-white text-black p-1 font-mono text-xs leading-snug w-[75mm] max-w-[75mm] mx-auto"
-        style={{ width: '75mm', maxWidth: '75mm', height: 'fit-content' }}
+        style={{ width: '75mm', maxWidth: '75mm', height: 'fit-content', backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}
       >
         <style>{`
           @media print {
@@ -61,10 +61,13 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
               size: 75mm auto;
               margin: 0mm !important;
             }
-            html, body {
+            html, html.dark, body, html.dark body {
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
+              background-color: #ffffff !important;
+              color: #000000 !important;
+              color-scheme: light !important;
               width: 75mm !important;
               height: auto !important;
               min-height: 0 !important;

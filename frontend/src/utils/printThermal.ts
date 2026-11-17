@@ -446,6 +446,21 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
   pageStyle.textContent = `@page { size: 80mm ${heightMm}mm; margin: 0; }`;
   doc.head.appendChild(pageStyle);
 
-  iframe.contentWindow?.focus();
-  iframe.contentWindow?.print();
+  return new Promise<void>((resolve) => {
+    let resolved = false;
+    const finish = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+
+    const win = iframe.contentWindow;
+    if (win) {
+      win.onafterprint = finish;
+      win.focus();
+      win.print();
+    }
+    setTimeout(finish, 500);
+  });
 }

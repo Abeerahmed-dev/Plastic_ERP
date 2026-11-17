@@ -1,21 +1,31 @@
 import { z } from 'zod';
 
-const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
+const REGIONS = [
+  'Sindh',
+  'Punjab',
+  'Khyber Pakhtunkhwa',
+  'KPK',
+  'Balochistan',
+  'Islamabad Capital Territory',
+  'Other',
+] as const;
 
 export const createSupplierSchema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
   phone: z.string().max(30).optional().nullable(),
   email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable(),
-  city: z.string().max(100).optional().nullable(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required').max(100),
   region: z.enum(REGIONS).optional().nullable(),
   payment_terms: z.coerce.number().int().min(0).default(30),
   opening_payable: z.coerce.number().min(0).default(0),
+  opening_balance: z.coerce.number().min(0).optional(),
+  opening_advance: z.coerce.number().min(0).default(0),
   notes: z.string().optional().nullable(),
 });
 
 export const updateSupplierSchema = createSupplierSchema
-  .omit({ opening_payable: true })
+  .omit({ opening_advance: true })
   .partial()
   .extend({
     is_active: z.boolean().optional(),

@@ -2,15 +2,9 @@ import db from '../../db/knex';
 import { Knex } from 'knex';
 import { WALKIN_CUSTOMER_PHONE } from '../../db/seeds/06_walkin_customer';
 
-<<<<<<< Updated upstream
-import { ForbiddenError } from '../../shared/errors';
-=======
-export { restoreInventoryBucketsLifo };
-
-import { NotFoundError } from '../../shared/errors';
+import { ForbiddenError, NotFoundError } from '../../shared/errors';
 import { logger } from '../../config/logger';
 import { estimateOverdraftCogs } from '../../shared/overdraftPricing';
->>>>>>> Stashed changes
 
 export async function processPOSCheckout(
   userId: string,
@@ -71,10 +65,6 @@ export async function processPOSCheckout(
         ? bagWeight
         : 1.0;
 
-<<<<<<< Updated upstream
-      const fixedRetailKg = Number(product.fixed_retail_price_per_kg || product.sale_price || 0);
-      const effectiveUnitPrice = isCashier ? (fixedRetailKg * unitMultiplier) : Number(item.unit_price);
-=======
       const retailNum = Number(product.fixed_retail_price_per_kg || 0);
       const saleNum = Number(product.sale_price || 0);
       const itemUnitPriceNum = Number(item.unit_price || 0);
@@ -88,7 +78,6 @@ export async function processPOSCheckout(
       const effectiveUnitPrice = (item.unit_price !== undefined && item.unit_price !== null && !isNaN(Number(item.unit_price)))
         ? Number(item.unit_price)
         : (fixedRetailKg > 0 ? (fixedRetailKg * unitMultiplier) : 0);
->>>>>>> Stashed changes
       const lineTotal = Number(item.quantity) * effectiveUnitPrice;
       subtotal += lineTotal;
 
@@ -140,11 +129,6 @@ export async function processPOSCheckout(
         const sold_kg = Number(item.quantity) * unitMultiplier;
         const currentStock = Number(product.total_stock_kg || 0);
 
-<<<<<<< Updated upstream
-        if (sold_kg > currentStock) {
-          throw new Error(
-            `Insufficient stock for ${product.name} (Requested: ${sold_kg} KG, Available: ${currentStock} KG).`
-=======
         // Concurrency Safety Wall: Lock row and query live inventory bucket in real-time
         const liveProduct = await trx('products')
           .where({ id: item.product_id })
@@ -158,7 +142,6 @@ export async function processPOSCheckout(
           logger.warn(
             { productId: product.id, productName: product.name, liveStock: live_stock, requestedKg: sold_kg },
             `POS: Stock for "${product.name}" is insufficient or negative (${live_stock} KG available, requested ${sold_kg} KG). Proceeding with POS sale & overdraft/unbatched fulfillment.`
->>>>>>> Stashed changes
           );
         }
 

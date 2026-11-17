@@ -94,7 +94,10 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
         : 'CASH RETAIL INVOICE';
 
   return (
-    <div className="w-[80mm] mx-auto bg-white text-black p-0 m-0 font-mono text-[11px] leading-tight box-border print:w-[80mm] print:p-0">
+    <div
+      className="w-[80mm] mx-auto bg-white text-black p-0 m-0 font-mono text-[11px] leading-tight box-border print:w-[80mm] print:p-0"
+      style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}
+    >
       <div className="p-3">
         {/* Logo & Header */}
         <div className="text-center mb-2 flex flex-col items-center justify-center">

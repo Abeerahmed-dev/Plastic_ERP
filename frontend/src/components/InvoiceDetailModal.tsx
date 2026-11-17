@@ -1,12 +1,16 @@
-import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2, Ban } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
 import { productsService } from '../services/products.service';
 import sabirLogo from '../assets/sabirlogo.png';
+import { ThermalReceipt80mm, A4SalesInvoice } from './print';
 import { getUrduProductName } from '../utils/bilingual';
 
 export interface InvoiceDetailItem {
   id?: string;
+  line_item_id?: string;
   product_id: string;
   product_name: string;
   name_urdu?: string | null;
@@ -19,6 +23,8 @@ export interface InvoiceDetailItem {
   batch_weight_per_unit?: number;
   batch_selected_unit?: string;
   quantity: number;
+  returned_quantity?: number;
+  return_quantity?: number;
   selected_unit?: string;
   net_kg_processed?: number;
   unit_price: number;
@@ -46,13 +52,26 @@ export interface InvoiceDetailData {
   subtotal: number;
   discount: number;
   delivery_charge?: number;
+  delivery_charges?: number;
   total_amount: number;
   paid_amount: number;
+  amount_paid?: number;
+  linked_returns_total?: number;
+  net_total?: number;
+  net_invoice_total?: number;
+  balance_due?: number;
   cash_tendered?: number | null;
   change_returned?: number | null;
   notes?: string | null;
+  void_reason?: string | null;
+  voided_at?: string | null;
+  voided_by_user_id?: string | null;
   items: InvoiceDetailItem[];
   credit_notes?: InvoiceDetailData[];
+  linked_debit_notes?: InvoiceDetailData[];
+  creator?: { name: string; role?: string };
+  created_by_name?: string;
+  created_by_role?: string;
 }
 
 interface InvoiceDetailModalProps {
@@ -66,6 +85,14 @@ interface InvoiceDetailModalProps {
 export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn }: InvoiceDetailModalProps) {
   const { user } = useAuthStore();
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
+  const [printMode, setPrintMode] = useState<'A4' | 'POS' | null>(null);
+  const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
+
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove('printing-a4', 'printing-pos');
+    };
+  }, []);
 
   const { data: allProducts = [] } = useQuery({
     queryKey: ['products'],
@@ -97,20 +124,49 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
   const subtotal = Number(invoice.subtotal || invoice.total_amount + (invoice.discount || 0));
   const discount = Number(invoice.discount || 0);
-  const deliveryCharge = Number(invoice.delivery_charge || 0);
+  const deliveryCharge = type === 'purchase' ? 0 : Number(invoice.delivery_charge || 0);
   const totalAmount = Number(invoice.total_amount || 0);
-  const paidAmount = Number(invoice.paid_amount || 0);
-  const balanceDue = Math.max(0, totalAmount - paidAmount);
+  const paidAmount = Number(invoice.paid_amount || invoice.amount_paid || 0);
 
-  const isCreditNote = invoice.invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || totalAmount < 0;
+  const isDebitNote = invoice.invoice_type === 'DEBIT_NOTE' || invoice.invoice_number?.startsWith('DN-');
+  const isCreditNote = invoice.invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || (!isDebitNote && totalAmount < 0);
+  const isReturnNote = isDebitNote || isCreditNote;
+  const isPosInvoice = type !== 'purchase' && (String(invoice.invoice_number || '').startsWith('POS-') || Boolean(invoice.notes && invoice.notes.includes('POS')));
   const statusUpper = (invoice.status || 'UNPAID').toUpperCase();
 
-  // Child Credit Notes Calculation
-  const creditNotes = invoice.credit_notes || [];
-  const totalReturnedAmount = creditNotes.reduce((acc, cn) => acc + Math.abs(Number(cn.total_amount || 0)), 0);
-  const netFinalInvoiceTotal = Math.max(0, totalAmount - totalReturnedAmount);
+  // Child Returns Calculation (Credit Notes for sales, Debit Notes for purchases)
+  const childReturns = (type === 'purchase' ? (invoice.linked_debit_notes || invoice.credit_notes) : invoice.credit_notes) || [];
+  const hasReturns = childReturns.length > 0 || (invoice.items || []).some((i) => Number(i.returned_quantity || 0) > 0);
+  const totalReturnedAmount = invoice.linked_returns_total !== undefined
+    ? Number(invoice.linked_returns_total)
+    : childReturns.reduce((acc, cn) => acc + Math.abs(Number(cn.total_amount || 0)), 0);
+
+  const netFinalInvoiceTotal = invoice.net_invoice_total !== undefined
+    ? Number(invoice.net_invoice_total)
+    : Math.round((totalAmount - totalReturnedAmount) * 100) / 100;
+
+  // CRITICAL: True net balance without Math.max(0, ...). Allow negative numbers for OVERPAID state.
+  const balanceDue = invoice.balance_due !== undefined
+    ? Number(invoice.balance_due)
+    : Math.round((netFinalInvoiceTotal - paidAmount) * 100) / 100;
 
   const getStatusBadge = () => {
+    if (statusUpper === 'VOID') {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-slate-800 text-white border border-slate-700">
+          <Ban className="w-3.5 h-3.5 text-slate-300" />
+          VOID
+        </span>
+      );
+    }
+    if (isDebitNote) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-rose-100 text-rose-800 border border-rose-300">
+          <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+          DEBIT NOTE
+        </span>
+      );
+    }
     if (isCreditNote) {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-red-100 text-red-800 border border-red-300">
@@ -119,7 +175,15 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
         </span>
       );
     }
-    if (statusUpper === 'PAID') {
+    if (balanceDue < 0) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+          <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+          OVERPAID
+        </span>
+      );
+    }
+    if (statusUpper === 'PAID' || balanceDue === 0) {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
           <CheckCircle2 className="w-3.5 h-3.5" />
@@ -127,7 +191,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
         </span>
       );
     }
-    if (statusUpper === 'PARTIAL') {
+    if (statusUpper === 'PARTIAL' || (paidAmount > 0 && balanceDue > 0)) {
       return (
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
           <AlertCircle className="w-3.5 h-3.5" />
@@ -143,54 +207,58 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
     );
   };
 
-  const handlePrint = () => {
-    window.print();
+  const triggerPrint = (mode: 'A4' | 'POS') => {
+    setPrintMode(mode);
+    const wasDark = document.documentElement.classList.contains('dark');
+    if (wasDark) {
+      document.documentElement.classList.remove('dark');
+    }
+    if (mode === 'A4') {
+      document.body.classList.add('printing-a4');
+    } else if (mode === 'POS') {
+      document.body.classList.add('printing-pos');
+    }
+
+    const handleAfterPrint = () => {
+      setPrintMode(null);
+      document.body.classList.remove('printing-a4', 'printing-pos');
+      if (wasDark) {
+        document.documentElement.classList.add('dark');
+      }
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+
+    window.addEventListener('afterprint', handleAfterPrint);
+    setTimeout(() => {
+      window.print();
+    }, 150);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto print:p-0 print:bg-white print:fixed print:inset-0">
-      <style>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 8mm;
-          }
-          body {
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #ffffff !important;
-          }
-          #a4-invoice-container {
-            width: 100% !important;
-            max-width: 194mm !important;
-            margin: 0 auto !important;
-            box-shadow: none !important;
-            border: 1px solid #cbd5e1 !important;
-            border-radius: 0 !important;
-          }
-        }
-      `}</style>
-      <div id="a4-invoice-container" className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] print:max-h-none print:shadow-none print:rounded-none print:w-full">
-        {/* Modal Window Top Controls (hidden on print) */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50 print:hidden">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              {type === 'purchase' ? 'Purchase Invoice' : (isCreditNote ? 'Credit Note' : 'Sales Invoice')}
-            </span>
-            <span className="font-mono font-bold text-slate-900">#{invoice.invoice_number}</span>
-          </div>
 
-          <div className="flex items-center gap-3">
-            {getStatusBadge()}
-            <button
-              onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition"
-              title="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
+  return (
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto print:hidden">
+        <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]">
+          {/* Modal Window Top Controls (hidden on print) */}
+          <div className="flex flex-wrap items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50 gap-2 print:hidden">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                {type === 'purchase' ? 'Purchase Invoice' : (isCreditNote ? 'Credit Note' : 'Sales Invoice')}
+              </span>
+              <span className="font-mono font-bold text-slate-900">#{invoice.invoice_number}</span>
+              {getStatusBadge()}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onClose}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-        </div>
 
         {/* Top Center Logo Header Banner (visible on screen and on print) */}
         <div className="text-center pt-5 pb-4 px-6 flex flex-col items-center justify-center border-b border-slate-200 bg-white">
@@ -203,7 +271,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             SABIR PLASTIC
           </h1>
           <p className="text-xs font-bold text-amber-600 tracking-wider uppercase mt-0.5">
-            {type === 'purchase' ? 'Purchase Invoice / Bill' : (isCreditNote ? 'Credit Note Invoice' : 'Official Sales Invoice')}
+            {type === 'purchase' ? (isDebitNote ? 'Debit Note Invoice' : 'Purchase Invoice / Bill') : (isCreditNote ? 'Credit Note Invoice' : 'Official Sales Invoice')}
           </p>
           <div className="mt-2 flex items-center justify-center gap-2.5">
             <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
@@ -217,6 +285,29 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
         {/* Modal Content */}
         <div className="p-6 space-y-6 overflow-y-auto flex-1 print:overflow-visible print:p-4">
+          {statusUpper === 'VOID' && (
+            <div className="p-4 rounded-xl bg-slate-900 text-white border border-slate-700 flex items-start gap-3 shadow-md">
+              <Ban className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-black uppercase tracking-wider text-red-400">VOIDED INVOICE</span>
+                  {invoice.voided_at && (
+                    <span className="text-slate-400">
+                      • {new Date(invoice.voided_at).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+                {invoice.void_reason && (
+                  <p className="text-slate-200">
+                    <strong className="text-slate-400">Reason:</strong> {invoice.void_reason}
+                  </p>
+                )}
+                <p className="text-slate-400 text-[11px]">
+                  Physical stock has been restored to warehouse inventory and payments converted to surplus advance credit.
+                </p>
+              </div>
+            </div>
+          )}
           {/* Metadata Section */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/80 print:bg-white print:border-slate-300">
             <div className="space-y-1">
@@ -244,6 +335,15 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   Due Date: {new Date(invoice.due_date).toLocaleDateString('en-PK', { dateStyle: 'medium' })}
                 </p>
               )}
+              <div className="text-xs text-slate-600 font-medium flex items-center gap-1.5 md:justify-end mt-1">
+                <span className="font-semibold text-slate-500">Billed By:</span>
+                <span className="text-slate-900 font-bold">{invoice.creator?.name || invoice.created_by_name || 'System'}</span>
+                {invoice.created_by_role && (
+                  <span className="inline-flex items-center px-1 py-0.2 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                    {invoice.created_by_role}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -256,8 +356,8 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <th className="py-2.5 px-3">Product</th>
                   <th className="py-2.5 px-3">Size</th>
                   <th className="py-2.5 px-3 text-right">Original Qty</th>
-                  {creditNotes.length > 0 && <th className="py-2.5 px-3 text-right text-red-600">Returned</th>}
-                  {creditNotes.length > 0 && <th className="py-2.5 px-3 text-right text-purple-700 font-bold">Net Qty</th>}
+                  {hasReturns && <th className="py-2.5 px-3 text-right text-red-600">Returned</th>}
+                  {hasReturns && <th className="py-2.5 px-3 text-right text-purple-700 font-bold">Net Qty</th>}
                   <th className="py-2.5 px-3">Unit</th>
                   <th className="py-2.5 px-3 text-right">Unit Price</th>
                   <th className="py-2.5 px-3 text-right">Total</th>
@@ -266,7 +366,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               <tbody className="divide-y divide-slate-100">
                 {(!invoice.items || invoice.items.length === 0) ? (
                   <tr>
-                    <td colSpan={creditNotes.length > 0 ? 9 : 7} className="py-6 text-center text-slate-400 italic">
+                    <td colSpan={hasReturns ? 9 : 7} className="py-6 text-center text-slate-400 italic">
                       No line items found for this invoice.
                     </td>
                   </tr>
@@ -274,11 +374,15 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   invoice.items.map((item, idx) => {
                     const unitName = item.selected_unit || 'Dasti';
 
-                    const returnedQty = creditNotes.reduce((acc, cn) => {
-                      const matching = (cn.items || []).filter((i) => i.product_id === item.product_id);
-                      return acc + matching.reduce((sum, ci) => sum + Math.abs(Number(ci.quantity || 0)), 0);
+                    const itemReturnedQty = Number(item.returned_quantity || 0);
+                    const childCalculatedReturnedQty = childReturns.reduce((acc, cn) => {
+                      const matching = (cn.items || []).filter(
+                        (i) => (item.id && (i.id === item.id || i.line_item_id === item.id)) || i.product_id === item.product_id
+                      );
+                      return acc + matching.reduce((sum, ci) => sum + Math.abs(Number(ci.quantity || ci.return_quantity || 0)), 0);
                     }, 0);
 
+                    const returnedQty = itemReturnedQty > 0 ? itemReturnedQty : childCalculatedReturnedQty;
                     const origQty = Number(item.quantity || 0);
                     const netQty = Math.max(0, origQty - returnedQty);
 
@@ -294,7 +398,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                     );
 
                     return (
-                      <tr key={item.id || idx} className={isCreditNote ? 'bg-red-50/50' : 'hover:bg-slate-50'}>
+                      <tr key={item.id || idx} className={isReturnNote ? 'bg-red-50/50' : 'hover:bg-slate-50'}>
                         <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
                         <td className="py-2.5 px-3">
                           <div className="font-bold text-slate-900 leading-snug">
@@ -319,12 +423,12 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                         <td className="py-2.5 px-3 text-right font-mono font-medium text-slate-800">
                           {formatNumber(origQty)}
                         </td>
-                        {creditNotes.length > 0 && (
+                        {hasReturns && (
                           <td className="py-2.5 px-3 text-right font-mono font-bold text-red-600">
                             {returnedQty > 0 ? `-${formatNumber(returnedQty)}` : '-'}
                           </td>
                         )}
-                        {creditNotes.length > 0 && (
+                        {hasReturns && (
                           <td className="py-2.5 px-3 text-right font-mono font-black text-purple-700">
                             {formatNumber(netQty)}
                           </td>
@@ -333,7 +437,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                         <td className="py-2.5 px-3 text-right font-mono text-slate-700">
                           {formatPKR(item.unit_price)}
                         </td>
-                        <td className={`py-2.5 px-3 text-right font-mono font-bold ${isCreditNote ? 'text-red-700' : 'text-slate-900'}`}>
+                        <td className={`py-2.5 px-3 text-right font-mono font-bold ${isReturnNote ? 'text-red-700' : 'text-slate-900'}`}>
                           {formatPKR(item.total_price)}
                         </td>
                       </tr>
@@ -344,24 +448,24 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             </table>
           </div>
 
-          {/* Child Credit Notes Section */}
-          {creditNotes.length > 0 && (
+          {/* Child Return Notes Section (Credit Notes / Debit Notes) */}
+          {childReturns.length > 0 && (
             <div className="p-4 rounded-xl bg-red-50/70 border border-red-200/80 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-red-800 uppercase tracking-wider flex items-center gap-1.5">
                   <RotateCcw className="w-4 h-4 text-red-600" />
-                  Processed Returns / Credit Notes ({creditNotes.length})
+                  Processed Returns / {type === 'purchase' ? 'Debit Notes' : 'Credit Notes'} ({childReturns.length})
                 </span>
                 <span className="text-xs font-mono font-bold text-red-700">
-                  Total Refunded: -{formatPKR(totalReturnedAmount)}
+                  Total {type === 'purchase' ? 'Debited' : 'Refunded'}: -{formatPKR(totalReturnedAmount)}
                 </span>
               </div>
               <div className="space-y-2">
-                {creditNotes.map((cn) => (
+                {childReturns.map((cn) => (
                   <div key={cn.id} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-red-200/60">
                     <div>
                       <span className="font-mono font-bold text-slate-900 mr-2">#{cn.invoice_number}</span>
-                      <span className="text-slate-500">{new Date(cn.date).toLocaleDateString()}</span>
+                      <span className="text-slate-500">{new Date(cn.date).toLocaleDateString('en-GB')}</span>
                       {cn.return_reason && (
                         <span className="ml-2 px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
                           {cn.return_reason}
@@ -399,7 +503,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <span className="font-mono font-semibold">-{formatPKR(discount)}</span>
                 </div>
               )}
-              {deliveryCharge > 0 && (
+              {type !== 'purchase' && deliveryCharge > 0 && (
                 <div className="flex justify-between text-blue-600">
                   <span>Delivery / Freight:</span>
                   <span className="font-mono font-semibold">+{formatPKR(deliveryCharge)}</span>
@@ -407,13 +511,13 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               )}
               <div className="flex justify-between font-bold text-slate-900 text-sm pt-1 border-t border-slate-200">
                 <span>Original Grand Total:</span>
-                <span className={`font-mono ${isCreditNote ? 'text-red-600 font-bold' : ''}`}>{formatPKR(totalAmount)}</span>
+                <span className={`font-mono ${isReturnNote ? 'text-red-600 font-bold' : ''}`}>{formatPKR(totalAmount)}</span>
               </div>
 
-              {creditNotes.length > 0 && (
+              {childReturns.length > 0 && (
                 <>
                   <div className="flex justify-between font-bold text-red-600 text-xs">
-                    <span>Less Returns (Credit Notes):</span>
+                    <span>Less Returns ({type === 'purchase' ? 'Debit Notes' : 'Credit Notes'}):</span>
                     <span className="font-mono">-{formatPKR(totalReturnedAmount)}</span>
                   </div>
                   <div className="flex justify-between font-black text-purple-700 text-sm pt-1.5 border-t border-purple-200 bg-purple-50/50 p-1.5 rounded">
@@ -443,15 +547,20 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               )}
 
               {!isCashier && (
-                balanceDue > 0 ? (
-                  <div className="flex justify-between font-black text-rose-600 text-sm pt-1.5 border-t border-rose-200">
+                balanceDue < 0 ? (
+                  <div className="flex justify-between font-black text-amber-600 text-sm pt-1.5 border-t border-amber-200">
                     <span>Balance Due:</span>
-                    <span className="font-mono">{formatPKR(balanceDue)}</span>
+                    <span className="font-mono">- Rs. {Math.abs(balanceDue).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Overpaid)</span>
                   </div>
-                ) : (
+                ) : balanceDue === 0 ? (
                   <div className="flex justify-between font-bold text-emerald-600 text-xs pt-1 border-t border-emerald-100">
                     <span>Balance Due:</span>
                     <span className="font-mono">Rs. 0.00 (Fully Settled)</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between font-black text-rose-600 text-sm pt-1.5 border-t border-rose-200">
+                    <span>Balance Due:</span>
+                    <span className="font-mono">{formatPKR(balanceDue)}</span>
                   </div>
                 )
               )}
@@ -499,7 +608,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
           </button>
 
           <div className="flex items-center gap-3">
-            {!isCashier && type === 'sales' && !isCreditNote && onProcessReturn && (
+            {!isCashier && !isReturnNote && onProcessReturn && (
               <button
                 onClick={() => {
                   onClose();
@@ -508,18 +617,10 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-sm font-bold shadow-xs transition active:scale-95"
               >
                 <RotateCcw className="w-4 h-4 text-red-600" />
-                Process Return (Credit Note)
+                Process Return ({type === 'purchase' ? 'Debit Note' : 'Credit Note'})
               </button>
             )}
 
-<<<<<<< Updated upstream
-            <button
-              onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-md transition active:scale-95"
-            >
-              <Printer className="w-4 h-4" />
-              Print Invoice
-=======
             {isPosInvoice && (
               <button
                 type="button"
@@ -530,30 +631,71 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => triggerPrint('A4')}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
-            >
-              <Printer className="w-4 h-4 text-slate-950" />
-              Print A4 Invoice
->>>>>>> Stashed changes
-            </button>
+            {!isPosInvoice && (
+              <div className="flex items-center gap-2 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">Print:</span>
+                <label className="flex items-center gap-1.5 cursor-pointer hover:text-amber-600 transition">
+                  <input
+                    type="checkbox"
+                    checked={printCopyMode === 'ORIGINAL'}
+                    onChange={() => setPrintCopyMode('ORIGINAL')}
+                    className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span>Original</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer hover:text-amber-600 transition">
+                  <input
+                    type="checkbox"
+                    checked={printCopyMode === 'DUPLICATE'}
+                    onChange={() => setPrintCopyMode('DUPLICATE')}
+                    className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span>Duplicate</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer hover:text-amber-600 transition">
+                  <input
+                    type="checkbox"
+                    checked={printCopyMode === 'BOTH'}
+                    onChange={() => setPrintCopyMode('BOTH')}
+                    className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span>Both</span>
+                </label>
+              </div>
+            )}
+
+            {!isPosInvoice && (
+              <button
+                type="button"
+                onClick={() => triggerPrint('A4')}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-slate-950" />
+                Print A4 Invoice
+              </button>
+            )}
           </div>
         </div>
       </div>
     </div>
-<<<<<<< Updated upstream
-  );
-=======
 
     {/* Print-Only Targeted Invoice Components */}
     {printMode === 'POS' && createPortal(
-      <div className="pos-print-portal hidden print:block">
+      <div className="pos-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
         <style dangerouslySetInnerHTML={{ __html: `
           @page {
             size: 80mm auto !important;
             margin: 0 !important;
+          }
+          html, html.dark, body, html.dark body {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            color-scheme: light !important;
+          }
+          .pos-print-portal,
+          .pos-print-portal * {
+            color-scheme: light !important;
           }
           body {
             margin: 0 !important;
@@ -566,19 +708,50 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
     )}
 
     {printMode === 'A4' && createPortal(
-      <div className="invoice-print-portal hidden print:block">
+      <div className="invoice-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
         <style dangerouslySetInnerHTML={{ __html: `
           @page {
             size: A4 portrait !important;
             margin: 8mm !important;
           }
+          html, html.dark, body, html.dark body {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            color-scheme: light !important;
+          }
+          .invoice-print-portal,
+          .invoice-print-portal * {
+            color-scheme: light !important;
+          }
+          @media print {
+            .page-break-after-always {
+              page-break-after: always !important;
+              break-after: page !important;
+            }
+          }
         ` }} />
-        <A4SalesInvoice data={{ ...invoice, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
+        {printCopyMode === 'BOTH' ? (
+          <>
+            <div className="page-break-after-always">
+              <A4SalesInvoice data={{ ...invoice, isDuplicate: false, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
+            </div>
+            <div>
+              <A4SalesInvoice data={{ ...invoice, isDuplicate: true, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
+            </div>
+          </>
+        ) : (
+          <A4SalesInvoice
+            data={{
+              ...invoice,
+              isDuplicate: printCopyMode === 'DUPLICATE',
+              type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales')
+            }}
+          />
+        )}
       </div>,
       document.body
     )}
   </>
 );
->>>>>>> Stashed changes
 }
-

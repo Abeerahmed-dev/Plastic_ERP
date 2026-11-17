@@ -7,22 +7,17 @@ import { X, Loader2 } from 'lucide-react';
 import { createCustomer, updateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 
-import { useAuthStore } from '../../store/auth.store';
-
-import { CustomerLedger } from './CustomerLedger';
-
-const REGIONS = ['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other'] as const;
-
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(150),
   customer_type: z.enum(['CASH', 'CREDIT']).default('CREDIT'),
   phone: z.string().max(30).optional(),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   address: z.string().optional(),
-  city: z.string().optional(),
-  region: z.enum(REGIONS).optional(),
+  city: z.string({ required_error: 'City is required' }).trim().min(1, 'City is required').max(100),
+  region: z.enum(['Sindh', 'Punjab', 'KPK', 'Balochistan', 'Other']).optional(),
   credit_limit: z.coerce.number().min(0).default(0),
   opening_balance: z.coerce.number().min(0).default(0),
+  opening_advance: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
 });
 
@@ -34,43 +29,51 @@ interface Props {
 }
 
 export default function CustomerFormModal({ customer, onClose }: Props) {
-  const { user } = useAuthStore();
-  const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
   const isEdit = Boolean(customer);
   const qc = useQueryClient();
   const [serverError, setServerError] = useState('');
-  const [activeTab, setActiveTab] = useState<'DETAILS' | 'LEDGER'>('DETAILS');
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: customer
       ? {
-          name: customer.name,
-          customer_type: customer.customer_type ?? 'CREDIT',
-          phone: customer.phone ?? '',
-          email: customer.email ?? '',
-          address: customer.address ?? '',
-          city: customer.city ?? '',
-          region: (customer.region as (typeof REGIONS)[number]) ?? undefined,
-          credit_limit: customer.credit_limit,
-          notes: customer.notes ?? '',
-        }
+        name: customer.name,
+        customer_type: (customer.customer_type === 'CASH' ? 'CASH' : 'CREDIT') as 'CASH' | 'CREDIT',
+        phone: customer.phone ?? '',
+        email: customer.email ?? '',
+        address: customer.address ?? '',
+        city: customer.city ?? '',
+        region: (customer.region as any) ?? undefined,
+        credit_limit: customer.credit_limit ?? 0,
+        opening_balance: customer.opening_balance ?? 0,
+        opening_advance: 0,
+        notes: customer.notes ?? '',
+      }
       : {
-          customer_type: 'CREDIT',
-        },
+        customer_type: 'CREDIT',
+        phone: '',
+        credit_limit: 0,
+        opening_balance: 0,
+        opening_advance: 0,
+      },
   });
+
+  const openingBalance = Number(watch('opening_balance') || 0);
+  const openingAdvance = Number(watch('opening_advance') || 0);
 
   const mutation = useMutation({
     mutationFn: (data: FormData) =>
       isEdit
-        ? updateCustomer(customer!.id, data)
+        ? updateCustomer(customer!.id, data as any)
         : createCustomer(data as any),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customers'] });
+      qc.invalidateQueries({ queryKey: ['customer'] });
       onClose();
     },
     onError: (err: { response?: { data?: { error?: string } } }) => {
@@ -79,159 +82,179 @@ export default function CustomerFormModal({ customer, onClose }: Props) {
   });
 
   const inputCls = (hasError: boolean) =>
-    `w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:ring-2 ${
-      hasError
-        ? 'border-red-400 focus:ring-red-200'
-        : 'border-gray-300 focus:border-blue-500 focus:ring-blue-100'
+    `w-full rounded-lg border px-3 py-2 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:ring-2 ${hasError
+      ? 'border-red-400 focus:ring-red-200'
+      : 'border-gray-300 focus:border-blue-500 focus:ring-blue-100'
     }`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className={`w-full rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh] ${activeTab === 'LEDGER' ? 'max-w-5xl' : 'max-w-2xl'}`}>
+      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <div className="flex items-center gap-6">
-            <h2 className="text-lg font-semibold text-gray-900">
-              {isEdit ? 'Customer Profile' : 'Add New Customer'}
-            </h2>
-            {isEdit && !isCashier && (
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => setActiveTab('DETAILS')}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                    activeTab === 'DETAILS'
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  Details
-                </button>
-                <button
-                  onClick={() => setActiveTab('LEDGER')}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                    activeTab === 'LEDGER'
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  Ledger Statement
-                </button>
-              </div>
-            )}
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {isEdit ? 'Customer Profile' : 'Add New Customer'}
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition cursor-pointer"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         <div className="overflow-y-auto flex-1">
-          {activeTab === 'DETAILS' ? (
-            <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="px-6 py-5 space-y-4">
-              {serverError && (
-                <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                  {serverError}
-                </div>
-              )}
-
-              {/* Name & Customer Type */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                    Name <span className="text-red-500">*</span>
-                  </label>
-                  <input {...register('name')} placeholder="Ahmed Traders" className={inputCls(!!errors.name)} />
-                  {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                    Customer Type
-                  </label>
-                  <select {...register('customer_type')} className={inputCls(false)}>
-                    <option value="CREDIT">Credit Account (Udhaar)</option>
-                    <option value="CASH">Walk-in Cash Entity</option>
-                  </select>
-                </div>
+          <form onSubmit={handleSubmit((d) => mutation.mutate(d))} autoComplete="off" className="px-6 py-5 space-y-4">
+            {serverError && (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                {serverError}
               </div>
+            )}
 
-              {/* Phone + Email */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Phone</label>
-                  <input {...register('phone')} placeholder="0300-1234567" className={inputCls(!!errors.phone)} />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
-                  <input {...register('email')} placeholder="ahmed@example.com" className={inputCls(!!errors.email)} />
-                  {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
-                </div>
+            {/* Name & Customer Type */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2">
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  {...register('name')}
+                  autoComplete="off"
+                  placeholder="Ahmed Traders"
+                  className={inputCls(!!errors.name)}
+                />
+                {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name.message}</p>}
               </div>
-
-              {/* Address */}
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">Address</label>
-                <input {...register('address')} placeholder="Street, Area" className={inputCls(false)} />
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  Customer Type
+                </label>
+                <select {...register('customer_type')} className={inputCls(false)}>
+                  <option value="CREDIT">Credit Account (Udhaar)</option>
+                  <option value="CASH">Walk-in Cash Entity</option>
+                </select>
               </div>
-
-              {/* City + Region */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">City</label>
-                  <input {...register('city')} placeholder="Karachi" className={inputCls(false)} />
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Region</label>
-                  <select {...register('region')} className={inputCls(false)}>
-                    <option value="">— Select —</option>
-                    {REGIONS.map((r) => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Credit Limit + Opening Balance */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Credit Limit (Rs.)</label>
-                  <input type="number" {...register('credit_limit')} placeholder="0" className={inputCls(!!errors.credit_limit)} />
-                </div>
-                {!isEdit && (
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Opening Balance (Rs.)
-                      <span className="ml-1 text-xs font-normal text-gray-400">set once</span>
-                    </label>
-                    <input type="number" {...register('opening_balance')} placeholder="0" className={inputCls(!!errors.opening_balance)} />
-                  </div>
-                )}
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700">Notes</label>
-                <textarea {...register('notes')} rows={2} placeholder="Any remarks..." className={`${inputCls(false)} resize-none`} />
-              </div>
-
-              {/* Actions */}
-              <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
-                <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={mutation.isPending}
-                  className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition"
-                >
-                  {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isEdit ? 'Save Changes' : 'Add Customer'}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="p-6">
-              {customer && <CustomerLedger customerId={customer.id} />}
             </div>
-          )}
+
+            {/* City & Phone */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  City <span className="text-red-500">*</span>
+                </label>
+                <input
+                  {...register('city')}
+                  required
+                  autoComplete="off"
+                  placeholder="Karachi"
+                  className={inputCls(!!errors.city)}
+                />
+                {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  Phone Number
+                </label>
+                <input
+                  {...register('phone')}
+                  autoComplete="off"
+                  placeholder="e.g. 0300-1234567"
+                  className={inputCls(!!errors.phone)}
+                />
+                {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone.message}</p>}
+              </div>
+            </div>
+
+            {/* Financial Inputs: Opening Balance / Advance */}
+            {isEdit ? (
+              <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Opening Balance (Rs.)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    {...register('opening_balance')}
+                    autoComplete="off"
+                    placeholder="0"
+                    className={inputCls(!!errors.opening_balance)}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Initial balance owed by customer (Receivable / Udhaar)</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Opening Balance (Rs.)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    {...register('opening_balance')}
+                    autoComplete="off"
+                    placeholder="0"
+                    disabled={openingAdvance > 0}
+                    className={`${inputCls(!!errors.opening_balance)} ${
+                      openingAdvance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                    }`}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Customer owes you (Udhaar)</p>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Opening Advance (Rs.)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    {...register('opening_advance')}
+                    autoComplete="off"
+                    placeholder="0"
+                    disabled={openingBalance > 0}
+                    className={`${inputCls(!!errors.opening_advance)} ${
+                      openingBalance > 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : ''
+                    }`}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Customer overpaid you (Wallet Liability)</p>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">Notes</label>
+              <textarea
+                {...register('notes')}
+                rows={2}
+                autoComplete="off"
+                placeholder="Any remarks..."
+                className={`${inputCls(false)} resize-none`}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={mutation.isPending}
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 disabled:opacity-60 transition cursor-pointer"
+              >
+                {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin text-slate-950" />}
+                {isEdit ? 'Save Changes' : 'Add Customer'}
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
