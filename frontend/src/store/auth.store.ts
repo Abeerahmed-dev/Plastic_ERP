@@ -10,6 +10,7 @@ interface AuthStore {
 
   setAuth: (user: AuthUser, accessToken: string, refreshToken: string) => void;
   setAccessToken: (token: string) => void;
+  setTokens: (accessToken: string, refreshToken: string) => void;
   clearAuth: () => void;
   hasPermission: (permission: string) => boolean;
 }
@@ -31,6 +32,12 @@ export const useAuthStore = create<AuthStore>()(
       setAccessToken: (token) => {
         localStorage.setItem('access_token', token);
         set({ accessToken: token });
+      },
+
+      setTokens: (accessToken, refreshToken) => {
+        localStorage.setItem('access_token', accessToken);
+        localStorage.setItem('refresh_token', refreshToken);
+        set({ accessToken, refreshToken });
       },
 
       clearAuth: () => {

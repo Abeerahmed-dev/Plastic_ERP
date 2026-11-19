@@ -6,6 +6,9 @@ import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { logger } from './config/logger';
 import { env } from './config/env';
+import { requireAuth } from './middleware/requireAuth';
+import { requirePermission } from './middleware/requirePermission';
+import { verifyRole } from './middleware/requireRole';
 import { apiRateLimiter } from './middleware/rateLimiter';
 import { errorHandler } from './middleware/errorHandler';
 import healthRouter from './modules/health/health.router';
@@ -53,23 +56,53 @@ export function createApp(): Application {
   });
 
   // ─── Security & parsing ────────────────────────
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          fontSrc: ["'self'", 'data:'],
+          connectSrc: [
+            "'self'",
+            'http://localhost:5173',
+            'ws://localhost:5173',
+            'http://127.0.0.1:5173',
+            'ws://127.0.0.1:5173',
+            env.FRONTEND_URL.replace(/\/$/, ''),
+          ],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
 
-  const allowedOrigins = [
-    env.FRONTEND_URL.replace(/\/$/, ''),
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3000',
-  ];
+  const allowedOrigins = Array.from(
+    new Set([
+      env.FRONTEND_URL.replace(/\/$/, ''),
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:3001',
+      'http://127.0.0.1:3001',
+    ]),
+  );
 
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow mobile apps, curl, server-to-server or development
-        if (!origin || env.NODE_ENV !== 'production' || allowedOrigins.includes(origin)) {
+        // Allow mobile apps, curl, server-to-server or explicitly whitelisted origins
+        if (!origin || allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        return callback(new Error(`Blocked by CORS policy for origin: ${origin}`));
+        // Clean rejection without throwing 500 server error
+        return callback(null, false);
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -77,8 +110,8 @@ export function createApp(): Application {
     }),
   );
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   // ─── Rate limiting ─────────────────────────────
   app.use('/api', apiRateLimiter);
@@ -99,7 +132,13 @@ export function createApp(): Application {
   v1Router.use('/products', productsRouter);
   v1Router.use('/inventory', inventoryRouter);
   v1Router.use('/invoices', invoicesRouter);
-  v1Router.post('/sync-offline', syncOfflineInvoices);
+  v1Router.post(
+    '/sync-offline',
+    requireAuth,
+    requirePermission('sales:write'),
+    verifyRole(['OWNER', 'ADMIN', 'CASHIER']),
+    syncOfflineInvoices
+  );
   v1Router.use('/sales', invoicesRouter);
   v1Router.use('/purchases', purchasesRouter);
   v1Router.use('/purchase-invoices', purchasesRouter);

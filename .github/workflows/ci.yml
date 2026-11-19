@@ -1,0 +1,42 @@
+name: Sabir Plastic ERP — Continuous Integration (CI)
+
+on:
+  push:
+    branches: [ main, security/*, refactor/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-verify:
+    name: Type-Check, Build & Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: 📦 Install Backend Dependencies
+        run: npm --prefix backend ci
+
+      - name: 📦 Install Frontend Dependencies
+        run: npm --prefix frontend ci
+
+      - name: 🔍 Run TypeScript Type-Check
+        run: npm run type-check
+
+      - name: 🏗️ Run Production Build
+        run: npm run build
+
+      - name: 🛡️ Dependency Security Scan (High/Critical)
+        run: |
+          npm --prefix backend audit --audit-level=high
+          npm --prefix frontend audit --audit-level=high

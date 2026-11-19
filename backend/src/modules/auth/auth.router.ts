@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth';
-import { authRateLimiter, forgotPasswordRateLimiter } from '../../middleware/rateLimiter';
+import {
+  authRateLimiter,
+  forgotPasswordRateLimiter,
+  refreshRateLimiter,
+} from '../../middleware/rateLimiter';
 import {
   loginController,
   refreshController,
@@ -32,9 +36,9 @@ router.post('/reset-password', forgotPasswordRateLimiter, resetPasswordControlle
 
 /**
  * POST /api/v1/auth/refresh
- * Public — uses refresh token in body.
+ * Public — uses refresh token in body (rate-limited).
  */
-router.post('/refresh', refreshController);
+router.post('/refresh', refreshRateLimiter, refreshController);
 
 /**
  * POST /api/v1/auth/logout

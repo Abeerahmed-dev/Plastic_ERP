@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidPassword } from '../../shared/password.schema';
 
 export const payFrequencyEnum = z.enum(['WEEKLY', 'MONTHLY', 'CONTRACT']);
 export type PayFrequency = z.infer<typeof payFrequencyEnum>;
@@ -44,10 +45,10 @@ export const createUserSchema = z
           path: ['email'],
         });
       }
-      if (!data.password || data.password.length < 8) {
+      if (!data.password || !isValidPassword(data.password)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Password must be at least 8 characters when granting system access',
+          message: 'Password must be at least 8 characters and include at least one letter and one number',
           path: ['password'],
         });
       }
@@ -79,7 +80,10 @@ export const updateUserSchema = z.object({
     .string()
     .optional()
     .nullable()
-    .transform((val) => (val && val.trim().length > 0 ? val : null)),
+    .transform((val) => (val && val.trim().length > 0 ? val : null))
+    .refine((val) => !val || isValidPassword(val), {
+      message: 'Password must be at least 8 characters and include at least one letter and one number',
+    }),
   role_id: z
     .string()
     .trim()

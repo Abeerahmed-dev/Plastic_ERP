@@ -31,7 +31,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
   const token = authHeader.slice(7);
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
 
     const authUser: AuthUser = {
       id: decoded.sub,
