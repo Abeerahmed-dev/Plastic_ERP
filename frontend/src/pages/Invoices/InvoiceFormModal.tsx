@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw, Printer, PauseCircle, Clock } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw, Printer, PauseCircle, Clock, Banknote, CheckCircle2, Split } from 'lucide-react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invoicesService } from '../../services/invoices.service';
 import { getCustomers } from '../../services/customers.service';
 import { productsService } from '../../services/products.service';
+import { bankAccountsService } from '../../services/bank-accounts.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { toast, handleApiError } from '../../utils/toast';
@@ -34,10 +35,16 @@ const schema = z.object({
   discount: z.coerce.number().min(0).default(0),
   delivery_charge: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
+  transport: z.string().optional(),
   items: z.array(itemSchema).min(1, 'At least one item is required'),
 });
 
 type FormData = z.infer<typeof schema>;
+
+interface SplitPaymentRow {
+  payment_account_id: string;
+  amount: number | '';
+}
 
 interface Props {
   isOpen?: boolean;
@@ -50,8 +57,18 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const qc = useQueryClient();
   const [applyAdvance, setApplyAdvance] = useState(false);
   const [advanceAppliedAmount, setAdvanceAppliedAmount] = useState('0');
+  const [paymentAccountId, setPaymentAccountId] = useState<string>('CASH_DRAWER');
+  const [isSplitPayment, setIsSplitPayment] = useState(false);
+  const [splitRows, setSplitRows] = useState<SplitPaymentRow[]>([
+    { payment_account_id: 'CASH_DRAWER', amount: '' },
+    { payment_account_id: '', amount: '' },
+  ]);
 
   const { data: customersResponse } = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers({ limit: 100 }) });
+  const { data: bankAccounts = [] } = useQuery({
+    queryKey: ['bank-accounts'],
+    queryFn: () => bankAccountsService.getBankAccounts(),
+  });
   const {
     data: productsResponse,
     isLoading: isLoadingProducts,
@@ -74,6 +91,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       discount: 0,
       delivery_charge: 0,
       notes: '',
+      transport: '',
       items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
     }
   });
@@ -89,7 +107,15 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const selectedCustomerId = watch('customer_id');
 
   const selectedCustomer = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
+  const isCashCustomer = selectedCustomer?.customer_type === 'CASH';
+  const isCreditCustomer = Boolean(selectedCustomer && !isCashCustomer);
   const walletBalance = Number(selectedCustomer?.advance_credit || (selectedCustomer as any)?.advance_wallet || 0);
+
+  useEffect(() => {
+    if (isCashCustomer) {
+      setValue('transport', '');
+    }
+  }, [isCashCustomer, setValue]);
 
   // Check if any row has missing product or empty size/variant
   const hasAnyEmptySize = !items || items.length === 0 || items.some((item) => {
@@ -112,6 +138,73 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const deliveryChargeNum = Math.round(Number(delivery_charge || 0) * 100) / 100;
   const discountNum = Math.round(Number(discount || 0) * 100) / 100;
   const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100) + deliveryChargeNum;
+
+  const splitTotalAllocated = Math.round(
+    splitRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0) * 100
+  ) / 100;
+  const splitDiff = Math.round((total - splitTotalAllocated) * 100) / 100;
+  const hasInvalidSplitRow = splitRows.some(
+    (r) => !r.payment_account_id || r.amount === '' || Number(r.amount) <= 0
+  );
+  const isSplitBalanced = isCashCustomer && isSplitPayment
+    ? Math.abs(splitDiff) <= 0.01 && !hasInvalidSplitRow
+    : true;
+
+  const toggleSplitMode = () => {
+    setIsSplitPayment((prev) => {
+      const next = !prev;
+      if (next) {
+        const half = Math.round((total / 2) * 100) / 100;
+        const remainder = Math.round((total - half) * 100) / 100;
+        const secondBank = bankAccounts.find((b: any) => b.is_active && b.id !== paymentAccountId)?.id || bankAccounts[0]?.id || '';
+        setSplitRows([
+          { payment_account_id: paymentAccountId || 'CASH_DRAWER', amount: half > 0 ? half : '' },
+          { payment_account_id: secondBank, amount: remainder > 0 ? remainder : '' },
+        ]);
+      }
+      return next;
+    });
+  };
+
+  const handleSplitRowChange = (index: number, field: 'payment_account_id' | 'amount', value: any) => {
+    setSplitRows((prev) => {
+      const updated = prev.map((row, i) => {
+        if (i !== index) return row;
+        return { ...row, [field]: value };
+      });
+
+      // Auto-fill second row remaining amount when editing row 0 in a 2-row setup
+      if (field === 'amount' && index === 0 && updated.length === 2) {
+        const row0Amt = value === '' ? 0 : Number(value);
+        if (!isNaN(row0Amt)) {
+          const remaining = Math.max(0, Math.round((total - row0Amt) * 100) / 100);
+          updated[1] = {
+            ...updated[1],
+            amount: value === '' ? '' : (remaining > 0 ? remaining : 0),
+          };
+        }
+      }
+
+      return updated;
+    });
+  };
+
+  const addSplitRow = () => {
+    const existingIds = new Set(splitRows.map((r) => r.payment_account_id));
+    const nextUnusedBank = bankAccounts.find((b: any) => b.is_active && !existingIds.has(b.id))?.id || bankAccounts[0]?.id || 'CASH_DRAWER';
+    const currentSum = Math.round(splitRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0) * 100) / 100;
+    const remaining = Math.max(0, Math.round((total - currentSum) * 100) / 100);
+
+    setSplitRows((prev) => [
+      ...prev,
+      { payment_account_id: nextUnusedBank, amount: remaining > 0 ? remaining : '' },
+    ]);
+  };
+
+  const removeSplitRow = (index: number) => {
+    if (splitRows.length <= 2) return;
+    setSplitRows((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // Step 1: Group products by product_name
   const groupedProducts = useMemo(() => {
@@ -250,8 +343,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     return (customersResponse?.data || []).map((c) => ({
       value: c.id,
       label: `${c.name}${c.city ? ` (${c.city})` : ''}`,
-      badge: c.code || undefined,
-      subLabel: [c.phone, c.address].filter(Boolean).join(' • ') || undefined,
+      badge: c.customer_type === 'CASH' ? 'CASH' : (c.code || undefined),
+      subLabel: [
+        c.customer_type === 'CASH' ? '💵 Cash Customer' : '📋 Credit Customer',
+        c.phone,
+        c.address
+      ].filter(Boolean).join(' • ') || undefined,
     }));
   }, [customersResponse?.data]);
 
@@ -364,8 +461,21 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       discount: Number(order.discount) || 0,
       delivery_charge: Number((order as any).delivery_charge) || 0,
       notes: (order as any).notes || '',
+      transport: (order as any).transport || '',
       items: parsedItems.length > 0 ? parsedItems : [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
     });
+
+    if ((order as any).payment_splits && Array.isArray((order as any).payment_splits) && (order as any).payment_splits.length > 0) {
+      setIsSplitPayment(true);
+      setSplitRows((order as any).payment_splits);
+    } else {
+      setIsSplitPayment(false);
+      if ((order as any).payment_account_id) {
+        setPaymentAccountId((order as any).payment_account_id);
+      } else {
+        setPaymentAccountId('CASH_DRAWER');
+      }
+    }
 
     deleteHeldOrderMutation.mutate(order.id);
     setIsHeldModalOpen(false);
@@ -412,7 +522,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         discount: Number(discount) || 0,
         delivery_charge: Number(delivery_charge) || 0,
         total_amount: total,
-        payment_method: 'CREDIT',
+        payment_method: isCashCustomer ? (isSplitPayment ? 'SPLIT' : (paymentAccountId === 'CASH_DRAWER' ? 'CASH' : 'BANK_TRANSFER')) : 'CREDIT',
+        payment_account_id: isCashCustomer ? (isSplitPayment ? splitRows[0]?.payment_account_id : paymentAccountId) : undefined,
+        payment_splits: isCashCustomer && isSplitPayment ? splitRows.map((r) => ({ payment_account_id: r.payment_account_id, amount: Number(r.amount) || 0 })) : undefined,
         notes: watch('notes') || '',
         due_date: watch('due_date') || '',
         date: watch('date') || new Date().toISOString().split('T')[0],
@@ -449,6 +561,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       customer_code: createdInvoice.customer_code || selectedCust?.code,
       customer_phone: createdInvoice.customer_phone || selectedCust?.phone,
       customer_city: createdInvoice.customer_city || selectedCust?.city,
+      transport: createdInvoice.transport ?? (isCashCustomer ? null : (watch('transport')?.trim() || null)),
       items: enrichedItems.length > 0 ? enrichedItems : createdInvoice.items,
       type: 'sales',
     };
@@ -508,10 +621,17 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
           discount: 0,
           delivery_charge: 0,
           notes: '',
+          transport: '',
           items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
         });
         setApplyAdvance(false);
         setAdvanceAppliedAmount('0');
+        setPaymentAccountId('CASH_DRAWER');
+        setIsSplitPayment(false);
+        setSplitRows([
+          { payment_account_id: 'CASH_DRAWER', amount: '' },
+          { payment_account_id: '', amount: '' },
+        ]);
       }
       focusField('customer-combobox');
     }
@@ -525,7 +645,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       // Ctrl+Enter or F9 -> Save and Print Invoice
       if ((e.ctrlKey && e.key === 'Enter' && !e.shiftKey) || e.key === 'F9') {
         e.preventDefault();
-        if (!mutation.isPending && !isHolding && !hasAnyEmptySize) {
+        const canSubmit = !mutation.isPending && !isHolding && !hasAnyEmptySize && !(isCashCustomer && isSplitPayment && !isSplitBalanced);
+        if (canSubmit) {
           handleSubmit(onSubmit)();
         }
       }
@@ -553,16 +674,45 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isOpen, mutation.isPending, isHolding, hasAnyEmptySize, fields.length]);
+  }, [isOpen, mutation.isPending, isHolding, hasAnyEmptySize, fields.length, isCashCustomer, isSplitPayment, isSplitBalanced]);
 
   const onSubmit = async (data: FormData) => {
     try {
+      if (isCashCustomer) {
+        if (isSplitPayment) {
+          if (!isSplitBalanced) {
+            toast.error('Split payment total must equal the invoice Grand Total.');
+            return;
+          }
+          if (splitRows.some((r) => !r.payment_account_id || r.amount === '' || Number(r.amount) <= 0)) {
+            toast.error('Every split payment row must have an account and amount > 0.');
+            return;
+          }
+        } else {
+          if (!paymentAccountId) {
+            toast.error('Please select a payment account to settle the cash invoice.');
+            return;
+          }
+        }
+      }
+
+      const cleanSplits = isCashCustomer && isSplitPayment
+        ? splitRows.map((r) => ({
+            payment_account_id: r.payment_account_id,
+            amount: Math.round(Number(r.amount) * 100) / 100,
+          }))
+        : undefined;
+
       const cleanData = {
         ...data,
-        due_date: data.due_date ? data.due_date : undefined,
+        transport: isCashCustomer ? undefined : (data.transport && data.transport.trim() ? data.transport.trim() : undefined),
+        due_date: isCashCustomer ? undefined : (data.due_date ? data.due_date : undefined),
         discount: Math.round(Number(data.discount || 0) * 100) / 100,
         delivery_charge: Math.round(Number(data.delivery_charge || 0) * 100) / 100,
-        advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
+        advance_applied_amount: (!isCashCustomer && applyAdvance) ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
+        payment_splits: cleanSplits,
+        payment_account_id: isCashCustomer ? (isSplitPayment ? cleanSplits?.[0]?.payment_account_id : paymentAccountId) : undefined,
+        payment_method: isCashCustomer ? (isSplitPayment ? 'SPLIT' : (paymentAccountId === 'CASH_DRAWER' ? 'CASH' : 'BANK_TRANSFER')) : undefined,
         items: data.items.map(({ bags_input, selected_family_name, selected_variant_id, ...i }) => {
           const qty = Number(i.quantity || 0);
           const unitPrice = Math.round(Number(i.unit_price || 0) * 100) / 100;
@@ -671,7 +821,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className={`grid grid-cols-1 ${isCreditCustomer ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-5`}>
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Customer <span className="text-xs font-normal text-slate-400">(Type or Arrow keys)</span>
@@ -681,6 +831,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                   value={selectedCustomerId || ''}
                   onChange={(val) => {
                     setValue('customer_id', val, { shouldValidate: true });
+                    const cust = customersResponse?.data.find((c: any) => c.id === val);
+                    if (cust?.customer_type === 'CASH') {
+                      setValue('transport', '');
+                    }
                   }}
                   options={customerOptions}
                   placeholder="Type to search customer..."
@@ -712,23 +866,52 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Due Date</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-medium text-slate-700">Due Date</label>
+                  {isCashCustomer && (
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                      N/A (Cash Spot Sale)
+                    </span>
+                  )}
+                </div>
                 <DateInput
                   id="invoice-due-date"
-                  value={watch('due_date')}
+                  value={isCashCustomer ? '' : watch('due_date')}
+                  disabled={isCashCustomer}
                   onChange={(val) => setValue('due_date', val, { shouldValidate: true })}
-                  placeholder="dd/mm/yyyy"
-                  className={inputCls(!!errors.due_date)}
-                  hasError={!!errors.due_date}
+                  placeholder={isCashCustomer ? 'Immediate Payment' : 'dd/mm/yyyy'}
+                  className={inputCls(!!errors.due_date && !isCashCustomer)}
+                  hasError={!!errors.due_date && !isCashCustomer}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      focusField('item-0-family');
+                      focusField(isCreditCustomer ? 'invoice-transport' : 'item-0-family');
                     }
                   }}
                 />
-                {errors.due_date && <p className="mt-1 text-xs text-red-600">{errors.due_date.message}</p>}
+                {errors.due_date && !isCashCustomer && <p className="mt-1 text-xs text-red-600">{errors.due_date.message}</p>}
               </div>
+
+              {isCreditCustomer && (
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Transport (optional)
+                  </label>
+                  <input
+                    id="invoice-transport"
+                    type="text"
+                    autoComplete="off"
+                    {...register('transport')}
+                    className={inputCls(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        focusField('item-0-family');
+                      }
+                    }}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="border border-slate-200 rounded-xl overflow-visible shadow-sm">
@@ -992,7 +1175,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
             </div>
             {errors.items?.root && <p className="text-sm text-red-600">{errors.items.root.message}</p>}
 
-            {walletBalance > 0 && (
+            {/* Advance Balance / Credit Application Option (Only for CREDIT customers) */}
+            {!isCashCustomer && walletBalance > 0 && selectedCustomerId && (
               <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 space-y-3 shadow-2xs">
                 <div className="flex items-center justify-between text-amber-900">
                   <span className="text-sm font-bold flex items-center gap-2">
@@ -1048,6 +1232,189 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
               </div>
             )}
 
+            {/* POS-Style Instant Payment Settlement Section (Only for CASH customers) */}
+            {isCashCustomer && (
+              <div className="rounded-2xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-50/90 via-emerald-50/50 to-teal-50/30 p-4 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-xs">
+                      <Banknote className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">
+                          Cash Customer Settlement
+                        </span>
+                        <span className="text-xs font-bold text-emerald-700">Immediate Full Payment</span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-0.5 font-medium">
+                        Immediate settlement upon saving. No separate &quot;Record Payment&quot; step required.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={toggleSplitMode}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer border bg-white hover:bg-emerald-50 text-emerald-800 border-emerald-300 active:scale-95"
+                    >
+                      <Split className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{isSplitPayment ? 'Single Payment' : '+ Split Payment'}</span>
+                    </button>
+
+                    <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-emerald-300 shadow-2xs">
+                      <span className="text-xs font-bold text-slate-600">Total:</span>
+                      <span className="text-sm font-black font-mono text-emerald-700">
+                        {formatCurrency(total)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {isSplitPayment ? (
+                  /* Split Mode */
+                  <div className="pt-3 border-t border-emerald-200/80 space-y-3">
+                    {/* Live Status Pill */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 bg-white/90 p-2.5 rounded-xl border border-emerald-200 shadow-2xs">
+                      <div className="flex items-center gap-2">
+                        {isSplitBalanced ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-full">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            Balanced — Full Rs. {total.toLocaleString()} allocated
+                          </span>
+                        ) : splitDiff > 0.01 ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100 border border-amber-300 px-3 py-1 rounded-full">
+                            <AlertCircle className="w-4 h-4 text-amber-600" />
+                            Remaining to allocate: Rs. {splitDiff.toLocaleString()}
+                          </span>
+                        ) : splitDiff < -0.01 ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-900 bg-rose-100 border border-rose-300 px-3 py-1 rounded-full">
+                            <AlertCircle className="w-4 h-4 text-rose-600" />
+                            Over-allocated by: Rs. {Math.abs(splitDiff).toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-900 bg-rose-100 border border-rose-300 px-3 py-1 rounded-full">
+                            <AlertCircle className="w-4 h-4 text-rose-600" />
+                            All rows must have an account and amount &gt; 0
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3 text-xs font-bold text-slate-700">
+                        <span>Allocated: <strong className="font-mono text-emerald-700">Rs. {splitTotalAllocated.toLocaleString()}</strong></span>
+                        <span className="text-slate-300">|</span>
+                        <span>Target: <strong className="font-mono text-slate-900">Rs. {total.toLocaleString()}</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Split Rows */}
+                    <div className="space-y-2">
+                      {splitRows.map((row, idx) => (
+                        <div key={idx} className="flex items-center gap-2.5 bg-white p-2.5 rounded-xl border border-emerald-200/90 shadow-2xs">
+                          <span className="text-xs font-black text-emerald-700 w-6 text-center shrink-0">
+                            #{idx + 1}
+                          </span>
+
+                          <div className="flex-1">
+                            <select
+                              value={row.payment_account_id}
+                              onChange={(e) => handleSplitRowChange(idx, 'payment_account_id', e.target.value)}
+                              className="w-full text-xs font-semibold rounded-lg py-1.5 px-2.5 border border-slate-300 bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 cursor-pointer text-slate-900"
+                            >
+                              <option value="">-- Select Account --</option>
+                              <option value="CASH_DRAWER">💵 Cash in Drawer (Cash Register)</option>
+                              {bankAccounts
+                                .filter((b: any) => b.is_active)
+                                .map((b: any) => (
+                                  <option key={b.id} value={b.id}>
+                                    🏦 {b.bank_name} — {b.account_title} ({b.account_number})
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+
+                          <div className="w-44 shrink-0">
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">Rs.</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={row.amount === '' ? '' : row.amount}
+                                placeholder="0.00"
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => handleSplitRowChange(idx, 'amount', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value) || 0))}
+                                className="w-full text-right font-mono font-bold text-xs rounded-lg py-1.5 pl-8 pr-2.5 border border-slate-300 bg-white focus:ring-2 focus:ring-emerald-500 text-slate-900"
+                              />
+                            </div>
+                          </div>
+
+                          {splitRows.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => removeSplitRow(idx)}
+                              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition cursor-pointer shrink-0"
+                              title="Remove split account"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add Another Account Button */}
+                    <div className="flex justify-between items-center pt-1">
+                      <button
+                        type="button"
+                        onClick={addSplitRow}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-emerald-800 border border-emerald-300 hover:bg-emerald-100/60 transition shadow-2xs cursor-pointer active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>+ Add Another Account</span>
+                      </button>
+
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        Auto-calculates second row balance as you type in row 1.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  /* Single Mode */
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-emerald-200/80">
+                    <div>
+                      <label htmlFor="invoice-payment-account" className="block text-xs font-bold text-slate-800 mb-1">
+                        Payment Account / Method <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        id="invoice-payment-account"
+                        value={paymentAccountId}
+                        onChange={(e) => setPaymentAccountId(e.target.value)}
+                        className="w-full text-sm font-semibold rounded-xl py-2 px-3 border border-emerald-300 bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 cursor-pointer text-slate-900 shadow-2xs"
+                      >
+                        <option value="CASH_DRAWER">💵 Cash in Drawer (Cash Register)</option>
+                        {bankAccounts
+                          .filter((b: any) => b.is_active)
+                          .map((b: any) => (
+                            <option key={b.id} value={b.id}>
+                              🏦 {b.bank_name} — {b.account_title} ({b.account_number})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center bg-emerald-100/70 rounded-xl px-3.5 py-2 border border-emerald-200">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 mr-2.5 shrink-0" />
+                      <p className="text-xs text-emerald-900 font-medium leading-relaxed">
+                        Full Grand Total of <strong className="font-bold text-emerald-950 font-mono">{formatCurrency(total)}</strong> will be settled into <strong className="font-bold text-emerald-950">{paymentAccountId === 'CASH_DRAWER' ? 'Cash in Drawer' : (bankAccounts.find((b: any) => b.id === paymentAccountId)?.bank_name || 'Selected Bank')}</strong> immediately upon saving this invoice.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex justify-end">
               <div className="w-64 space-y-3">
                 <div className="flex justify-between text-sm text-slate-600">
@@ -1098,6 +1465,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                   <span>Total Payable</span>
                   <span className="text-xl font-black text-blue-600">{formatCurrency(total)}</span>
                 </div>
+                {isCashCustomer && (
+                  <div className="flex justify-between items-center text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                    <span>Payment Status:</span>
+                    <span className="inline-flex items-center gap-1 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Fully Settled (Cash)
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1179,9 +1554,15 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
             <button
               type="submit"
               form="invoice-form"
-              disabled={mutation.isPending || isHolding || hasAnyEmptySize}
+              disabled={mutation.isPending || isHolding || hasAnyEmptySize || (isCashCustomer && isSplitPayment && !isSplitBalanced)}
               className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
-              title={hasAnyEmptySize ? "All line items must have a size/variant selected" : "Save and Print Invoice"}
+              title={
+                hasAnyEmptySize
+                  ? "All line items must have a size/variant selected"
+                  : isCashCustomer && isSplitPayment && !isSplitBalanced
+                  ? "Split payment must be balanced and all rows have valid amounts"
+                  : "Save and Print Invoice"
+              }
             >
               {mutation.isPending ? (
                 <>

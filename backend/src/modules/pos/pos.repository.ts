@@ -19,7 +19,8 @@ export async function processPOSCheckout(
   paymentMethodInput?: string,
   bankAccountId?: string | null,
   splitCashAmountInput?: number,
-  splitBankAmountInput?: number
+  splitBankAmountInput?: number,
+  deliveryChargesInput: number = 0
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
     const effectiveDiscount = Number(discount || 0);
@@ -318,7 +319,8 @@ export async function processPOSCheckout(
       }
     }
 
-    const totalAmount = subtotal - effectiveDiscount;
+    const deliveryCharges = Math.max(0, Math.round(Number(deliveryChargesInput || 0) * 100) / 100);
+    const totalAmount = Math.round((subtotal - effectiveDiscount + deliveryCharges) * 100) / 100;
 
     const isSplit = String(paymentMethodInput || '').toUpperCase() === 'SPLIT';
     const isBank = String(paymentMethodInput || '').toUpperCase() === 'BANK';
@@ -402,6 +404,7 @@ export async function processPOSCheckout(
         due_date: new Date(),
         subtotal,
         discount: effectiveDiscount,
+        delivery_charge: deliveryCharges,
         total_amount: totalAmount,
         paid_amount: effectiveAmountPaid,
         cash_tendered: cashTendered,
@@ -426,6 +429,8 @@ export async function processPOSCheckout(
     (invoice as any).balance_due = balanceDue;
     (invoice as any).split_cash_amount = isSplit ? splitCashNet : (isBank ? 0 : effectiveAmountPaid);
     (invoice as any).split_bank_amount = isSplit ? splitBankNet : (isBank ? effectiveAmountPaid : 0);
+    (invoice as any).delivery_charge = deliveryCharges;
+    (invoice as any).delivery_charges = deliveryCharges;
     (invoice as any).requested_qty = invoiceRequestedTotal;
     (invoice as any).fulfilled_qty = invoiceFulfilledTotal;
     (invoice as any).deferred_qty = invoiceDeferredTotal;
@@ -779,6 +784,7 @@ export async function getCashierShiftAudit(userId: string) {
       'si.date',
       'si.subtotal',
       'si.discount',
+      'si.delivery_charge',
       'si.total_amount',
       'si.paid_amount',
       'si.status',
@@ -964,6 +970,7 @@ export async function getPosInvoicesList(filter?: { created_by?: string }) {
       'si.date',
       'si.subtotal',
       'si.discount',
+      'si.delivery_charge',
       'si.total_amount',
       'si.paid_amount',
       'si.status',

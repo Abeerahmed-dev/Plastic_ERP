@@ -12,6 +12,11 @@ export const invoiceItemSchema = z.object({
 });
 
 
+export const paymentSplitSchema = z.object({
+  payment_account_id: z.union([z.string(), z.number()]).transform((val) => String(val)),
+  amount: z.coerce.number().min(0.01, 'Split amount must be greater than 0'),
+});
+
 export const createInvoiceSchema = z.object({
   customer_id: z.string().uuid('Invalid customer ID'),
   date: z.string(), // ISO date string
@@ -20,6 +25,10 @@ export const createInvoiceSchema = z.object({
   delivery_charge: z.number().min(0).optional().default(0),
   advance_applied_amount: z.number().min(0).optional().default(0),
   notes: z.string().optional(),
+  transport: z.string().trim().optional().nullable(),
+  payment_account_id: z.string().optional().nullable(),
+  payment_method: z.string().optional().nullable(),
+  payment_splits: z.array(paymentSplitSchema).optional().nullable(),
   items: z.array(invoiceItemSchema).min(1, 'At least one item is required'),
 });
 

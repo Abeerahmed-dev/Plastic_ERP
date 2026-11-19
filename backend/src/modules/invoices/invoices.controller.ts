@@ -76,7 +76,7 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
 
     const amountPaid = Number((req.body as any).amount_paid || (req.body as any).paid_amount || 0);
     const subtotal = parsed.data.items.reduce((acc, i) => acc + (Number(i.quantity) * Number(i.unit_price)), 0);
-    const grandTotal = subtotal - (parsed.data.discount || 0);
+    const grandTotal = (subtotal - (parsed.data.discount || 0)) + (parsed.data.delivery_charge || 0);
 
     if (isCashier && amountPaid > grandTotal + 0.01) {
       throw new ForbiddenError('Cashiers cannot receive excess ledger payments.');

@@ -9,6 +9,7 @@ interface A4SalesInvoiceProps {
 
 export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
   if (!data) return null;
+  const invoice = data;
 
   const invoiceNumber = String(data.invoice_number || data.code || data.id || 'N/A');
   const billNumber = data.bill_number 
@@ -342,6 +343,12 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
                 {entityName}{entityCode ? ` (${entityCode})` : ''} {entityCity ? `(${entityCity})` : ''}
               </span>
             </div>
+            {invoice.transport && String(invoice.transport).trim() !== '' && (
+              <div className="flex items-center">
+                <span className="w-24 font-semibold text-slate-700">Transport:</span>
+                <span className="text-black font-medium">{invoice.transport}</span>
+              </div>
+            )}
             {entityPhone && (
               <div className="flex items-center">
                 <span className="w-24 font-semibold text-slate-700">Phone:</span>

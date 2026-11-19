@@ -13,6 +13,8 @@ export interface POSCheckoutData {
   customer_id?: string;
   items: POSCheckoutItem[];
   discount?: number;
+  delivery_charges?: number;
+  delivery_charge?: number;
   amount_paid?: number;
   payment_method?: string;
   bank_account_id?: string;

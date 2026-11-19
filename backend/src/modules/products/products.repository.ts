@@ -141,22 +141,28 @@ export async function findAllProducts(query: ProductQuery): Promise<{
   rows: ProductWithStock[];
   total: number;
 }> {
-  const { page, limit, search, category_id, category, is_active } = query;
+  const { page, limit = 2000, search, category_id, category, is_active } = query;
   const offset = (page - 1) * limit;
 
   const baseQuery = db('products')
-    .join('categories as c', 'products.category_id', 'c.id')
+    .leftJoin('categories', 'products.category_id', 'categories.id')
     .modify((qb) => {
       if (search) {
-        qb.where((inner) => {
-          inner
-            .whereILike('products.name', `%${search}%`)
-            .orWhereILike('products.code', `%${search}%`)
-            .orWhereILike('products.size', `%${search}%`);
-        });
+        const tokens = search.trim().split(/\s+/).filter(Boolean);
+        if (tokens.length > 0) {
+          qb.andWhere((outer) => {
+            for (const token of tokens) {
+              outer.andWhere((inner) => {
+                inner
+                  .whereILike('products.name', `%${token}%`)
+                  .orWhereILike('products.size', `%${token}%`);
+              });
+            }
+          });
+        }
       }
       if (category_id) qb.where({ 'products.category_id': category_id });
-      if (category) qb.whereILike('c.name', `%${category}%`);
+      if (category) qb.whereILike('categories.name', `%${category}%`);
       if (is_active !== undefined) qb.where({ 'products.is_active': is_active });
       else qb.where({ 'products.is_active': true });
     });
@@ -168,9 +174,9 @@ export async function findAllProducts(query: ProductQuery): Promise<{
     .clone()
     .select(
       'products.*',
-      'c.name as category_name',
-      'c.name as category',
-      'c.bag_weight_kg as bag_weight_kg',
+      'categories.name as category_name',
+      'categories.name as category',
+      'categories.bag_weight_kg as bag_weight_kg',
       db.raw(`(
         EXISTS (SELECT 1 FROM sales_invoice_items WHERE sales_invoice_items.product_id = products.id)
         OR EXISTS (SELECT 1 FROM purchase_invoice_items WHERE purchase_invoice_items.product_id = products.id)
@@ -204,12 +210,12 @@ export async function findProductById(
   client: Knex | Knex.Transaction = db
 ): Promise<ProductWithStock | undefined> {
   const product = await client('products')
-    .join('categories as c', 'products.category_id', 'c.id')
+    .leftJoin('categories', 'products.category_id', 'categories.id')
     .select(
       'products.*',
-      'c.name as category_name',
-      'c.name as category',
-      'c.bag_weight_kg as bag_weight_kg'
+      'categories.name as category_name',
+      'categories.name as category',
+      'categories.bag_weight_kg as bag_weight_kg'
     )
     .where({ 'products.id': id })
     .first();
@@ -235,25 +241,31 @@ export async function findProductById(
 
 export async function findPOSAvailableProducts(search?: string): Promise<ProductWithStock[]> {
   const baseQuery = db('products')
-    .join('categories as c', 'products.category_id', 'c.id')
+    .leftJoin('categories', 'products.category_id', 'categories.id')
     .where('products.is_active', true)
     .modify((qb) => {
       if (search) {
-        qb.where((inner) => {
-          inner
-            .whereILike('products.name', `%${search}%`)
-            .orWhereILike('products.code', `%${search}%`)
-            .orWhereILike('products.size', `%${search}%`);
-        });
+        const tokens = search.trim().split(/\s+/).filter(Boolean);
+        if (tokens.length > 0) {
+          qb.andWhere((outer) => {
+            for (const token of tokens) {
+              outer.andWhere((inner) => {
+                inner
+                  .whereILike('products.name', `%${token}%`)
+                  .orWhereILike('products.size', `%${token}%`);
+              });
+            }
+          });
+        }
       }
     });
 
   const rows = await baseQuery
     .select(
       'products.*',
-      'c.name as category_name',
-      'c.name as category',
-      'c.bag_weight_kg as bag_weight_kg'
+      'categories.name as category_name',
+      'categories.name as category',
+      'categories.bag_weight_kg as bag_weight_kg'
     )
     .orderBy('products.name', 'asc');
 

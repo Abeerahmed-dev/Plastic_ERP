@@ -10,6 +10,7 @@ import {
 import { CheckoutInput, CreateHeldOrderInput } from './pos.schemas';
 
 export async function checkout(userId: string, data: CheckoutInput, userRole?: string) {
+  const deliveryCharges = Number(data.delivery_charges ?? data.delivery_charge ?? 0);
   const invoice = await processPOSCheckout(
     userId,
     data.items,
@@ -20,7 +21,8 @@ export async function checkout(userId: string, data: CheckoutInput, userRole?: s
     data.payment_method,
     data.bank_account_id,
     data.split_cash_amount,
-    data.split_bank_amount
+    data.split_bank_amount,
+    deliveryCharges
   );
   return invoice;
 }

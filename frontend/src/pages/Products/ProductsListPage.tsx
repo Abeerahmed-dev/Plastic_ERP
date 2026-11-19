@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, Box } from 'lucide-react';
+import { Plus, Edit2, Box } from 'lucide-react';
 import { productsService } from '../../services/products.service';
 import { categoriesService } from '../../services/categories.service';
 import { ProductFormModal } from './ProductFormModal';
 import { Product, CreateProductData, UpdateProductData } from '../../types/product.types';
 import { useAuthStore } from '../../store/auth.store';
+import { invalidateProductQueries } from '../../utils/querySync';
+import { ProductSizeFilter } from '../../components/Common/ProductSizeFilter';
 
 export default function ProductsListPage() {
   const queryClient = useQueryClient();
@@ -13,13 +15,13 @@ export default function ProductsListPage() {
   const userRole = (user?.roleName || user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
-  const isAccountant = userRole === 'ACCOUNTANT';
-  
-  const [searchTerm, setSearchTerm] = useState('');
+
+  const [productQuery, setProductQuery] = useState('');
+  const [sizeQuery, setSizeQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const canWrite = isCashier || isOwner || isAccountant || hasPermission('products:write');
+  const canWrite = isCashier || isOwner || hasPermission('products:write');
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products'],
@@ -34,7 +36,7 @@ export default function ProductsListPage() {
   const createMutation = useMutation({
     mutationFn: (data: CreateProductData) => productsService.createProduct(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      invalidateProductQueries(queryClient);
       setIsModalOpen(false);
     },
   });
@@ -43,19 +45,34 @@ export default function ProductsListPage() {
     mutationFn: ({ id, data }: { id: string; data: UpdateProductData }) =>
       productsService.updateProduct(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      invalidateProductQueries(queryClient);
       setIsModalOpen(false);
       setEditingProduct(null);
     },
   });
 
-  const filteredProducts = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.size || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.category || p.category_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      if (productQuery.trim()) {
+        const pName = (p.name || '').trim().toLowerCase();
+        if (!pName.includes(productQuery.trim().toLowerCase())) {
+          return false;
+        }
+      }
+      if (sizeQuery.trim()) {
+        const pSize = (p.size || '').trim().toLowerCase();
+        if (!pSize.includes(sizeQuery.trim().toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [products, productQuery, sizeQuery]);
+
+  const handleClearFilters = () => {
+    setProductQuery('');
+    setSizeQuery('');
+  };
 
   const handleOpenCreate = () => {
     setEditingProduct(null);
@@ -103,21 +120,19 @@ export default function ProductsListPage() {
         )}
       </div>
 
-      {/* Toolbar */}
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div className="relative max-w-md w-full">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <Search className="h-5 w-5 text-slate-400" />
-          </div>
-          <input
-            type="text"
-            className="block w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
-            placeholder="Search by code, name, size, or category..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-      </div>
+      {/* Product & Size Filter Combobox */}
+      <ProductSizeFilter
+        products={products}
+        productQuery={productQuery}
+        sizeQuery={sizeQuery}
+        onProductChange={setProductQuery}
+        onSizeChange={setSizeQuery}
+        onClear={handleClearFilters}
+        showLabels={true}
+        productLabel="Select Product"
+        sizeLabel="Select Size"
+        className="mb-6"
+      />
 
       {/* Main Table Card */}
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -211,11 +226,10 @@ export default function ProductsListPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          product.is_active
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/50'
-                            : 'bg-rose-50 text-rose-700 border border-rose-200/50'
-                        }`}
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${product.is_active
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/50'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200/50'
+                          }`}
                       >
                         {product.is_active ? 'Active' : 'Inactive'}
                       </span>

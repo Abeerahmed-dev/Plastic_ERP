@@ -9,6 +9,7 @@ export interface OfflineInvoiceRecord {
   payment_method?: string;
   amount_paid?: number;
   discount?: number;
+  delivery_charges?: number;
   status: 'PENDING' | 'SYNCED' | 'FAILED';
 }
 
@@ -75,6 +76,7 @@ class OfflineVaultService {
       payment_method: orderData.payment_method || 'CASH',
       amount_paid: orderData.amount_paid,
       discount: orderData.discount,
+      delivery_charges: orderData.delivery_charges ?? orderData.delivery_charge ?? 0,
       status: 'PENDING',
     };
 
@@ -148,6 +150,10 @@ class OfflineVaultService {
         price: Number(i.price !== undefined ? i.price : i.unit_price) || 0,
         selected_unit: i.selected_unit || 'KG',
       })),
+      discount: rec.discount ?? rec.payload?.discount ?? 0,
+      delivery_charges: rec.delivery_charges ?? rec.payload?.delivery_charges ?? rec.payload?.delivery_charge ?? 0,
+      delivery_charge: rec.delivery_charges ?? rec.payload?.delivery_charges ?? rec.payload?.delivery_charge ?? 0,
+      amount_paid: rec.amount_paid ?? rec.payload?.amount_paid,
       payment_method: rec.payment_method || rec.payload?.payment_method || 'CASH',
     }));
 

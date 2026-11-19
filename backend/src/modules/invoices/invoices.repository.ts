@@ -1,6 +1,7 @@
 import db from '../../db/knex';
 import { CreateInvoiceInput } from './invoices.schemas';
 import { estimateOverdraftCogs, getLatestMarketBatchPrice } from '../../shared/overdraftPricing';
+import { ValidationError, NotFoundError } from '../../shared/errors';
 
 export interface InvoiceRow {
   id: string;
@@ -15,6 +16,7 @@ export interface InvoiceRow {
   paid_amount: number;
   status: string;
   notes: string | null;
+  transport?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -294,9 +296,92 @@ export async function createInvoiceWithItems(
     const deliveryCharge = Math.round(Number((input as any).delivery_charge || 0) * 100) / 100;
     const total_amount = Math.round((Math.max(0, subtotal - discount) + deliveryCharge) * 100) / 100;
 
-    // ── Credit Limit Check ──
+    // ── Customer & Account Validation ──
     const customer = await trx('customers').where({ id: input.customer_id }).first();
-    if (customer && Number(customer.credit_limit || 0) > 0) {
+    if (!customer) {
+      throw new NotFoundError('Customer');
+    }
+    const isCashCustomer = customer.customer_type === 'CASH';
+
+    let resolvedSplits: Array<{
+      payment_account_id: string;
+      amount: number;
+      isCashDrawer: boolean;
+      targetBankId: string | null;
+      targetBankName: string;
+      effectivePaymentMethod: string;
+    }> = [];
+
+    if (isCashCustomer) {
+      // Normalize payment_splits array or fallback to single payment_account_id
+      let rawSplits: Array<{ payment_account_id: string | number; amount: number }> = [];
+      if (Array.isArray(input.payment_splits) && input.payment_splits.length > 0) {
+        rawSplits = input.payment_splits;
+      } else if (input.payment_account_id && String(input.payment_account_id).trim() !== '') {
+        rawSplits = [{
+          payment_account_id: input.payment_account_id,
+          amount: total_amount,
+        }];
+      }
+
+      if (rawSplits.length === 0) {
+        throw new ValidationError('Payment account is required for Cash customer');
+      }
+
+      let splitSum = 0;
+      for (const split of rawSplits) {
+        const rawAccountId = String(split.payment_account_id || '').trim();
+        const splitAmt = Math.round(Number(split.amount || 0) * 100) / 100;
+
+        if (!rawAccountId) {
+          throw new ValidationError('Valid payment account is required for each split entry');
+        }
+        if (splitAmt <= 0 || isNaN(splitAmt)) {
+          throw new ValidationError('Split amount must be greater than 0');
+        }
+
+        splitSum = Math.round((splitSum + splitAmt) * 100) / 100;
+
+        const isCashDrawer =
+          rawAccountId === 'CASH_DRAWER' ||
+          rawAccountId === 'cash-drawer' ||
+          rawAccountId.toUpperCase() === 'CASH' ||
+          (rawSplits.length === 1 && String(input.payment_method || '').toUpperCase() === 'CASH');
+
+        let targetBankId: string | null = null;
+        let targetBankName = '';
+        let effectivePaymentMethod = 'CASH';
+
+        if (isCashDrawer) {
+          effectivePaymentMethod = 'CASH';
+          targetBankId = null;
+        } else {
+          const bankAcc = await trx('bank_accounts').where({ id: rawAccountId }).first();
+          if (!bankAcc) {
+            throw new ValidationError(`Selected payment account '${rawAccountId}' not found`);
+          }
+          targetBankId = bankAcc.id;
+          targetBankName = bankAcc.bank_name || '';
+          effectivePaymentMethod = 'BANK_TRANSFER';
+        }
+
+        resolvedSplits.push({
+          payment_account_id: rawAccountId,
+          amount: splitAmt,
+          isCashDrawer,
+          targetBankId,
+          targetBankName,
+          effectivePaymentMethod,
+        });
+      }
+
+      if (Math.abs(splitSum - total_amount) > 0.01) {
+        throw new ValidationError('Split payment total must equal the invoice Grand Total.');
+      }
+    }
+
+    // ── Credit Limit Check (Only for Credit customers) ──
+    if (!isCashCustomer && customer && Number(customer.credit_limit || 0) > 0) {
       const balanceDue = total_amount - Number((input as any).paid_amount || 0);
       if (balanceDue > 0) {
         const existingSum = await trx('sales_invoices')
@@ -314,10 +399,20 @@ export async function createInvoiceWithItems(
       }
     }
 
-    const advanceApplied = Math.round(Number((input as any).advance_applied_amount || 0) * 100) / 100;
-    const directPaid = Math.round(Number((input as any).paid_amount || (input as any).amount_paid || 0) * 100) / 100;
-    const initialPaidAmount = Math.round((directPaid + advanceApplied) * 100) / 100;
-    const invoiceStatus = initialPaidAmount >= total_amount ? 'PAID' : (initialPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
+    let advanceApplied = 0;
+    let directPaid = 0;
+    let initialPaidAmount = 0;
+    let invoiceStatus = 'UNPAID';
+
+    if (isCashCustomer) {
+      initialPaidAmount = total_amount;
+      invoiceStatus = 'PAID';
+    } else {
+      advanceApplied = Math.round(Number((input as any).advance_applied_amount || 0) * 100) / 100;
+      directPaid = Math.round(Number((input as any).paid_amount || (input as any).amount_paid || 0) * 100) / 100;
+      initialPaidAmount = Math.round((directPaid + advanceApplied) * 100) / 100;
+      invoiceStatus = initialPaidAmount >= total_amount ? 'PAID' : (initialPaidAmount > 0 ? 'PARTIAL' : 'UNPAID');
+    }
 
     // Insert Invoice (Financial Lock: Total amount locked in at full selling price)
     const [invoice] = await trx('sales_invoices')
@@ -332,9 +427,12 @@ export async function createInvoiceWithItems(
         delivery_charge: deliveryCharge,
         total_amount,
         paid_amount: initialPaidAmount,
+        cash_tendered: isCashCustomer ? total_amount : 0,
+        change_returned: 0,
         status: invoiceStatus,
         notes: input.notes,
         created_by: userId,
+        transport: input.transport || null,
       })
       .returning('*');
 
@@ -400,62 +498,141 @@ export async function createInvoiceWithItems(
       }
     }
 
-    // Record direct customer payment if directPaid > 0
-    if (directPaid > 0) {
-      const [pmt] = await trx('customer_payments').insert({
-        customer_id: input.customer_id,
-        invoice_id: invoiceId,
-        payment_number: `RCV-${invoiceNumber}`,
-        payment_date: input.date || new Date().toISOString().split('T')[0],
-        amount: directPaid,
-        payment_method: (input as any).payment_method || 'CASH',
-        bank_account_id: (input as any).bank_account_id || null,
-        notes: `Payment for Invoice ${invoiceNumber}`,
-        created_by: userId,
-      }).returning('*');
+    // ── Payment Settlement ──
+    if (isCashCustomer) {
+      if (total_amount > 0 && resolvedSplits.length > 0) {
+        for (let i = 0; i < resolvedSplits.length; i++) {
+          const split = resolvedSplits[i];
+          const splitSuffix = resolvedSplits.length > 1 ? `-${i + 1}` : '';
+          const paymentNumber = `RCV-${invoiceNumber}${splitSuffix}`;
 
-      await trx('payment_allocations').insert({
-        payment_id: pmt.id,
-        invoice_id: invoiceId,
-        allocated_amount: directPaid,
-      });
-    }
+          const [pmt] = await trx('customer_payments').insert({
+            customer_id: input.customer_id,
+            invoice_id: invoiceId,
+            payment_number: paymentNumber,
+            payment_date: input.date || new Date().toISOString().split('T')[0],
+            amount: split.amount,
+            payment_method: split.effectivePaymentMethod,
+            payment_type: 'INVOICE_SETTLEMENT',
+            bank_account_id: split.targetBankId,
+            notes: split.isCashDrawer
+              ? (resolvedSplits.length > 1 ? `Cash Split Settlement (Invoice #${invoiceNumber})` : `Cash Settlement (Invoice #${invoiceNumber})`)
+              : (resolvedSplits.length > 1 ? `Bank Split Settlement - ${split.targetBankName} (Invoice #${invoiceNumber})` : `Bank Settlement - ${split.targetBankName} (Invoice #${invoiceNumber})`),
+            cheque_status: 'CLEARED',
+            created_by: userId || null,
+          }).returning('*');
 
-    // Record Virtual Payment from Advance Wallet if advanceApplied > 0
-    if (advanceApplied > 0) {
-      const rows = await trx('customer_payments')
-        .where('payment_number', 'like', 'RCV-%')
-        .select('payment_number');
+          const hasAllocations = await trx.schema.hasTable('payment_allocations');
+          if (hasAllocations && pmt?.id) {
+            await trx('payment_allocations').insert({
+              payment_id: pmt.id,
+              invoice_id: invoiceId,
+              allocated_amount: split.amount,
+            });
+          }
 
-      let maxNum = 0;
-      for (const r of rows) {
-        if (r.payment_number && !r.payment_number.startsWith('RCV-POS-')) {
-          const numPart = r.payment_number.replace('RCV-', '');
-          const num = parseInt(numPart, 10);
-          if (!isNaN(num) && num > maxNum) {
-            maxNum = num;
+          if (!split.isCashDrawer && split.targetBankId) {
+            // Increment bank account balance
+            await trx('bank_accounts')
+              .where('id', split.targetBankId)
+              .increment('current_balance', split.amount);
+
+            // Record Bank Transaction inflow
+            const hasBankTx = await trx.schema.hasTable('bank_transactions');
+            if (hasBankTx) {
+              await trx('bank_transactions').insert({
+                bank_account_id: split.targetBankId,
+                transaction_type: 'DEPOSIT',
+                type: 'INFLOW',
+                amount: split.amount,
+                source_type: 'SALES',
+                source: 'SALES',
+                reference_id: invoiceId,
+                description: resolvedSplits.length > 1
+                  ? `Sales Invoice Split Payment: Invoice #${invoiceNumber}`
+                  : `Sales Invoice Cash Settlement: Invoice #${invoiceNumber}`,
+                transaction_date: input.date || new Date().toISOString().split('T')[0],
+                category: 'SALES',
+                created_by: userId || null,
+              });
+            }
+          } else {
+            // Inflow to Cash Drawer ledger
+            const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+            if (hasCdl) {
+              await trx('cash_drawer_ledger').insert({
+                type: 'INFLOW',
+                amount: split.amount,
+                reference_id: invoiceId,
+                description: resolvedSplits.length > 1
+                  ? `Sales Invoice Split Cash Payment: Invoice #${invoiceNumber}`
+                  : `Sales Invoice Cash Settlement: Invoice #${invoiceNumber}`,
+                transaction_date: input.date || new Date().toISOString().split('T')[0],
+                created_by: userId || null,
+              });
+            }
           }
         }
       }
-      const paymentNumber = `RCV-${(maxNum + 1).toString().padStart(5, '0')}`;
+    } else {
+      // CREDIT Customer (Existing behavior 100% untouched)
+      // Record direct customer payment if directPaid > 0
+      if (directPaid > 0) {
+        const [pmt] = await trx('customer_payments').insert({
+          customer_id: input.customer_id,
+          invoice_id: invoiceId,
+          payment_number: `RCV-${invoiceNumber}`,
+          payment_date: input.date || new Date().toISOString().split('T')[0],
+          amount: directPaid,
+          payment_method: (input as any).payment_method || 'CASH',
+          bank_account_id: (input as any).bank_account_id || null,
+          notes: `Payment for Invoice ${invoiceNumber}`,
+          created_by: userId,
+        }).returning('*');
 
-      const [virtualPayment] = await trx('customer_payments').insert({
-        customer_id: input.customer_id,
-        invoice_id: invoiceId,
-        payment_number: paymentNumber,
-        payment_date: input.date || new Date().toISOString().split('T')[0],
-        amount: advanceApplied,
-        payment_method: 'WALLET_ADVANCE',
-        cheque_status: 'CLEARED',
-        notes: 'Manually applied from advance balance',
-        created_by: userId,
-      }).returning('*');
+        await trx('payment_allocations').insert({
+          payment_id: pmt.id,
+          invoice_id: invoiceId,
+          allocated_amount: directPaid,
+        });
+      }
 
-      await trx('payment_allocations').insert({
-        payment_id: virtualPayment.id,
-        invoice_id: invoiceId,
-        allocated_amount: advanceApplied,
-      });
+      // Record Virtual Payment from Advance Wallet if advanceApplied > 0
+      if (advanceApplied > 0) {
+        const rows = await trx('customer_payments')
+          .where('payment_number', 'like', 'RCV-%')
+          .select('payment_number');
+
+        let maxNum = 0;
+        for (const r of rows) {
+          if (r.payment_number && !r.payment_number.startsWith('RCV-POS-')) {
+            const numPart = r.payment_number.replace('RCV-', '');
+            const num = parseInt(numPart, 10);
+            if (!isNaN(num) && num > maxNum) {
+              maxNum = num;
+            }
+          }
+        }
+        const paymentNumber = `RCV-${(maxNum + 1).toString().padStart(5, '0')}`;
+
+        const [virtualPayment] = await trx('customer_payments').insert({
+          customer_id: input.customer_id,
+          invoice_id: invoiceId,
+          payment_number: paymentNumber,
+          payment_date: input.date || new Date().toISOString().split('T')[0],
+          amount: advanceApplied,
+          payment_method: 'WALLET_ADVANCE',
+          cheque_status: 'CLEARED',
+          notes: 'Manually applied from advance balance',
+          created_by: userId,
+        }).returning('*');
+
+        await trx('payment_allocations').insert({
+          payment_id: virtualPayment.id,
+          invoice_id: invoiceId,
+          allocated_amount: advanceApplied,
+        });
+      }
     }
 
     return invoiceId;
@@ -1084,6 +1261,7 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
     'si.delivery_charge',
     'si.total_amount',
     'si.paid_amount',
+    'si.transport',
     'si.status',
     'si.invoice_type',
     'si.parent_invoice_id',
@@ -1658,7 +1836,8 @@ export async function processOfflineSyncInvoices(
       }
 
       const discount = Number(invPayload.discount || 0);
-      invoiceTotal = Math.max(0, invoiceSubtotal - discount);
+      const deliveryCharge = Number(invPayload.delivery_charges ?? invPayload.delivery_charge ?? 0);
+      invoiceTotal = Math.max(0, invoiceSubtotal - discount) + deliveryCharge;
       const paidAmount = Number(invPayload.paid_amount ?? invPayload.amount_paid ?? invoiceTotal);
 
       // Save Invoice Header
@@ -1670,6 +1849,7 @@ export async function processOfflineSyncInvoices(
           date: invoiceDate,
           subtotal: invoiceSubtotal,
           discount,
+          delivery_charge: deliveryCharge,
           total_amount: invoiceTotal,
           paid_amount: paidAmount,
           requested_qty: invoiceRequestedTotal,
@@ -1679,6 +1859,7 @@ export async function processOfflineSyncInvoices(
           offline_id: invPayload.id || invPayload.offline_id || null,
           offline_timestamp: Number(invPayload.timestamp || invPayload.offline_timestamp || Date.now()),
           created_by: userId || null,
+          transport: invPayload.transport || null,
         })
         .returning('*');
 

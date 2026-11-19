@@ -59,6 +59,7 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
 
   const subtotal = Number(invoice.subtotal || invoice.total_amount || 0);
   const discount = Number(invoice.discount || 0);
+  const deliveryCharge = Number(invoice.delivery_charge ?? invoice.delivery_charges ?? invoice.deliveryCharges ?? 0);
   const totalAmount = Number(invoice.total_amount || 0);
 
   // Total weight calculation
@@ -231,6 +232,12 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
             <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
               <span>Discount:</span>
               <span>- Rs. ${discount.toLocaleString()}</span>
+            </div>
+          ` : ''}
+          ${deliveryCharge > 0 ? `
+            <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
+              <span>Delivery:</span>
+              <span>+ Rs. ${deliveryCharge.toLocaleString()}</span>
             </div>
           ` : ''}
           <div class="flex" style="font-weight: 900; font-size: 11px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 2px 0; padding-right: 2px;">

@@ -30,6 +30,7 @@ export interface Invoice {
   change_returned?: number | null;
   status: 'DRAFT' | 'UNPAID' | 'PARTIAL' | 'PAID' | 'CANCELLED';
   notes: string | null;
+  transport?: string | null;
   created_by?: string | null;
   created_by_name?: string | null;
   created_by_role?: string | null;
@@ -58,6 +59,12 @@ export interface CreateInvoiceData {
   date: string;
   due_date?: string;
   discount: number;
+  delivery_charge?: number;
+  advance_applied_amount?: number;
+  payment_account_id?: string | null;
+  payment_method?: string | null;
+  payment_splits?: Array<{ payment_account_id: string | number; amount: number }> | null;
   notes?: string;
+  transport?: string | null;
   items: CreateInvoiceItemData[];
 }

@@ -29,6 +29,7 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
 
     const subtotal = Number(invoice.subtotal || invoice.total_amount || 0);
     const discount = Number(invoice.discount || 0);
+    const deliveryCharge = Number(invoice.delivery_charge ?? invoice.delivery_charges ?? invoice.deliveryCharges ?? 0);
     const totalAmount = Number(invoice.total_amount || 0);
 
     const totalWeight = items.reduce((sum, item) => {
@@ -234,6 +235,12 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
                 <div className="flex justify-between text-gray-800">
                   <span>Discount / رعایت:</span>
                   <span>- Rs. {discount.toLocaleString()}</span>
+                </div>
+              )}
+              {deliveryCharge > 0 && (
+                <div className="flex justify-between text-gray-800">
+                  <span>Delivery / ڈلیوری:</span>
+                  <span>+ Rs. {deliveryCharge.toLocaleString()}</span>
                 </div>
               )}
               <div className="flex justify-between font-extrabold text-sm border-t border-b border-black py-1 my-1">

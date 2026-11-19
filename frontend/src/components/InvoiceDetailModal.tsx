@@ -63,6 +63,7 @@ export interface InvoiceDetailData {
   cash_tendered?: number | null;
   change_returned?: number | null;
   notes?: string | null;
+  transport?: string | null;
   void_reason?: string | null;
   voided_at?: string | null;
   voided_by_user_id?: string | null;
@@ -320,6 +321,9 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
               </div>
               {entityPhone && <p className="text-xs text-slate-600">Phone: {entityPhone}</p>}
               {entityCity && <p className="text-xs text-slate-500">City: {entityCity}</p>}
+              {invoice.transport && invoice.transport.trim() !== '' && (
+                <p className="text-xs text-slate-500">Transport: {invoice.transport}</p>
+              )}
             </div>
 
             <div className="space-y-1 md:text-right">

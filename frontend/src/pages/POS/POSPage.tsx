@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy, Clock, PauseCircle, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy, Clock, PauseCircle, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { productsService } from '../../services/products.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
 import { offlineVaultService } from '../../services/offline-vault.service';
@@ -11,6 +11,7 @@ import { useAuthStore } from '../../store/auth.store';
 import { useReportStore } from '../../store/useReportStore';
 import { printThermalReceipt } from '../../utils/printThermal';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
+import { ProductSizeFilter } from '../../components/Common/ProductSizeFilter';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ShiftAuditModal } from './ShiftAuditModal';
 import { HeldOrdersModal } from './HeldOrdersModal';
@@ -36,10 +37,12 @@ export default function POSPage() {
   const { user } = useAuthStore();
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
 
-  const [searchTerm, setSearchTerm] = useState('');
+  const [productQuery, setProductQuery] = useState('');
+  const [sizeQuery, setSizeQuery] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState<number>(0);
+  const [deliveryCharges, setDeliveryCharges] = useState<number>(0);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [splitCashAmount, setSplitCashAmount] = useState<number | ''>('');
@@ -56,7 +59,6 @@ export default function POSPage() {
   const [offlinePendingCount, setOfflinePendingCount] = useState<number>(0);
 
   const queryClient = useQueryClient();
-  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   // Track pending offline vault records & register auto-sync listener
   useEffect(() => {
@@ -82,21 +84,33 @@ export default function POSPage() {
     return () => window.removeEventListener('online', handleOnline);
   }, [queryClient]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchTerm);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
   // Query Available Products
   const { data: searchResults, isLoading: isSearchLoading } = useQuery({
-    queryKey: ['posProducts', debouncedSearch],
-    queryFn: () => productsService.getPOSAvailableProducts(debouncedSearch),
+    queryKey: ['posProducts'],
+    queryFn: () => productsService.getPOSAvailableProducts(),
   });
-  const products = useMemo(() => {
+
+  const sortedProducts = useMemo(() => {
     return [...(searchResults || [])].sort(compareProducts);
   }, [searchResults]);
+
+  const products = useMemo(() => {
+    return sortedProducts.filter((p) => {
+      if (productQuery.trim()) {
+        const pName = (p.name || '').trim().toLowerCase();
+        if (!pName.includes(productQuery.trim().toLowerCase())) {
+          return false;
+        }
+      }
+      if (sizeQuery.trim()) {
+        const pSize = (p.size || '').trim().toLowerCase();
+        if (!pSize.includes(sizeQuery.trim().toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [sortedProducts, productQuery, sizeQuery]);
 
   // Query Customers for Searchable Dropdown
   const { data: customersData } = useQuery({
@@ -200,6 +214,15 @@ export default function POSPage() {
     });
   };
 
+  const handleEnterSingleMatch = () => {
+    if (products.length === 1) {
+      addToCart(products[0]);
+      setProductQuery('');
+      setSizeQuery('');
+      focusField('pos-product-search', true);
+    }
+  };
+
   const updateCartItem = (productId: string, updates: Partial<CartItem>) => {
     setCart((prev) =>
       prev.map((item) => {
@@ -249,7 +272,8 @@ export default function POSPage() {
     0
   );
   const effectiveDiscount = isCashier ? 0 : discount;
-  const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount);
+  const effectiveDeliveryCharges = Math.max(0, Number(deliveryCharges) || 0);
+  const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount + effectiveDeliveryCharges);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
 
@@ -279,6 +303,7 @@ cart.every((item) => Number(item.quantity) > 0);
           };
         }),
         discount: effectiveDiscount,
+        delivery_charges: effectiveDeliveryCharges,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
         bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
@@ -301,6 +326,8 @@ cart.every((item) => Number(item.quantity) > 0);
       const receiptData = {
         invoice: {
           ...invoice,
+          delivery_charges: effectiveDeliveryCharges,
+          delivery_charge: effectiveDeliveryCharges,
           payment_method: activeMethod,
           bank_name: selectedBank ? selectedBank.bank_name : (invoice.bank_name || undefined),
           paid_amount: effectiveAmountPaid,
@@ -325,6 +352,7 @@ cart.every((item) => Number(item.quantity) > 0);
       // Clear cart and reset state immediately
       setCart([]);
       setDiscount(0);
+      setDeliveryCharges(0);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -379,6 +407,8 @@ cart.every((item) => Number(item.quantity) > 0);
           };
         }),
         discount: effectiveDiscount,
+        delivery_charges: effectiveDeliveryCharges,
+        delivery_charge: effectiveDeliveryCharges,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
         bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
@@ -410,6 +440,7 @@ cart.every((item) => Number(item.quantity) > 0);
 
       setCart([]);
       setDiscount(0);
+      setDeliveryCharges(0);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -434,6 +465,8 @@ cart.every((item) => Number(item.quantity) > 0);
         items: cart,
         subtotal,
         discount,
+        delivery_charges: effectiveDeliveryCharges,
+        delivery_charge: effectiveDeliveryCharges,
         total_amount: total,
         payment_method: paymentMethod,
         split_cash_amount: splitCashAmount !== '' ? Number(splitCashAmount) : null,
@@ -446,6 +479,7 @@ cart.every((item) => Number(item.quantity) > 0);
       setIsHoldConfirmOpen(false);
       setCart([]);
       setDiscount(0);
+      setDeliveryCharges(0);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -478,6 +512,7 @@ cart.every((item) => Number(item.quantity) > 0);
     setCart(order.items || []);
     setSelectedCustomerId(order.customer_id || '');
     setDiscount(Number(order.discount || 0));
+    setDeliveryCharges(Number((order as any).delivery_charges || (order as any).delivery_charge || 0));
     setPaymentMethod(order.payment_method || 'CASH');
     setSplitCashAmount(order.split_cash_amount !== null && order.split_cash_amount !== undefined ? Number(order.split_cash_amount) : '');
     setSplitBankAmount(order.split_bank_amount !== null && order.split_bank_amount !== undefined ? Number(order.split_bank_amount) : '');
@@ -641,6 +676,7 @@ cart.every((item) => Number(item.quantity) > 0);
           if (window.confirm('Clear all items from current cart?')) {
             setCart([]);
             setDiscount(0);
+            setDeliveryCharges(0);
             setAmountPaid('');
             setSplitCashAmount('');
             setSplitBankAmount('');
@@ -779,94 +815,24 @@ return (
               </button>
             </div>
 
-            {/* Product Search Input */}
-            <div className="relative">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                <Search className="h-3.5 w-3.5 text-slate-400" />
-              </div>
-              <input
-                id="pos-product-search"
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search products by name or category... (Type & press Enter to add)"
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-300 bg-white shadow-2xs focus:ring-2 focus:ring-amber-500 focus:outline-none text-xs font-medium dark:bg-[#161925] dark:border-[#23283B] dark:text-white dark:placeholder-slate-500"
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setHighlightedProductIndex(0);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setHighlightedProductIndex((prev) => Math.min(products.length - 1, prev + 1));
-                  } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setHighlightedProductIndex((prev) => Math.max(0, prev - 1));
-                  } else if (e.key === 'Enter') {
-                    e.preventDefault();
-                    const target = products[highlightedProductIndex] || products[0];
-                    if (target) {
-                      addToCart(target);
-                      setSearchTerm('');
-                      setHighlightedProductIndex(0);
-                    }
-                  } else if (e.key === 'Escape') {
-                    if (searchTerm) {
-                      e.preventDefault();
-                      setSearchTerm('');
-                      setHighlightedProductIndex(0);
-                    }
-                  }
-                }}
-              />
-
-              {/* Live Search Suggestions Dropdown (Item sequence: e.g. Abid Gold(8x11), Abid Gold(9x11), Abid Gold(10x14)) */}
-              {searchTerm.trim().length > 0 && products.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1.5 z-40 bg-white dark:bg-[#161925] border border-slate-300 dark:border-[#2a3045] rounded-xl shadow-2xl max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-[#202538]">
-                  {products.slice(0, 15).map((p, pIdx) => {
-                    const isSelected = pIdx === highlightedProductIndex;
-                    const title = formatProductTitle(p.name, p.size);
-                    const stock = Number(p.total_stock_kg ?? p.current_stock ?? 0);
-                    const price = isCashier
-                      ? (p.fixed_retail_price_per_kg || p.sale_price)
-                      : p.sale_price;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          addToCart(p);
-                          setSearchTerm('');
-                          setHighlightedProductIndex(0);
-                        }}
-                        onMouseEnter={() => setHighlightedProductIndex(pIdx)}
-                        className={`w-full px-3.5 py-2 flex items-center justify-between text-left text-xs transition cursor-pointer ${
-                          isSelected
-                            ? 'bg-amber-100/90 dark:bg-amber-950/60 text-amber-950 dark:text-amber-200 font-bold'
-                            : 'hover:bg-slate-50 dark:hover:bg-[#1f2438] text-slate-800 dark:text-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="font-semibold truncate">{title}</span>
-                          {p.name_urdu && <span className="text-[10px] text-slate-400 shrink-0" dir="rtl">{p.name_urdu}</span>}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-[11px] font-mono font-bold text-blue-600 dark:text-blue-400">
-                            Rs. {price} / KG
-                          </span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                            stock > 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
-                          }`}>
-                            {stock} KG
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            {/* Product & Size Cascading Search */}
+            <ProductSizeFilter
+              products={sortedProducts}
+              productQuery={productQuery}
+              sizeQuery={sizeQuery}
+              onProductChange={setProductQuery}
+              onSizeChange={setSizeQuery}
+              onClear={() => {
+                setProductQuery('');
+                setSizeQuery('');
+                focusField('pos-product-search', true);
+              }}
+              onEnterSingleMatch={handleEnterSingleMatch}
+              productInputId="pos-product-search"
+              productInputRef={searchInputRef}
+              showLabels={false}
+              className="w-full"
+            />
           </div>
 
           {/* MIDDLE: Product List Grid (5 Columns Across in Compact Square Boxes) */}
@@ -885,7 +851,8 @@ return (
                     key={p.id}
                     onClick={() => {
                       addToCart(p);
-                      setSearchTerm('');
+                      setProductQuery('');
+                      setSizeQuery('');
                       setHighlightedProductIndex(0);
                     }}
                     className={`border rounded-xl p-2.5 flex flex-col justify-between text-left transition-all duration-150 group relative min-h-[105px] max-h-[120px] overflow-hidden cursor-pointer ${
@@ -992,7 +959,13 @@ return (
 
             {products.length === 0 && !isSearchLoading && (
               <div className="py-8 text-center text-slate-400 text-xs font-medium bg-white rounded-xl border border-dashed border-slate-200 mt-2 dark:bg-[#121520] dark:border-[#23283B] dark:text-slate-400">
-                No products found matching "{searchTerm}"
+                {productQuery || sizeQuery ? (
+                  <span>
+                    No products found matching "{productQuery}{sizeQuery ? ` (${sizeQuery})` : ''}"
+                  </span>
+                ) : (
+                  <span>No products available.</span>
+                )}
               </div>
             )}
             {isSearchLoading && (
@@ -1253,6 +1226,20 @@ className={`w-20 text-right text-xs font-bold rounded py-0.5 px-2 ${
                 isCashier ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700' : 'bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white'
               }`}
               disabled={isCashier}
+              placeholder="0"
+            />
+          </div>
+
+          <div className="flex justify-between items-center text-xs text-slate-600 font-medium dark:text-slate-400">
+            <span className="flex items-center gap-1">
+              Delivery / Freight (Rs)
+            </span>
+            <input
+              type="number"
+              min="0"
+              value={deliveryCharges || ''}
+              onChange={(e) => setDeliveryCharges(Math.max(0, parseFloat(e.target.value) || 0))}
+              className="w-20 text-right text-xs font-bold rounded py-0.5 px-2 bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
               placeholder="0"
             />
           </div>
