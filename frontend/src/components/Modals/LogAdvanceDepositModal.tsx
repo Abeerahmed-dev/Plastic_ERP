@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Wallet, AlertCircle, Loader2, ArrowUpRight } from 'lucide-react';
 import { paymentsService } from '../../services/payments.service';
+import { invalidateCustomerPaymentQueries, invalidateSupplierPaymentQueries } from '../../utils/querySync';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { getCustomers } from '../../services/customers.service';
 import { getSuppliers } from '../../services/suppliers.service';
 import { Customer } from '../../types/customer.types';
 import { Supplier } from '../../types/supplier.types';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 export interface LogAdvanceDepositModalProps {
   isOpen: boolean;
@@ -118,16 +120,13 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
-      queryClient.invalidateQueries({ queryKey: ['supplier-payments'] });
+      invalidateCustomerPaymentQueries(queryClient);
+      invalidateSupplierPaymentQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['liquidity-ledger'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
       if (activeCustomer?.id) {
         queryClient.invalidateQueries({ queryKey: ['customers', activeCustomer.id, 'ledger'] });
       }
+      erpSyncBus.emit('payment');
       onClose();
       if (onSuccess) onSuccess();
     },
@@ -207,22 +206,62 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
               </div>
             )}
 
-          {/* Entity Selection or Details Card */}
-          {entityType === 'customer' ? (
-            !customer ? (
+            {/* Entity Selection or Details Card */}
+            {entityType === 'customer' ? (
+              !customer ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Select Customer
+                  </label>
+                  <select
+                    value={selectedEntityId}
+                    onChange={(e) => setSelectedEntityId(e.target.value)}
+                    className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition bg-white"
+                  >
+                    <option value="">Select a customer...</option>
+                    {customersList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.city ? `(${c.city})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-emerald-50/70 border border-emerald-200 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-600">Customer</p>
+                      <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
+                      {activeCustomer?.city && (
+                        <p className="text-xs text-slate-400 font-mono">({activeCustomer.city})</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="flex items-center justify-end gap-1 text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
+                        <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                        Current Wallet
+                      </span>
+                      <p className="text-base font-extrabold text-emerald-900 font-mono mt-0.5">
+                        {formatCurrency(currentWalletBalance)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : !supplier ? (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Select Customer
+                  Select Supplier
                 </label>
                 <select
                   value={selectedEntityId}
                   onChange={(e) => setSelectedEntityId(e.target.value)}
                   className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition bg-white"
                 >
-                  <option value="">Select a customer...</option>
-                  {customersList.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.city ? `(${c.city})` : ''}
+                  <option value="">Select a supplier...</option>
+                  {suppliersList.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.city ? `(${s.city})` : ''}
                     </option>
                   ))}
                 </select>
@@ -231,16 +270,16 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
               <div className="rounded-xl bg-emerald-50/70 border border-emerald-200 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-slate-600">Customer</p>
-                    <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
-                    {activeCustomer?.city && (
-                      <p className="text-xs text-slate-400 font-mono">({activeCustomer.city})</p>
+                    <p className="text-xs font-semibold text-slate-600">Supplier</p>
+                    <p className="text-sm font-bold text-slate-900">{activeSupplier?.name}</p>
+                    {activeSupplier?.city && (
+                      <p className="text-xs text-slate-400 font-mono">({activeSupplier.city})</p>
                     )}
                   </div>
                   <div className="text-right">
                     <span className="flex items-center justify-end gap-1 text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
                       <Wallet className="w-3.5 h-3.5 text-emerald-700" />
-                      Current Wallet
+                      Current Advance
                     </span>
                     <p className="text-base font-extrabold text-emerald-900 font-mono mt-0.5">
                       {formatCurrency(currentWalletBalance)}
@@ -248,117 +287,77 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
                   </div>
                 </div>
               </div>
-            )
-          ) : !supplier ? (
+            )}
+
+            {/* Amount (PKR) */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Select Supplier
+                Deposit Amount (PKR) <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <span className="text-slate-400 font-bold sm:text-xs">Rs.</span>
+                </div>
+                <input
+                  type="number"
+                  step="any"
+                  min="1"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="block w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3.5 text-sm font-mono font-bold text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                  required
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Date */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Payment Date <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={paymentDate}
+                onChange={(e) => setPaymentDate(e.target.value)}
+                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition bg-white"
+                required
+              />
+            </div>
+
+            {/* Bank / Cash Source */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Bank / Cash Source <span className="text-red-500">*</span>
               </label>
               <select
-                value={selectedEntityId}
-                onChange={(e) => setSelectedEntityId(e.target.value)}
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
                 className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition bg-white"
               >
-                <option value="">Select a supplier...</option>
-                {suppliersList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} {s.city ? `(${s.city})` : ''}
+                <option value="CASH_DRAWER">Cash in Drawer (Physical Cash)</option>
+                {bankAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    Bank: {acc.bank_name} - {acc.account_title || (acc as any).account_name} ({acc.account_number})
                   </option>
                 ))}
               </select>
             </div>
-          ) : (
-            <div className="rounded-xl bg-emerald-50/70 border border-emerald-200 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-600">Supplier</p>
-                  <p className="text-sm font-bold text-slate-900">{activeSupplier?.name}</p>
-                  {activeSupplier?.city && (
-                    <p className="text-xs text-slate-400 font-mono">({activeSupplier.city})</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <span className="flex items-center justify-end gap-1 text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
-                    <Wallet className="w-3.5 h-3.5 text-emerald-700" />
-                    Current Advance
-                  </span>
-                  <p className="text-base font-extrabold text-emerald-900 font-mono mt-0.5">
-                    {formatCurrency(currentWalletBalance)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
-          {/* Amount (PKR) */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Deposit Amount (PKR) <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                <span className="text-slate-400 font-bold sm:text-xs">Rs.</span>
-              </div>
-              <input
-                type="number"
-                step="any"
-                min="1"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                className="block w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3.5 text-sm font-mono font-bold text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-                required
-                autoFocus
+            {/* Notes (Optional) */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Notes (Optional)
+              </label>
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="e.g. Advance deposit for upcoming delivery"
+                className="block w-full rounded-xl border border-slate-300 py-2 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition resize-none"
               />
             </div>
-          </div>
-
-          {/* Date */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Payment Date <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={paymentDate}
-              onChange={(e) => setPaymentDate(e.target.value)}
-              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition bg-white"
-              required
-            />
-          </div>
-
-          {/* Bank / Cash Source */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Bank / Cash Source <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition bg-white"
-            >
-              <option value="CASH_DRAWER">Cash in Drawer (Physical Cash)</option>
-              {bankAccounts.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  Bank: {acc.bank_name} - {acc.account_title || (acc as any).account_name} ({acc.account_number})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Notes (Optional) */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Notes (Optional)
-            </label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Advance deposit for upcoming delivery"
-              className="block w-full rounded-xl border border-slate-300 py-2 px-3 text-sm text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition resize-none"
-            />
-          </div>
 
           </div>
 

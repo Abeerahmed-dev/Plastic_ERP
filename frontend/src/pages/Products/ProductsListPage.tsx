@@ -7,6 +7,7 @@ import { ProductFormModal } from './ProductFormModal';
 import { Product, CreateProductData, UpdateProductData } from '../../types/product.types';
 import { useAuthStore } from '../../store/auth.store';
 import { invalidateProductQueries } from '../../utils/querySync';
+import { erpSyncBus, useErpSync } from '../../utils/erpSyncBus';
 import { ProductSizeFilter } from '../../components/Common/ProductSizeFilter';
 
 export default function ProductsListPage() {
@@ -23,20 +24,26 @@ export default function ProductsListPage() {
 
   const canWrite = isCashier || isOwner || hasPermission('products:write');
 
-  const { data: products = [], isLoading } = useQuery({
+  const { data: products = [], isLoading, refetch } = useQuery({
     queryKey: ['products'],
     queryFn: productsService.getProducts,
   });
 
-  const { data: categories = [] } = useQuery({
+  const { data: categories = [], refetch: refetchCategories } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesService.getCategories,
+  });
+
+  useErpSync(() => {
+    refetch();
+    refetchCategories();
   });
 
   const createMutation = useMutation({
     mutationFn: (data: CreateProductData) => productsService.createProduct(data),
     onSuccess: () => {
       invalidateProductQueries(queryClient);
+      erpSyncBus.emit('product');
       setIsModalOpen(false);
     },
   });
@@ -46,6 +53,7 @@ export default function ProductsListPage() {
       productsService.updateProduct(id, data),
     onSuccess: () => {
       invalidateProductQueries(queryClient);
+      erpSyncBus.emit('product');
       setIsModalOpen(false);
       setEditingProduct(null);
     },

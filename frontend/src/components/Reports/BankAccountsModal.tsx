@@ -5,6 +5,7 @@ import { bankAccountsService } from '../../services/bank-accounts.service';
 import { BankAccount } from '../../types/bank-account.types';
 import { BankAccountDetailView } from './BankAccountDetailView';
 import { TransferFundsModal } from '../Modals/TransferFundsModal';
+import { erpSyncBus, useErpSync } from '../../utils/erpSyncBus';
 
 interface BankAccountsModalProps {
   isOpen: boolean;
@@ -24,10 +25,16 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
   const [ibanDetails, setIbanDetails] = useState('');
   const [initialBalance, setInitialBalance] = useState<number | ''>(0);
 
-  const { data: accounts = [], isLoading } = useQuery({
+  const { data: accounts = [], isLoading, refetch } = useQuery({
     queryKey: ['bank-accounts'],
     queryFn: bankAccountsService.getBankAccounts,
     enabled: isOpen,
+  });
+
+  useErpSync(() => {
+    if (isOpen) {
+      refetch();
+    }
   });
 
   const totalCombinedBalance = accounts.reduce((sum, acc) => sum + Number(acc.current_balance || 0), 0);
@@ -36,8 +43,10 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
     mutationFn: (data: any) => bankAccountsService.createBankAccount(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      erpSyncBus.emit('bank-account');
       resetForm();
     },
   });
@@ -46,8 +55,10 @@ export const BankAccountsModal = ({ isOpen, onClose }: BankAccountsModalProps) =
     mutationFn: ({ id, data }: { id: string; data: any }) => bankAccountsService.updateBankAccount(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      erpSyncBus.emit('bank-account');
       resetForm();
     },
   });

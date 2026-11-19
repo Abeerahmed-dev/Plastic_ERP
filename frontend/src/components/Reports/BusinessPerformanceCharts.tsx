@@ -22,6 +22,7 @@ import {
 } from 'recharts';
 import api from '../../services/api';
 import { reportsService } from '../../services/reports.service';
+import { useErpSync } from '../../utils/erpSyncBus';
 
 export type FilterOption = 'this_month' | 'today' | 'yesterday' | 'last_7_days' | 'custom';
 
@@ -252,6 +253,12 @@ export const BusinessPerformanceCharts: React.FC = () => {
     },
     refetchInterval: 5000,
     refetchOnWindowFocus: true,
+  });
+
+  useErpSync(() => {
+    refetchPnL();
+    refetchMargin();
+    refetchExpenses();
   });
 
   const isLoading = isPnLLoading || isMarginLoading || isExpensesLoading;

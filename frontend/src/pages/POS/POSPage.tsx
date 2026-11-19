@@ -17,6 +17,8 @@ import { ShiftAuditModal } from './ShiftAuditModal';
 import { HeldOrdersModal } from './HeldOrdersModal';
 import { HoldConfirmModal } from './HoldConfirmModal';
 import { compareProducts, formatProductTitle } from '../../utils/productSorting';
+import { invalidateSalesInvoiceQueries, invalidateAllDomains } from '../../utils/querySync';
+import { erpSyncBus, useErpSync } from '../../utils/erpSyncBus';
 
 interface CartItem {
   product_id: string;
@@ -73,7 +75,8 @@ export default function POSPage() {
           const newCount = await offlineVaultService.getPendingCount();
           setOfflinePendingCount(newCount);
           toast.success('Offline invoices synchronized successfully!');
-          queryClient.invalidateQueries({ queryKey: ['posProducts'] });
+          await invalidateAllDomains(queryClient);
+          erpSyncBus.emit('offline-sync');
         }
       } catch (err) {
         console.error('Offline auto-sync error:', err);
@@ -83,6 +86,13 @@ export default function POSPage() {
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, [queryClient]);
+
+  // Subscribe to cross-page mutations to keep POS products, cash tally, and metrics synchronized
+  useErpSync(() => {
+    queryClient.invalidateQueries({ queryKey: ['posProducts'] });
+    queryClient.invalidateQueries({ queryKey: ['todayCashTally'] });
+    queryClient.invalidateQueries({ queryKey: ['shiftAudit'] });
+  });
 
   // Query Available Products
   const { data: searchResults, isLoading: isSearchLoading } = useQuery({
@@ -310,7 +320,7 @@ cart.every((item) => Number(item.quantity) > 0);
         split_cash_amount: isSplit ? effectiveSplitCash : undefined,
         split_bank_amount: isSplit ? effectiveSplitBank : undefined,
       }),
-    onSuccess: (invoice: any) => {
+    onSuccess: async (invoice: any) => {
       const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
       const selectedBank = bankAccounts.find((b: any) => b.id === selectedBankAccountId);
       const activeMethod = paymentMethod;
@@ -359,21 +369,9 @@ cart.every((item) => Number(item.quantity) > 0);
       setSelectedCustomerId('');
       setSelectedBankAccountId('');
 
-      // Refresh stock and metrics immediately
-      queryClient.invalidateQueries({ queryKey: ['products'] });
-      queryClient.invalidateQueries({ queryKey: ['posProducts'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboardMetrics'] });
-      queryClient.invalidateQueries({ queryKey: ['todayCashTally'] });
-      queryClient.invalidateQueries({ queryKey: ['shiftAudit'] });
-      queryClient.invalidateQueries({ queryKey: ['pnlReport'] });
-      queryClient.invalidateQueries({ queryKey: ['cashLedger'] });
-      queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
-      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
-      queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      useReportStore.getState().fetchLiquidityLedger();
-      useReportStore.getState().fetchAllReports();
+      // Refresh stock, invoices, customers, bank accounts, and metrics immediately across all pages
+      await invalidateSalesInvoiceQueries(queryClient);
+      erpSyncBus.emit('pos', { invoice });
 
       toast.success(`Sale ${invoice.invoice_number || 'POS'} completed successfully!`);
     },

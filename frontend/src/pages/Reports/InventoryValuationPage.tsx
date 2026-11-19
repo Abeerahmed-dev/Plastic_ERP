@@ -30,6 +30,8 @@ import { UpdateThresholdModal } from './UpdateThresholdModal';
 import { ProductFormModal } from '../Products/ProductFormModal';
 import { LowStockWidget } from '../../components/Dashboard/LowStockWidget';
 import { ProductSizeFilter } from '../../components/Common/ProductSizeFilter';
+import { invalidateProductQueries } from '../../utils/querySync';
+import { erpSyncBus, useErpSync } from '../../utils/erpSyncBus';
 
 interface ProductGroup {
   groupKey: string;
@@ -64,8 +66,8 @@ export default function InventoryValuationPage() {
   const createProductMutation = useMutation({
     mutationFn: (data: any) => productsService.createProduct(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inventoryValuation'] });
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      invalidateProductQueries(queryClient);
+      erpSyncBus.emit('product');
       setIsAddProductOpen(false);
     },
   });
@@ -82,6 +84,11 @@ export default function InventoryValuationPage() {
   } = useQuery<InventoryValuationData>({
     queryKey: ['inventoryValuation'],
     queryFn: () => reportsService.getInventoryValuation(),
+  });
+
+  // Automatically refresh inventory valuation on any mutation across the system
+  useErpSync(() => {
+    refetch();
   });
 
   const filterProductItems = useMemo(() => {

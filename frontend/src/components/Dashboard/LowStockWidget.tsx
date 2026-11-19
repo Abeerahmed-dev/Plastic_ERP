@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ShoppingCart, RefreshCw, CheckCircle2, ArrowRight } from 'lucide-react';
 import { inventoryService, LowStockVariant } from '../../services/inventory.service';
+import { useErpSync } from '../../utils/erpSyncBus';
 
 export const LowStockWidget: React.FC = () => {
   const navigate = useNavigate();
@@ -11,6 +12,10 @@ export const LowStockWidget: React.FC = () => {
     queryKey: ['lowStockAlerts'],
     queryFn: () => inventoryService.getLowStock(),
     refetchInterval: 30000, // auto-refresh every 30s
+  });
+
+  useErpSync(() => {
+    refetch();
   });
 
   const lowStockItems = data || [];

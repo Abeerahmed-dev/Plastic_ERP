@@ -15,6 +15,7 @@ import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 import { getCustomers } from '../../services/customers.service';
 import { Pagination } from '../../components/Common/Pagination';
 import { printThermalReceipt } from '../../utils/printThermal';
+import { useErpSync } from '../../utils/erpSyncBus';
 
 interface InvoicesListPageProps {
   defaultType?: 'erp' | 'pos' | 'all';
@@ -67,6 +68,11 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
   const { data: allHeldOrders = [], isLoading: isLoadingHeldOrders, refetch: refetchHeldOrders } = useQuery({
     queryKey: ['posHeldOrders'],
     queryFn: () => posService.getHeldOrders(),
+  });
+
+  useErpSync(() => {
+    refetch();
+    refetchHeldOrders();
   });
 
   const erpHeldOrders = useMemo(() => {

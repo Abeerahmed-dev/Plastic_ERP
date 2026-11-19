@@ -3,13 +3,15 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { X, Loader2, AlertCircle } from 'lucide-react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../../services/payments.service';
 import { getCustomers } from '../../services/customers.service';
 import { getSuppliers } from '../../services/suppliers.service';
 import { invoicesService } from '../../services/invoices.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { useAuthStore } from '../../store/auth.store';
+import { invalidateCustomerPaymentQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 const paymentSchema = z.object({
   customer_id: z.string().uuid('Please select a customer'),
@@ -80,6 +82,7 @@ export const PaymentFormModal = ({
   customerId,
   invoiceId,
 }: PaymentFormModalProps) => {
+  const qc = useQueryClient();
   const { user } = useAuthStore();
   const isCashier = (user?.roleName || user?.role || '').toUpperCase() === 'CASHIER';
   const [serverError, setServerError] = useState<string | null>(null);
@@ -120,6 +123,8 @@ export const PaymentFormModal = ({
     }),
     onSuccess: () => {
       setServerError(null);
+      invalidateCustomerPaymentQueries(qc);
+      erpSyncBus.emit('payment', { type: 'customer', customerId });
       onSuccess?.();
     },
     onError: (err: any) => {

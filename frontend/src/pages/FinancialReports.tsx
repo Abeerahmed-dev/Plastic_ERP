@@ -28,6 +28,7 @@ import { PdcLedgerModal } from '../components/Reports/PdcLedgerModal';
 import { IssuedPdcLedgerModal } from '../components/Reports/IssuedPdcLedgerModal';
 import { BankAccountsModal } from '../components/Reports/BankAccountsModal';
 import { TransferFundsModal } from '../components/Modals/TransferFundsModal';
+import { useErpSync } from '../utils/erpSyncBus';
 
 interface LiquidityModalData {
   type: 'receivables' | 'payables' | 'unsold-stock' | 'customer-advances' | 'supplier-advances' | 'pending-expenses';
@@ -58,6 +59,10 @@ export default function FinancialReports() {
   const [isIssuedPdcModalOpen, setIsIssuedPdcModalOpen] = useState(false);
   const [isBankAccountsModalOpen, setIsBankAccountsModalOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+
+  useErpSync(() => {
+    fetchAllReports(true);
+  });
 
   useEffect(() => {
     fetchAllReports();

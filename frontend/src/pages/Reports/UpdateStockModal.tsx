@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { purchasesService, StockUpdatePurchase } from '../../services/purchases.service';
+import { invalidateProductQueries, invalidatePurchaseQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface UpdateStockModalProps {
   isOpen: boolean;
@@ -132,12 +134,9 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['inventoryValuation'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['recentPurchasesForStockUpdate'] });
-      qc.invalidateQueries({ queryKey: ['expenses'] });
-      qc.invalidateQueries({ queryKey: ['reports'] });
+      invalidateProductQueries(qc);
+      invalidatePurchaseQueries(qc);
+      erpSyncBus.emit('stock');
       toast.success('Stock delivery charges and selling prices updated successfully!');
       onClose();
     },

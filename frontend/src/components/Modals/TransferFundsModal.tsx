@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, ArrowRightLeft, Building2, Wallet, AlertCircle, CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { bankAccountsService } from '../../services/bank-accounts.service';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface TransferFundsModalProps {
   isOpen: boolean;
@@ -92,9 +93,11 @@ export const TransferFundsModal: React.FC<TransferFundsModalProps> = ({ isOpen, 
     onSuccess: (res) => {
       toast.success(res.message || 'Funds transferred successfully');
       queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
       queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
       queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      erpSyncBus.emit('bank-account');
       onSuccess?.();
       handleClose();
     },

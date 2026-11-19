@@ -23,6 +23,8 @@ import {
 } from '../../services/expenses.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { toast, handleApiError } from '../../utils/toast';
+import { invalidateExpenseQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface ExpenseFormModalProps {
   isOpen: boolean;
@@ -161,11 +163,8 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({
   const createMutation = useMutation({
     mutationFn: (data: CreateExpenseData) => expensesService.createExpense(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['outstanding-expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
-      queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      invalidateExpenseQueries(queryClient);
+      erpSyncBus.emit('expense');
       toast.success('Operating expense recorded successfully');
       onClose();
     },
@@ -179,11 +178,8 @@ export const ExpenseFormModal: React.FC<ExpenseFormModalProps> = ({
     mutationFn: ({ id, data }: { id: string; data: any }) =>
       expensesService.payExpense(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['outstanding-expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['bankAccounts'] });
-      queryClient.invalidateQueries({ queryKey: ['cash-drawer-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      invalidateExpenseQueries(queryClient);
+      erpSyncBus.emit('expense');
       toast.success('Expense payment recorded successfully');
       onClose();
     },

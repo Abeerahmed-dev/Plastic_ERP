@@ -18,6 +18,7 @@ import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDepositModal';
 import { ProcessCashRefundModal } from '../../components/Modals/ProcessCashRefundModal';
 import CustomerFormModal from './CustomerFormModal';
+import { useErpSync } from '../../utils/erpSyncBus';
 
 function formatRs(n: number | string | undefined | null) {
   if (n === undefined || n === null) return 'Rs. 0';
@@ -47,6 +48,10 @@ export default function CustomerDetailPage() {
     queryKey: ['customers', id],
     queryFn: () => getCustomer(id!),
     enabled: !!id,
+  });
+
+  useErpSync(() => {
+    refetch();
   });
 
   const advanceCredit = Number(customer?.advance_credit || customer?.advance || 0);

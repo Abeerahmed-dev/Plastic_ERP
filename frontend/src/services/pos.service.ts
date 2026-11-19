@@ -1,4 +1,6 @@
 import api from './api';
+import { invalidateSalesInvoiceQueries } from '../utils/querySync';
+import { erpSyncBus } from '../utils/erpSyncBus';
 import { Invoice } from '../types/invoice.types';
 
 export interface POSCheckoutItem {
@@ -98,6 +100,8 @@ export const posService = {
 
   rollbackSale: async (invoiceId: string, reason?: string): Promise<any> => {
     const response = await api.post(`/invoices/${invoiceId}/void`, { voidReason: reason || 'POS Print Cancelled by Cashier' });
+    await invalidateSalesInvoiceQueries();
+    await erpSyncBus.emit('void', { invoiceId, reason });
     return response.data;
   },
 };

@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
 import { useAuthStore } from '../store/auth.store';
+import { useReportStore } from '../store/useReportStore';
+import { useErpSync } from '../utils/erpSyncBus';
 import CashierDashboard from './CashierDashboard';
 import { LiquidityLedger } from '../components/Reports/LiquidityLedger';
 import { BusinessPerformanceCharts } from '../components/Reports/BusinessPerformanceCharts';
@@ -8,6 +11,14 @@ import { LowStockWidget } from '../components/Dashboard/LowStockWidget';
 export const Dashboard = () => {
   const { user } = useAuthStore();
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
+
+  useEffect(() => {
+    useReportStore.getState().fetchAllReports(true);
+  }, []);
+
+  useErpSync(() => {
+    useReportStore.getState().fetchAllReports(true);
+  });
 
   if (isCashier) {
     return <CashierDashboard />;

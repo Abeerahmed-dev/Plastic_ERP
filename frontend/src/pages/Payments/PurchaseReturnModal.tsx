@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { X, RotateCcw, AlertTriangle, Loader2, ShieldAlert } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { purchasesService } from '../../services/purchases.service';
+import { invalidatePurchaseQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface Props {
   parentInvoiceId: string;
@@ -100,10 +102,8 @@ export const PurchaseReturnModal = ({ parentInvoiceId, isOpen = true, onClose, o
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['supplier-payments'] });
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      qc.invalidateQueries({ queryKey: ['suppliers'] });
+      invalidatePurchaseQueries(qc);
+      erpSyncBus.emit('purchase');
       onSuccess();
       onClose();
     },

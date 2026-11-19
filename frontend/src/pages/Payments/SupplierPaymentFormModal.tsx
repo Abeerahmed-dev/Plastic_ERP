@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -8,6 +7,7 @@ import { supplierPaymentsService } from '../../services/supplier-payments.servic
 import { getSuppliers } from '../../services/suppliers.service';
 import { purchasesService } from '../../services/purchases.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
+import { invalidateSupplierPaymentQueries } from '../../utils/querySync';
 
 const schema = z.object({
   supplier_id: z.string().min(1, 'Supplier / Party is required'),
@@ -41,7 +41,7 @@ export const SupplierPaymentFormModal = ({
   const qc = useQueryClient();
 
   const { data: suppliersResponse } = useQuery({ queryKey: ['suppliers'], queryFn: () => getSuppliers({ limit: 100 }) });
-  
+
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -60,8 +60,8 @@ export const SupplierPaymentFormModal = ({
   const selectedInvoiceId = watch('purchase_invoice_id');
   const selectedPaymentMethod = watch('payment_method');
 
-  const { data: invoicesResponse } = useQuery({ 
-    queryKey: ['purchases', { supplier_id: selectedSupplierId, status: 'UNPAID,PARTIAL' }], 
+  const { data: invoicesResponse } = useQuery({
+    queryKey: ['purchases', { supplier_id: selectedSupplierId, status: 'UNPAID,PARTIAL' }],
     queryFn: () => purchasesService.getInvoices({ supplier_id: selectedSupplierId }),
     enabled: !!selectedSupplierId
   });
@@ -121,61 +121,6 @@ export const SupplierPaymentFormModal = ({
     }
   };
 
-  const focusField = (fieldId: string) => {
-    setTimeout(() => {
-      const el = document.getElementById(fieldId) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
-      if (el) {
-        el.focus();
-        if ('select' in el && typeof el.select === 'function') {
-          el.select();
-        }
-      }
-    }, 50);
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      if (supplierId || purchaseInvoiceId) {
-        focusField('supplier-payment-amount');
-      } else {
-        focusField('supplier-payment-party');
-      }
-    }
-  }, [isOpen, supplierId, purchaseInvoiceId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        const form = document.getElementById('payment-form') as HTMLFormElement | null;
-        if (form) form.requestSubmit();
-        return;
-      }
-      if (e.key === 'F9') {
-        e.preventDefault();
-        const form = document.getElementById('payment-form') as HTMLFormElement | null;
-        if (form) form.requestSubmit();
-        return;
-      }
-      if (e.altKey && (e.key === 'c' || e.key === 'C')) {
-        e.preventDefault();
-        handleClearFullBalance();
-        focusField('supplier-payment-amount');
-        return;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, handleClearFullBalance]);
-
   const mutation = useMutation({
     mutationFn: (data: FormData) => {
       const cleanAmount = parseFloat(String(data.amount ?? '0').replace(/,/g, '').trim()) || 0;
@@ -189,12 +134,8 @@ export const SupplierPaymentFormModal = ({
       } as any);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['supplier-payments'] });
-      qc.invalidateQueries({ queryKey: ['suppliers'] });
-      qc.invalidateQueries({ queryKey: ['purchases'] });
+      invalidateSupplierPaymentQueries(qc);
       qc.invalidateQueries({ queryKey: ['issuedPdc'] });
-      qc.invalidateQueries({ queryKey: ['liquidityLedger'] });
-      qc.invalidateQueries({ queryKey: ['reports'] });
       onSuccess?.();
       onClose();
     },
@@ -230,18 +171,8 @@ export const SupplierPaymentFormModal = ({
             className="space-y-5"
           >
             <div>
-              <label htmlFor="supplier-payment-party" className="mb-1.5 block text-sm font-medium text-slate-700">Party</label>
-              <select
-                id="supplier-payment-party"
-                {...register('supplier_id')}
-                className={inputCls(!!errors.supplier_id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    focusField('supplier-payment-invoice');
-                  }
-                }}
-              >
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Party</label>
+              <select {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
                 <option value="">Select a party...</option>
                 {suppliersResponse?.data.map((c) => (
                   <option key={c.id} value={c.id}>{c.name} {c.city ? `(${c.city})` : ''}</option>
@@ -252,20 +183,10 @@ export const SupplierPaymentFormModal = ({
 
             {selectedSupplierId && (
               <div>
-                <label htmlFor="supplier-payment-invoice" className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Select Purchase Bill to Settle (Optional)
                 </label>
-                <select
-                  id="supplier-payment-invoice"
-                  {...register('purchase_invoice_id')}
-                  className={inputCls(!!errors.purchase_invoice_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      focusField('supplier-payment-date');
-                    }
-                  }}
-                >
+                <select {...register('purchase_invoice_id')} className={inputCls(!!errors.purchase_invoice_id)}>
                   <option value="">-- No Specific Bill (On-Account / Closing Balance) --</option>
                   {invoices.map((invoice: any) => (
                     <option key={invoice.id} value={invoice.id}>
@@ -297,19 +218,8 @@ export const SupplierPaymentFormModal = ({
             )}
 
             <div>
-              <label htmlFor="supplier-payment-date" className="mb-1.5 block text-sm font-medium text-slate-700">Payment Date</label>
-              <input
-                id="supplier-payment-date"
-                type="date"
-                {...register('payment_date')}
-                className={inputCls(!!errors.payment_date)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    focusField('supplier-payment-amount');
-                  }
-                }}
-              />
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Payment Date</label>
+              <input type="date" {...register('payment_date')} className={inputCls(!!errors.payment_date)} />
               {errors.payment_date && <p className="mt-1 text-xs text-red-600">{errors.payment_date.message}</p>}
             </div>
 
@@ -330,7 +240,7 @@ export const SupplierPaymentFormModal = ({
             ) : (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label htmlFor="supplier-payment-amount" className="block text-sm font-medium text-slate-700">Amount</label>
+                  <label className="block text-sm font-medium text-slate-700">Amount</label>
                   {selectedBill ? (
                     <span className="text-xs font-bold text-slate-600">
                       Balance Due: <span className="font-mono text-blue-700 font-extrabold">PKR {selectedBillBalance.toFixed(2)}</span>
@@ -343,25 +253,18 @@ export const SupplierPaymentFormModal = ({
                 </div>
                 <div className="relative w-full">
                   <input
-                    id="supplier-payment-amount"
                     type="number"
                     step="0.01"
                     min="0.01"
                     max={selectedBill ? Math.max(0, (selectedBill as any).balance_due) : undefined}
                     {...register('amount')}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        focusField('supplier-payment-method');
-                      }
-                    }}
                     className={inputCls(!!errors.amount) + ((selectedBill && selectedBillBalance > 0) || (!selectedBill && supplierOutstanding > 0) ? ' pr-36' : '')}
                   />
                   {((selectedBill && selectedBillBalance > 0) || (!selectedBill && supplierOutstanding > 0)) && (
                     <button
                       type="button"
                       onClick={handleClearFullBalance}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 px-2.5 py-1 rounded-lg border border-blue-300 transition-all cursor-pointer shadow-2xs"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200 transition-all cursor-pointer shadow-2xs"
                     >
                       Clear Full Balance
                     </button>
@@ -372,24 +275,8 @@ export const SupplierPaymentFormModal = ({
             )}
 
             <div>
-              <label htmlFor="supplier-payment-method" className="mb-1.5 block text-sm font-medium text-slate-700">Payment Method</label>
-              <select
-                id="supplier-payment-method"
-                {...register('payment_method')}
-                className={inputCls(!!errors.payment_method)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (selectedPaymentMethod === 'BANK_TRANSFER') {
-                      focusField('supplier-payment-bank');
-                    } else if (selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') {
-                      focusField('supplier-payment-cheque-no');
-                    } else {
-                      focusField('supplier-payment-notes');
-                    }
-                  }
-                }}
-              >
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Payment Method</label>
+              <select {...register('payment_method')} className={inputCls(!!errors.payment_method)}>
                 <option value="CASH">Cash</option>
                 <option value="BANK_TRANSFER">Bank Transfer</option>
                 <option value="CHEQUE">Post-Dated Cheque (PDC)</option>
@@ -398,20 +285,10 @@ export const SupplierPaymentFormModal = ({
 
             {(selectedPaymentMethod === 'BANK_TRANSFER' || selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') && (
               <div>
-                <label htmlFor="supplier-payment-bank" className="mb-1.5 block text-sm font-medium text-slate-700">
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Select Source Bank Account <span className="text-red-500">*</span>
                 </label>
-                <select
-                  id="supplier-payment-bank"
-                  {...register('bank_account_id')}
-                  className={inputCls(!!errors.bank_account_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      focusField('supplier-payment-notes');
-                    }
-                  }}
-                >
+                <select {...register('bank_account_id')} className={inputCls(!!errors.bank_account_id)}>
                   <option value="">Select Bank Account...</option>
                   {bankAccounts.map((acc) => (
                     <option key={acc.id} value={acc.id}>
@@ -430,34 +307,20 @@ export const SupplierPaymentFormModal = ({
                 </h4>
                 <div className="space-y-3">
                   <div>
-                    <label htmlFor="supplier-payment-cheque-no" className="mb-1 block text-xs font-medium text-slate-700">Cheque Number</label>
+                    <label className="mb-1 block text-xs font-medium text-slate-700">Cheque Number</label>
                     <input
-                      id="supplier-payment-cheque-no"
                       type="text"
                       {...register('cheque_number')}
                       placeholder="e.g. CHQ-10022"
                       className={inputCls(!!errors.cheque_number)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          focusField('supplier-payment-cheque-date');
-                        }
-                      }}
                     />
                   </div>
                   <div>
-                    <label htmlFor="supplier-payment-cheque-date" className="mb-1 block text-xs font-medium text-slate-700">Cheque Due Date</label>
+                    <label className="mb-1 block text-xs font-medium text-slate-700">Cheque Due Date</label>
                     <input
-                      id="supplier-payment-cheque-date"
                       type="date"
                       {...register('cheque_due_date')}
                       className={inputCls(!!errors.cheque_due_date)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          focusField('supplier-payment-bank');
-                        }
-                      }}
                     />
                   </div>
                 </div>
@@ -465,14 +328,8 @@ export const SupplierPaymentFormModal = ({
             )}
 
             <div>
-              <label htmlFor="supplier-payment-notes" className="mb-1.5 block text-sm font-medium text-slate-700">Notes / Reference</label>
-              <textarea
-                id="supplier-payment-notes"
-                {...register('notes')}
-                rows={2}
-                className={inputCls()}
-                placeholder="E.g., Cheque number or memo"
-              />
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Notes / Reference</label>
+              <textarea {...register('notes')} rows={2} className={inputCls()} placeholder="E.g., Cheque number or memo" />
             </div>
           </form>
         </div>

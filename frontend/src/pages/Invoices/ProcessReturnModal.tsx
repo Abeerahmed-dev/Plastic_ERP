@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { X, RotateCcw, AlertTriangle, Loader2, ShieldAlert } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoicesService } from '../../services/invoices.service';
+import { invalidateSalesInvoiceQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface Props {
   parentInvoiceId: string;
@@ -81,10 +83,8 @@ export const ProcessReturnModal = ({ parentInvoiceId, isOpen, onClose, onSuccess
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      qc.invalidateQueries({ queryKey: ['pnlReport'] });
-      qc.invalidateQueries({ queryKey: ['customers'] });
+      invalidateSalesInvoiceQueries(qc);
+      erpSyncBus.emit('invoice');
       onSuccess();
       onClose();
     },

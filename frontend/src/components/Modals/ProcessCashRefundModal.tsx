@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, ArrowDownLeft, Wallet, AlertCircle, Loader2, Link2 } from 'lucide-react';
 import { paymentsService } from '../../services/payments.service';
+import { invalidateCustomerPaymentQueries, invalidateSupplierPaymentQueries } from '../../utils/querySync';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { getCustomers, getCustomerRefundableCredits } from '../../services/customers.service';
 import { getSuppliers, getSupplierRefundableCredits } from '../../services/suppliers.service';
 import { Customer } from '../../types/customer.types';
 import { Supplier } from '../../types/supplier.types';
 import { RefundableCreditSource } from '../../types/payment.types';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 export interface ProcessCashRefundModalProps {
   isOpen: boolean;
@@ -222,13 +224,9 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
-      queryClient.invalidateQueries({ queryKey: ['supplier-payments'] });
+      invalidateCustomerPaymentQueries(queryClient);
+      invalidateSupplierPaymentQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['liquidity-ledger'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['refundable-credits'] });
       if (activeCustomer?.id) {
         queryClient.invalidateQueries({ queryKey: ['customers', activeCustomer.id, 'ledger'] });
@@ -236,6 +234,7 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
       if (activeSupplier?.id) {
         queryClient.invalidateQueries({ queryKey: ['suppliers', activeSupplier.id, 'ledger'] });
       }
+      erpSyncBus.emit('payment');
       onClose();
       if (onSuccess) onSuccess();
     },
@@ -265,8 +264,7 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
 
     if (numAmount > effectiveMaxCredit) {
       setError(
-        `Refund amount cannot exceed available credit of PKR ${effectiveMaxCredit.toLocaleString()}${
-          selectedSource ? ` on ${selectedSource.reference}` : ''
+        `Refund amount cannot exceed available credit of PKR ${effectiveMaxCredit.toLocaleString()}${selectedSource ? ` on ${selectedSource.reference}` : ''
         }.`
       );
       return;
@@ -334,12 +332,58 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
               </div>
             )}
 
-          {/* Entity Selection or Details Card */}
-          {entityType === 'customer' ? (
-            !customer ? (
+            {/* Entity Selection or Details Card */}
+            {entityType === 'customer' ? (
+              !customer ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Select Customer (with Wallet Balance)
+                  </label>
+                  <select
+                    value={selectedEntityId}
+                    onChange={(e) => {
+                      setSelectedEntityId(e.target.value);
+                      setAmount('');
+                    }}
+                    className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
+                  >
+                    {availableCustomers.length === 0 ? (
+                      <option value="">No customers currently have advance wallet credit</option>
+                    ) : (
+                      availableCustomers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.city ? `(${c.city})` : ''} — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              ) : (
+                <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-600">Customer</p>
+                      <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
+                      {activeCustomer?.city && (
+                        <p className="text-xs text-slate-400 font-mono">({activeCustomer.city})</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="flex items-center justify-end gap-1 text-[11px] font-bold text-amber-800 uppercase tracking-wider">
+                        <Wallet className="w-3.5 h-3.5 text-amber-700" />
+                        Advance Wallet
+                      </span>
+                      <p className="text-base font-extrabold text-amber-900 font-mono mt-0.5">
+                        {formatCurrency(availableAdvance)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : !supplier ? (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Select Customer (with Wallet Balance)
+                  Select Supplier (with Advance Balance)
                 </label>
                 <select
                   value={selectedEntityId}
@@ -349,12 +393,12 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
                   }}
                   className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
                 >
-                  {availableCustomers.length === 0 ? (
-                    <option value="">No customers currently have advance wallet credit</option>
+                  {availableSuppliers.length === 0 ? (
+                    <option value="">No suppliers currently have advance wallet credit</option>
                   ) : (
-                    availableCustomers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.city ? `(${c.city})` : ''} — Wallet: {formatCurrency(Number(c.advance_credit || (c as any).advance || 0))}
+                    availableSuppliers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} {s.city ? `(${s.city})` : ''} — Wallet: {formatCurrency(Number((s as any).advance_payable || 0))}
                       </option>
                     ))
                   )}
@@ -364,10 +408,10 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
               <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-slate-600">Customer</p>
-                    <p className="text-sm font-bold text-slate-900">{activeCustomer?.name}</p>
-                    {activeCustomer?.city && (
-                      <p className="text-xs text-slate-400 font-mono">({activeCustomer.city})</p>
+                    <p className="text-xs font-semibold text-slate-600">Supplier</p>
+                    <p className="text-sm font-bold text-slate-900">{activeSupplier?.name}</p>
+                    {activeSupplier?.city && (
+                      <p className="text-xs text-slate-400 font-mono">({activeSupplier.city})</p>
                     )}
                   </div>
                   <div className="text-right">
@@ -381,213 +425,167 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
                   </div>
                 </div>
               </div>
-            )
-          ) : !supplier ? (
+            )}
+
+            {/* Refund Source Dropdown (Traceable Credit Source) */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Select Supplier (with Advance Balance)
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                  <Link2 className="w-3.5 h-3.5 text-blue-600" />
+                  Select Credit Source to Refund <span className="text-red-500">*</span>
+                </label>
+                {isLoadingCredits && (
+                  <span className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Scanning ledger...
+                  </span>
+                )}
+              </div>
               <select
-                value={selectedEntityId}
-                onChange={(e) => {
-                  setSelectedEntityId(e.target.value);
-                  setAmount('');
-                }}
-                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
+                value={selectedSourceId}
+                onChange={handleSourceChange}
+                disabled={isLoadingCredits || creditSources.length === 0}
+                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white disabled:bg-slate-50 disabled:text-slate-400 font-medium"
+                required
               >
-                {availableSuppliers.length === 0 ? (
-                  <option value="">No suppliers currently have advance wallet credit</option>
+                {creditSources.length === 0 ? (
+                  <option value="">
+                    {isLoadingCredits
+                      ? 'Scanning ledger for refundable credits...'
+                      : 'No specific refundable credits found'}
+                  </option>
                 ) : (
-                  availableSuppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} {s.city ? `(${s.city})` : ''} — Wallet: {formatCurrency(Number((s as any).advance_payable || 0))}
+                  creditSources.map((src) => (
+                    <option key={src.id} value={src.id}>
+                      {formatCreditOptionText(src)}
                     </option>
                   ))
                 )}
               </select>
-            </div>
-          ) : (
-            <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-600">Supplier</p>
-                  <p className="text-sm font-bold text-slate-900">{activeSupplier?.name}</p>
-                  {activeSupplier?.city && (
-                    <p className="text-xs text-slate-400 font-mono">({activeSupplier.city})</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <span className="flex items-center justify-end gap-1 text-[11px] font-bold text-amber-800 uppercase tracking-wider">
-                    <Wallet className="w-3.5 h-3.5 text-amber-700" />
-                    Advance Wallet
+              {selectedSource && (
+                <div className="mt-1.5 px-2.5 py-1.5 bg-blue-50/70 border border-blue-100 rounded-lg flex items-center justify-between text-[11px]">
+                  <span className="text-blue-900">
+                    Locked to: <strong className="font-semibold">{selectedSource.type === 'OVERPAID_INVOICE' ? 'Invoice' : 'Advance'} ({selectedSource.reference})</strong>
                   </span>
-                  <p className="text-base font-extrabold text-amber-900 font-mono mt-0.5">
-                    {formatCurrency(availableAdvance)}
-                  </p>
+                  <span className="font-mono font-bold text-blue-700">
+                    Cap: Rs. {Number(selectedSource.available_credit).toLocaleString('en-PK')}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Amount (PKR) with auto-fill & max safety check */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+                <label className="text-xs font-bold text-slate-700">
+                  Refund Amount (PKR) <span className="text-red-500">*</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  {dynamicSafetyCap > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(dynamicSafetyCap.toString())}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+                    >
+                      Max Capped ({formatCurrency(dynamicSafetyCap)})
+                    </button>
+                  )}
+                  <span className={`text-[11px] font-bold ${selectedOutflowBalance <= 0 ? 'text-red-600' : 'text-slate-500'}`}>
+                    (Avail: Rs. {selectedOutflowBalance.toLocaleString()})
+                  </span>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Refund Source Dropdown (Traceable Credit Source) */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-                <Link2 className="w-3.5 h-3.5 text-blue-600" />
-                Select Credit Source to Refund <span className="text-red-500">*</span>
-              </label>
-              {isLoadingCredits && (
-                <span className="flex items-center gap-1 text-[11px] text-slate-400 font-medium">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Scanning ledger...
-                </span>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <span className="text-slate-400 font-bold sm:text-xs">Rs.</span>
+                </div>
+                <input
+                  type="number"
+                  step="any"
+                  min="1"
+                  max={dynamicSafetyCap > 0 ? dynamicSafetyCap : undefined}
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="block w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3.5 text-sm font-mono font-bold text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition"
+                  required
+                  autoFocus
+                />
+              </div>
+              {selectedSource && parseFloat(amount) > selectedSource.available_credit && (
+                <p className="mt-1 text-xs text-red-600 font-medium">
+                  Amount cannot exceed the selected source balance of Rs. {Number(selectedSource.available_credit).toLocaleString('en-PK')}.
+                </p>
+              )}
+              {selectedOutflowBalance > 0 && parseFloat(amount) > selectedOutflowBalance && (
+                <p className="mt-1 text-xs text-red-600 font-medium">
+                  Amount cannot exceed available drawer/bank liquidity of Rs. {selectedOutflowBalance.toLocaleString('en-PK')}.
+                </p>
               )}
             </div>
-            <select
-              value={selectedSourceId}
-              onChange={handleSourceChange}
-              disabled={isLoadingCredits || creditSources.length === 0}
-              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white disabled:bg-slate-50 disabled:text-slate-400 font-medium"
-              required
-            >
-              {creditSources.length === 0 ? (
-                <option value="">
-                  {isLoadingCredits
-                    ? 'Scanning ledger for refundable credits...'
-                    : 'No specific refundable credits found'}
-                </option>
-              ) : (
-                creditSources.map((src) => (
-                  <option key={src.id} value={src.id}>
-                    {formatCreditOptionText(src)}
-                  </option>
-                ))
-              )}
-            </select>
-            {selectedSource && (
-              <div className="mt-1.5 px-2.5 py-1.5 bg-blue-50/70 border border-blue-100 rounded-lg flex items-center justify-between text-[11px]">
-                <span className="text-blue-900">
-                  Locked to: <strong className="font-semibold">{selectedSource.type === 'OVERPAID_INVOICE' ? 'Invoice' : 'Advance'} ({selectedSource.reference})</strong>
-                </span>
-                <span className="font-mono font-bold text-blue-700">
-                  Cap: Rs. {Number(selectedSource.available_credit).toLocaleString('en-PK')}
-                </span>
-              </div>
-            )}
-          </div>
 
-          {/* Amount (PKR) with auto-fill & max safety check */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
-              <label className="text-xs font-bold text-slate-700">
-                Refund Amount (PKR) <span className="text-red-500">*</span>
+            {/* Date */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Refund Date <span className="text-red-500">*</span>
               </label>
-              <div className="flex items-center gap-2">
-                {dynamicSafetyCap > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setAmount(dynamicSafetyCap.toString())}
-                    className="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
-                  >
-                    Max Capped ({formatCurrency(dynamicSafetyCap)})
-                  </button>
-                )}
-                <span className={`text-[11px] font-bold ${selectedOutflowBalance <= 0 ? 'text-red-600' : 'text-slate-500'}`}>
-                  (Avail: Rs. {selectedOutflowBalance.toLocaleString()})
-                </span>
-              </div>
-            </div>
-            <div className="relative">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                <span className="text-slate-400 font-bold sm:text-xs">Rs.</span>
-              </div>
               <input
-                type="number"
-                step="any"
-                min="1"
-                max={dynamicSafetyCap > 0 ? dynamicSafetyCap : undefined}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                className="block w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3.5 text-sm font-mono font-bold text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition"
+                type="date"
+                value={refundDate}
+                onChange={(e) => setRefundDate(e.target.value)}
+                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
                 required
-                autoFocus
               />
             </div>
-            {selectedSource && parseFloat(amount) > selectedSource.available_credit && (
-              <p className="mt-1 text-xs text-red-600 font-medium">
-                Amount cannot exceed the selected source balance of Rs. {Number(selectedSource.available_credit).toLocaleString('en-PK')}.
-              </p>
-            )}
-            {selectedOutflowBalance > 0 && parseFloat(amount) > selectedOutflowBalance && (
-              <p className="mt-1 text-xs text-red-600 font-medium">
-                Amount cannot exceed available drawer/bank liquidity of Rs. {selectedOutflowBalance.toLocaleString('en-PK')}.
-              </p>
-            )}
-          </div>
 
-          {/* Date */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Refund Date <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              value={refundDate}
-              onChange={(e) => setRefundDate(e.target.value)}
-              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
-              required
-            />
-          </div>
-
-          {/* Bank / Cash Source */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-bold text-slate-700">
-                Outflow Drawer / Account <span className="text-red-500">*</span>
-              </label>
-              <span className={`text-[11px] font-bold ${selectedOutflowBalance <= 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                Balance: Rs. {selectedOutflowBalance.toLocaleString()}
-              </span>
-            </div>
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
-            >
-              <option value="CASH_DRAWER" disabled={cashDrawerBalance <= 0}>
-                Cash in Drawer (Balance: Rs. {cashDrawerBalance.toLocaleString()})
-              </option>
-              {bankAccounts.map((acc) => (
-                <option key={acc.id} value={acc.id} disabled={Number(acc.current_balance) <= 0}>
-                  {acc.bank_name} - {acc.account_title || (acc as any).account_name} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
+            {/* Bank / Cash Source */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700">
+                  Outflow Drawer / Account <span className="text-red-500">*</span>
+                </label>
+                <span className={`text-[11px] font-bold ${selectedOutflowBalance <= 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                  Balance: Rs. {selectedOutflowBalance.toLocaleString()}
+                </span>
+              </div>
+              <select
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                className="block w-full rounded-xl border border-slate-300 py-2.5 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition bg-white"
+              >
+                <option value="CASH_DRAWER" disabled={cashDrawerBalance <= 0}>
+                  Cash in Drawer (Balance: Rs. {cashDrawerBalance.toLocaleString()})
                 </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Insufficient Liquidity Warning */}
-          {selectedOutflowBalance <= 0 && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-semibold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
-              <span>
-                INSUFFICIENT LIQUIDITY: The selected account has Rs. {selectedOutflowBalance.toLocaleString()} available. You cannot withdraw more cash than the account holds.
-              </span>
+                {bankAccounts.map((acc) => (
+                  <option key={acc.id} value={acc.id} disabled={Number(acc.current_balance) <= 0}>
+                    {acc.bank_name} - {acc.account_title || (acc as any).account_name} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
 
-          {/* Notes (Optional) */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1.5">
-              Notes (Optional)
-            </label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Cash refund from customer advance"
-              className="block w-full rounded-xl border border-slate-300 py-2 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition resize-none"
-            />
-          </div>
+            {/* Insufficient Liquidity Warning */}
+            {selectedOutflowBalance <= 0 && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                <span>
+                  INSUFFICIENT LIQUIDITY: The selected account has Rs. {selectedOutflowBalance.toLocaleString()} available. You cannot withdraw more cash than the account holds.
+                </span>
+              </div>
+            )}
+
+            {/* Notes (Optional) */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Notes (Optional)
+              </label>
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="e.g. Cash refund from customer advance"
+                className="block w-full rounded-xl border border-slate-300 py-2 px-3 text-sm text-slate-900 focus:border-red-500 focus:ring-1 focus:ring-red-500 transition resize-none"
+              />
+            </div>
 
           </div>
 

@@ -16,6 +16,8 @@ import { A4SalesInvoice } from '../../components/print/A4SalesInvoice';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
 import { DateInput } from '../../components/DateInput';
 import { compareProducts, formatProductTitle } from '../../utils/productSorting';
+import { invalidateSalesInvoiceQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 const itemSchema = z.object({
   product_id: z.string().min(1, 'Product is required'),
@@ -595,11 +597,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const mutation = useMutation({
     mutationFn: (data: FormData) => invoicesService.createInvoice(data as any),
     onSuccess: (createdInvoice: any) => {
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      qc.invalidateQueries({ queryKey: ['pnlReport'] });
-      qc.invalidateQueries({ queryKey: ['customers'] });
-      qc.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      invalidateSalesInvoiceQueries(qc);
+      erpSyncBus.emit('invoice', { invoice: createdInvoice });
+      onSuccess();
       toast.success('Sales invoice created and saved successfully!');
       triggerA4Print(createdInvoice);
     },

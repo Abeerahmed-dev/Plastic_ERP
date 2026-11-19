@@ -6,6 +6,8 @@ import { bankAccountsService } from '../../services/bank-accounts.service';
 import { getCustomers, getCustomerRefundableCredits } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 import { RefundableCreditSource } from '../../types/payment.types';
+import { invalidateCustomerPaymentQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface CustomerRefundModalProps {
   isOpen: boolean;
@@ -146,14 +148,12 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
       linked_invoice_id?: string | null;
     }) => paymentsService.createRefund(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] });
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
-      queryClient.invalidateQueries({ queryKey: ['liquidity-ledger'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      invalidateCustomerPaymentQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['refundable-credits'] });
       if (activeCustomer?.id) {
         queryClient.invalidateQueries({ queryKey: ['customers', activeCustomer.id, 'ledger'] });
       }
+      erpSyncBus.emit('customer');
       onClose();
       if (onSuccess) onSuccess();
     },

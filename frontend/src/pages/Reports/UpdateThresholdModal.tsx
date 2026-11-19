@@ -4,6 +4,8 @@ import { X, Loader2, AlertTriangle, Check, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { productsService } from '../../services/products.service';
 import { InventoryValuationItem } from '../../services/reports.service';
+import { invalidateProductQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 interface UpdateThresholdModalProps {
   isOpen: boolean;
@@ -32,8 +34,8 @@ export function UpdateThresholdModal({ isOpen, onClose, product }: UpdateThresho
       toast.success(
         `Low stock threshold updated to ${Number(threshold || 0)} KG for ${product?.product_name || 'product'}`
       );
-      qc.invalidateQueries({ queryKey: ['inventoryValuation'] });
-      qc.invalidateQueries({ queryKey: ['lowStockAlerts'] });
+      invalidateProductQueries(qc);
+      erpSyncBus.emit('product');
       onClose();
     },
     onError: (err: any) => {

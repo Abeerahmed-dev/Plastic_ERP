@@ -10,6 +10,7 @@ import { LogAdvanceDepositModal } from '../../components/Modals/LogAdvanceDeposi
 import { ProcessCashRefundModal } from '../../components/Modals/ProcessCashRefundModal';
 import { CascadingFilterBar } from '../../components/CascadingFilterBar';
 import { useCascadingFilters } from '../../hooks/useCascadingFilters';
+import { useErpSync } from '../../utils/erpSyncBus';
 
 const LIMIT = 100;
 
@@ -38,6 +39,10 @@ export default function CustomersListPage() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['customers', page, activeTab],
     queryFn: () => getCustomers({ page, limit: LIMIT, customer_type: activeTab }),
+  });
+
+  useErpSync(() => {
+    refetch();
   });
 
   const deactivateMutation = useMutation({

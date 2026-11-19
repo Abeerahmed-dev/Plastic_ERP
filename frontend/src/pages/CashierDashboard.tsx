@@ -4,6 +4,7 @@ import { ShoppingCart, Banknote, RefreshCw, HandCoins, Calendar, CheckCircle2, S
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store';
 import { reportsService } from '../services/reports.service';
+import { useErpSync } from '../utils/erpSyncBus';
 
 export default function CashierDashboard() {
   const { user } = useAuthStore();
@@ -12,6 +13,10 @@ export default function CashierDashboard() {
     queryKey: ['cashierTally'],
     queryFn: () => reportsService.getCashierTally(),
     refetchInterval: 15000,
+  });
+
+  useErpSync(() => {
+    refetch();
   });
 
   const formatPKR = (val: number | undefined | null) => {

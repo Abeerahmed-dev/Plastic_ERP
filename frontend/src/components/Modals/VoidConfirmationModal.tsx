@@ -5,6 +5,7 @@ import { AlertTriangle, X, Ban, Loader2 } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
 import { purchasesService } from '../../services/purchases.service';
 import { invalidatePurchaseQueries, invalidateSalesInvoiceQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 export interface VoidConfirmationModalProps {
   isOpen: boolean;
@@ -53,10 +54,12 @@ export function VoidConfirmationModal({
         await purchasesService.voidInvoice(invoice.id, payloadReason);
         toast.success('Purchase invoice successfully voided.');
         await invalidatePurchaseQueries(queryClient);
+        await erpSyncBus.emit('void', { invoiceId: invoice.id, type: 'purchase' });
       } else {
         await invoicesService.voidInvoice(invoice.id, payloadReason);
         toast.success('Invoice successfully voided and inventory restored.');
         await invalidateSalesInvoiceQueries(queryClient);
+        await erpSyncBus.emit('void', { invoiceId: invoice.id, type: 'sale' });
       }
 
       setVoidReason('');

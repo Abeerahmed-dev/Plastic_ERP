@@ -12,7 +12,7 @@ import { invoicesService } from '../../services/invoices.service';
 import { purchasesService } from '../../services/purchases.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { useAuthStore } from '../../store/auth.store';
-import { SearchableCombobox, ComboboxOption } from '../SearchableCombobox';
+import { invalidateCustomerPaymentQueries, invalidateSupplierPaymentQueries } from '../../utils/querySync';
 
 const paymentFormSchema = z.object({
   entity_id: z.string().min(1, 'Entity is required'),
@@ -314,36 +314,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     return maxVal === Infinity ? undefined : maxVal;
   }, [selectedInvoice, isSupplier, availableOutflowBalance]);
 
-  const entityOptions: ComboboxOption[] = useMemo(() => {
-    if (isSupplier) {
-      return (suppliers || []).map((s: any) => ({
-        value: s.id,
-        label: `${s.name}${s.city ? ` (${s.city})` : ''}`,
-        badge: s.code || undefined,
-        subLabel: [s.phone, `Payable: Rs. ${(Number(s?.outstanding_payable ?? s?.outstanding_balance) || 0).toLocaleString()}`].filter(Boolean).join(' • '),
-      }));
-    } else {
-      return (customers || []).map((c: any) => ({
-        value: c.id,
-        label: `${c.name}${c.city ? ` (${c.city})` : ''}`,
-        badge: c.code || undefined,
-        subLabel: [c.phone, `Receivable: Rs. ${(Number(c?.outstanding_receivable ?? c?.outstanding_balance) || 0).toLocaleString()}`].filter(Boolean).join(' • '),
-      }));
-    }
-  }, [isSupplier, suppliers, customers]);
-
-  const focusField = (id: string) => {
-    setTimeout(() => {
-      const el = document.getElementById(id) as HTMLElement;
-      if (el) {
-        el.focus();
-        if ('select' in el && typeof (el as any).select === 'function') {
-          (el as any).select();
-        }
-      }
-    }, 40);
-  };
-
   // Clear Full Balance button handler
   const handleClearFullBalance = () => {
     const targetBalance = selectedInvoice && selectedInvoice.balance_due > 0
@@ -430,8 +400,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       const target = currentAmt > 0
         ? currentAmt
         : (selectedInvoice && selectedInvoice.balance_due > 0
-            ? selectedInvoice.balance_due
-            : (selectedEntityClosingBalance > 0 ? selectedEntityClosingBalance : 0));
+          ? selectedInvoice.balance_due
+          : (selectedEntityClosingBalance > 0 ? selectedEntityClosingBalance : 0));
 
       if (target > 0 && splitCashAmount === '' && splitBankAmount === '') {
         const half = Math.round((target / 2) * 100) / 100;
@@ -493,11 +463,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     },
     onSuccess: () => {
       setServerError(null);
-      qc.invalidateQueries({ queryKey: ['payments'] });
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-      qc.invalidateQueries({ queryKey: ['customers'] });
+      invalidateCustomerPaymentQueries(qc);
       qc.invalidateQueries({ queryKey: ['bank-accounts'] });
-      qc.invalidateQueries({ queryKey: ['reports'] });
       if (selectedEntityId) {
         qc.invalidateQueries({ queryKey: ['customers', selectedEntityId, 'statement'] });
         qc.invalidateQueries({ queryKey: ['customers', selectedEntityId, 'ledger'] });
@@ -542,11 +509,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     },
     onSuccess: () => {
       setServerError(null);
-      qc.invalidateQueries({ queryKey: ['supplier-payments'] });
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['suppliers'] });
+      invalidateSupplierPaymentQueries(qc);
       qc.invalidateQueries({ queryKey: ['bank-accounts'] });
-      qc.invalidateQueries({ queryKey: ['reports'] });
       if (selectedEntityId) {
         qc.invalidateQueries({ queryKey: ['suppliers', selectedEntityId, 'statement'] });
         qc.invalidateQueries({ queryKey: ['suppliers', selectedEntityId, 'ledger'] });
@@ -660,47 +624,13 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (isOpen) {
-      if (preselectedEntityId) {
-        focusField('amount');
-      } else {
-        focusField('payment-entity-combobox');
-      }
-    }
-  }, [isOpen, preselectedEntityId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+Enter or F9 -> Save Payment
-      if ((e.ctrlKey && e.key === 'Enter' && !e.shiftKey) || e.key === 'F9') {
-        e.preventDefault();
-        if (!isPending && !(selectedInvoice && selectedInvoice.balance_due <= 0)) {
-          handleSubmit(onSubmit)();
-        }
-      }
-      // Alt+C -> Clear Full Balance
-      else if (e.altKey && (e.key === 'c' || e.key === 'C')) {
-        e.preventDefault();
-        handleClearFullBalance();
-        focusField('amount');
-      }
-    };
-
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [isOpen, isPending, selectedInvoice, selectedEntityClosingBalance, calculatedMaxAmount]);
-
 
   if (!isOpen) return null;
 
   const inputCls = (hasError: boolean) =>
-    `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 ${
-      hasError
-        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-        : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20 dark:border-[#2D3349] dark:bg-[#121520] dark:text-white'
+    `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 ${hasError
+      ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+      : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20 dark:border-[#2D3349] dark:bg-[#121520] dark:text-white'
     }`;
 
   const formatCurrency = (val: string | number) => {
@@ -754,33 +684,38 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 <label htmlFor="entity_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                   {isSupplier ? 'Supplier' : 'Customer'} <span className="text-red-500">*</span>
                 </label>
-                {preselectedEntityId ? (
-                  <select
-                    id="entity_id"
-                    {...register('entity_id')}
-                    disabled={true}
-                    className={inputCls(!!errors.entity_id) + ' bg-slate-50 text-slate-700 cursor-not-allowed font-medium'}
-                  >
-                    <option value={preselectedEntityId}>
-                      {selectedEntity?.name || 'Selected Party'} {selectedEntity?.city ? `(${selectedEntity.city})` : ''}
-                    </option>
-                  </select>
-                ) : (
-                  <SearchableCombobox
-                    id="payment-entity-combobox"
-                    value={selectedEntityId || ''}
-                    onChange={(val) => {
-                      setValue('entity_id', val, { shouldValidate: true });
-                      setValue('invoice_id', '', { shouldValidate: true });
-                      setValue('amount', 0);
-                    }}
-                    options={entityOptions}
-                    placeholder={isSupplier ? "Search supplier (Arrow keys / Enter)..." : "Search customer (Arrow keys / Enter)..."}
-                    hasError={!!errors.entity_id}
-                    onSelectNext={() => focusField('invoice_id')}
-                    onTabNext={() => focusField('invoice_id')}
-                  />
-                )}
+                <select
+                  id="entity_id"
+                  {...register('entity_id')}
+                  onChange={(e) => {
+                    register('entity_id').onChange(e);
+                    setValue('invoice_id', '', { shouldValidate: true });
+                    setValue('amount', 0);
+                  }}
+                  disabled={!!preselectedEntityId}
+                  className={inputCls(!!errors.entity_id) + (preselectedEntityId ? ' bg-slate-50 text-slate-700 cursor-not-allowed font-medium' : '')}
+                >
+                  <option value="">
+                    {isSupplier
+                      ? isLoadingSuppliers
+                        ? 'Loading suppliers...'
+                        : 'Select a supplier...'
+                      : isLoadingCustomers
+                        ? 'Loading customers...'
+                        : 'Select a customer...'}
+                  </option>
+                  {isSupplier
+                    ? suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.id}>
+                        {supplier.name} {supplier.city ? `(${supplier.city})` : ''}
+                      </option>
+                    ))
+                    : customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name} {customer.city ? `(${customer.city})` : ''}
+                      </option>
+                    ))}
+                </select>
                 {errors.entity_id && <p className="mt-1 text-xs text-red-600">{errors.entity_id.message}</p>}
               </div>
 
@@ -800,12 +735,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                       setValue('amount', Math.round(matched.balance_due * 100) / 100, {
                         shouldValidate: true,
                       });
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      focusField('payment_method');
                     }
                   }}
                   disabled={!selectedEntityId}
@@ -858,12 +787,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                   id="payment_date"
                   type="date"
                   {...register('payment_date')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      focusField('payment_method');
-                    }
-                  }}
                   className={inputCls(!!errors.payment_date)}
                 />
                 {errors.payment_date && <p className="mt-1 text-xs text-red-600">{errors.payment_date.message}</p>}
@@ -881,22 +804,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                     register('payment_method').onChange(e);
                     if (e.target.value === 'CASH') {
                       setValue('bank_account_id', '');
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (selectedPaymentMethod === 'SPLIT') {
-                        focusField('split_bank_account_id');
-                      } else if (selectedPaymentMethod === 'BANK' || selectedPaymentMethod === 'BANK_TRANSFER') {
-                        focusField('bank_account_id');
-                      } else if (selectedPaymentMethod === 'CHEQUE' || selectedPaymentMethod === 'PDC') {
-                        focusField('cheque_number');
-                      } else if (!isSupplier && selectedPaymentMethod === 'DIRECT_TO_SUPPLIER') {
-                        focusField('supplier_id');
-                      } else {
-                        focusField('amount');
-                      }
                     }
                   }}
                   className={inputCls(!!errors.payment_method)}
@@ -933,17 +840,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                   <label htmlFor="supplier_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
                     Select Target Supplier <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    id="supplier_id"
-                    {...register('supplier_id')}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        focusField('amount');
-                      }
-                    }}
-                    className={inputCls(!!errors.supplier_id)}
-                  >
+                  <select id="supplier_id" {...register('supplier_id')} className={inputCls(!!errors.supplier_id)}>
                     <option value="">Select Target Supplier...</option>
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -960,48 +857,42 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 selectedPaymentMethod === 'BANK_TRANSFER' ||
                 selectedPaymentMethod === 'CHEQUE' ||
                 selectedPaymentMethod === 'PDC') && (
-                <div className="md:col-span-2">
-                  <label htmlFor="bank_account_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-                    Select {isSupplier ? 'Source' : 'Target'} Bank Account <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    id="bank_account_id"
-                    {...register('bank_account_id')}
-                    value={selectedBankAccountId || ''}
-                    onChange={(e) => {
-                      setValue('bank_account_id', e.target.value, {
-                        shouldValidate: true,
-                        shouldDirty: true,
-                        shouldTouch: true,
-                      });
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        focusField('amount');
-                      }
-                    }}
-                    className={inputCls(!!errors.bank_account_id)}
-                  >
-                    <option value="">Select Bank Account...</option>
-                    {(bankAccounts || []).map((acc) => (
-                      <option
-                        key={acc.id}
-                        value={acc.id}
-                        disabled={
-                          isSupplier &&
-                          selectedPaymentMethod !== 'CHEQUE' &&
-                          selectedPaymentMethod !== 'PDC' &&
-                          Number(acc.current_balance) <= 0
-                        }
-                      >
-                        {acc.bank_name} — {acc.account_title} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
-                      </option>
-                    ))}
-                  </select>
-                  {errors.bank_account_id && <p className="mt-1 text-xs text-red-600">{errors.bank_account_id.message}</p>}
-                </div>
-              )}
+                  <div className="md:col-span-2">
+                    <label htmlFor="bank_account_id" className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Select {isSupplier ? 'Source' : 'Target'} Bank Account <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      id="bank_account_id"
+                      {...register('bank_account_id')}
+                      value={selectedBankAccountId || ''}
+                      onChange={(e) => {
+                        setValue('bank_account_id', e.target.value, {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                          shouldTouch: true,
+                        });
+                      }}
+                      className={inputCls(!!errors.bank_account_id)}
+                    >
+                      <option value="">Select Bank Account...</option>
+                      {(bankAccounts || []).map((acc) => (
+                        <option
+                          key={acc.id}
+                          value={acc.id}
+                          disabled={
+                            isSupplier &&
+                            selectedPaymentMethod !== 'CHEQUE' &&
+                            selectedPaymentMethod !== 'PDC' &&
+                            Number(acc.current_balance) <= 0
+                          }
+                        >
+                          {acc.bank_name} — {acc.account_title} (Balance: Rs. {Number(acc.current_balance).toLocaleString()})
+                        </option>
+                      ))}
+                    </select>
+                    {errors.bank_account_id && <p className="mt-1 text-xs text-red-600">{errors.bank_account_id.message}</p>}
+                  </div>
+                )}
 
 
               {/* Post-Dated Cheque (PDC) fields */}
@@ -1018,16 +909,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                         type="text"
                         {...register('cheque_number')}
                         placeholder="e.g. CHQ-99401"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            if (!isSupplier) {
-                              focusField('cheque_bank_name');
-                            } else {
-                              focusField('cheque_due_date');
-                            }
-                          }
-                        }}
                         className={inputCls(!!errors.cheque_number)}
                       />
                     </div>
@@ -1039,12 +920,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           type="text"
                           {...register('cheque_bank_name')}
                           placeholder="e.g. Meezan Bank"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              focusField('cheque_due_date');
-                            }
-                          }}
                           className={inputCls(!!errors.cheque_bank_name)}
                         />
                       </div>
@@ -1055,12 +930,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                         id="cheque_due_date"
                         type="date"
                         {...register('cheque_due_date')}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            focusField('amount');
-                          }
-                        }}
                         className={inputCls(!!errors.cheque_due_date)}
                       />
                     </div>
@@ -1125,12 +994,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           shouldTouch: true,
                         });
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          focusField('split_cash_input');
-                        }
-                      }}
                       className={inputCls(!!errors.bank_account_id)}
                     >
                       <option value="">Select Bank Account...</option>
@@ -1165,13 +1028,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           min="0"
                           value={splitCashAmount}
                           onChange={(e) => handleSplitChange('cash', e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              focusField('split_bank_input');
-                            }
-                          }}
                           placeholder="0.00"
                           className="block w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-emerald-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:bg-[#121520] dark:border-emerald-500/60 dark:text-emerald-300 focus:dark:ring-emerald-400 focus:dark:border-emerald-400"
                         />
@@ -1195,13 +1051,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                           min="0"
                           value={splitBankAmount}
                           onChange={(e) => handleSplitChange('bank', e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              focusField('notes');
-                            }
-                          }}
                           placeholder="0.00"
                           className="block w-full rounded-lg border border-blue-300 bg-white px-3 py-2 pl-9 text-base font-semibold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-[#121520] dark:border-sky-500/60 dark:text-sky-300 focus:dark:ring-sky-400 focus:dark:border-sky-400"
                         />
@@ -1290,28 +1139,17 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                       min="0.01"
                       max={calculatedMaxAmount !== undefined ? calculatedMaxAmount : (selectedInvoice ? Math.max(0, selectedInvoice.balance_due) : undefined)}
                       {...register('amount')}
-                      onFocus={(e) => e.target.select()}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          focusField('notes');
-                        }
-                      }}
-                      className={`block w-full rounded-xl border px-3 py-3 pl-10 text-lg font-medium transition-colors focus:outline-none focus:ring-2 ${
-                        (selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0) ? 'pr-36' : ''
-                      } ${
-
-                        errors.amount
+                      className={`block w-full rounded-xl border px-3 py-3 pl-10 text-lg font-medium transition-colors focus:outline-none focus:ring-2 ${(selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0) ? 'pr-36' : ''
+                        } ${errors.amount
                           ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
                           : 'border-emerald-200 focus:border-emerald-500 focus:ring-emerald-500/20 text-emerald-900 bg-emerald-50/50 dark:bg-[#092218] dark:border-emerald-500/60 dark:text-emerald-300 focus:dark:border-emerald-400 focus:dark:ring-emerald-400/20'
-                      }`}
+                        }`}
                     />
                     {((selectedInvoice && selectedInvoice.balance_due > 0) || (!selectedInvoice && selectedEntityClosingBalance > 0)) && (
                       <button
                         type="button"
                         onClick={handleClearFullBalance}
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-300 transition-all cursor-pointer shadow-2xs dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-500/60 hover:dark:bg-emerald-900/60"
-                        title="Clear Full Balance"
                       >
                         Clear Full Balance
                       </button>
@@ -1331,12 +1169,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
                 rows={2}
                 className={inputCls(false)}
                 placeholder="Cheque number, transaction ID, bank reference..."
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey && e.key === 'Enter') || e.key === 'F9') {
-                    e.preventDefault();
-                    handleSubmit(onSubmit)();
-                  }
-                }}
               />
             </div>
           </form>

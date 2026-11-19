@@ -10,6 +10,8 @@ import { productsService } from '../../services/products.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { DateInput } from '../../components/DateInput';
 import { compareProducts, formatProductTitle } from '../../utils/productSorting';
+import { invalidatePurchaseQueries } from '../../utils/querySync';
+import { erpSyncBus } from '../../utils/erpSyncBus';
 
 const itemSchema = z.object({
   product_id: z.string().min(1, 'Product is required'),
@@ -348,10 +350,8 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   const mutation = useMutation({
     mutationFn: (data: FormData) => purchasesService.createInvoice(data as any),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchases'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      qc.invalidateQueries({ queryKey: ['suppliers'] });
-      qc.invalidateQueries({ queryKey: ['liquidityLedger'] });
+      invalidatePurchaseQueries(qc);
+      erpSyncBus.emit('purchase');
       onSuccess();
       onClose();
     },

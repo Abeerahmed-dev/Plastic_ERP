@@ -1,4 +1,6 @@
 import api from './api';
+import { invalidateAllDomains } from '../utils/querySync';
+import { erpSyncBus } from '../utils/erpSyncBus';
 
 export interface OfflineInvoiceRecord {
   id: string; // standard uuid_generate_v4()
@@ -62,10 +64,10 @@ class OfflineVaultService {
     const uuid = typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-          const r = (Math.random() * 16) | 0;
-          const v = c === 'x' ? r : (r & 0x3) | 0x8;
-          return v.toString(16);
-        });
+        const r = (Math.random() * 16) | 0;
+        const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
 
     const record: OfflineInvoiceRecord = {
       id: uuid,
@@ -161,6 +163,8 @@ class OfflineVaultService {
 
     if (response.data && response.data.success) {
       await this.clearOfflineInvoices();
+      await invalidateAllDomains();
+      erpSyncBus.emit('offline-sync');
     }
 
     return response.data;
