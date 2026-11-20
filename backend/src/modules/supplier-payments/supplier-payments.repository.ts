@@ -48,7 +48,7 @@ async function allocateSupplierPaymentToInvoices(
           .orWhere('invoice_type', 'RETURN')
           .orWhere('invoice_number', 'like', 'DN-%');
       })
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .sum('total_amount as total_returned')
       .first();
 
@@ -98,7 +98,7 @@ async function allocateSupplierPaymentToInvoices(
 
     const unpaidInvoices = await trx('purchase_invoices')
       .where('supplier_id', supplierId)
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .whereNot('status', 'PAID')
       .where(function() {
         this.whereNull('invoice_type')
@@ -128,7 +128,7 @@ async function allocateSupplierPaymentToInvoices(
             .orWhere('invoice_type', 'RETURN')
             .orWhere('invoice_number', 'like', 'DN-%');
         })
-        .whereNot('status', 'CANCELLED')
+        .whereNotIn('status', ['CANCELLED', 'VOID'])
         .sum('total_amount as total_returned')
         .first();
 
@@ -244,7 +244,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
               .orWhere('invoice_type', 'RETURN')
               .orWhere('invoice_number', 'like', 'DN-%');
           })
-          .whereNot('status', 'CANCELLED')
+          .whereNotIn('status', ['CANCELLED', 'VOID'])
           .sum('total_amount as total_returned')
           .first();
         const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
@@ -469,7 +469,7 @@ export async function findAllPayments(query: PaymentQuery) {
   // 1. Fetch Purchase Invoices
   const invoicesQuery = db('purchase_invoices as pi')
     .join('suppliers as s', 'pi.supplier_id', 's.id')
-    .whereNot('pi.status', 'CANCELLED')
+    .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
     .modify((qb: Knex.QueryBuilder) => {
       if (supplier_id) qb.where('pi.supplier_id', supplier_id);
       if (purchase_invoice_id) qb.where('pi.id', purchase_invoice_id);
@@ -543,7 +543,7 @@ export async function findAllPayments(query: PaymentQuery) {
     ? await db('purchase_invoices')
         .whereIn('parent_invoice_id', invoiceIds)
         .where('invoice_type', 'DEBIT_NOTE')
-        .whereNot('status', 'CANCELLED')
+        .whereNotIn('status', ['CANCELLED', 'VOID'])
         .select(
           'id',
           'parent_invoice_id',

@@ -28,6 +28,26 @@ export const updateProductSchema = createProductSchema
     is_active: z.boolean().optional(),
   });
 
+export const updateProductPriceSchema = z.object({
+  sale_price: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? undefined : Number(val)),
+    z.number().min(0, 'Selling price must be a non-negative number')
+  ).optional(),
+  selling_price: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? undefined : Number(val)),
+    z.number().min(0, 'Selling price must be a non-negative number')
+  ).optional(),
+  fixed_retail_price_per_kg: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined || isNaN(Number(val)) ? undefined : Number(val)),
+    z.number().min(0, 'Selling price must be a non-negative number')
+  ).optional(),
+}).refine(
+  (data) => data.sale_price !== undefined || data.selling_price !== undefined || data.fixed_retail_price_per_kg !== undefined,
+  { message: 'A valid selling price must be provided' }
+);
+
+export type UpdateProductPriceInput = z.infer<typeof updateProductPriceSchema>;
+
 export const productQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(5000).default(2000),

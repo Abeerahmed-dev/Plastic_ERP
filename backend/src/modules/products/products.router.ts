@@ -7,6 +7,7 @@ import {
   getProductController,
   createProductController,
   updateProductController,
+  updateProductPriceController,
   deleteProductController,
   getProductBatchesController,
 } from './products.controller';
@@ -19,6 +20,7 @@ router.get('/:id/batches', requireAuth, getProductBatchesController);
 router.get('/:id', requireAuth, getProductController);
 router.post('/', requireAuth, verifyRole(['ADMIN', 'OWNER', 'CASHIER', 'ACCOUNTANT']), createProductController);
 router.put('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER', 'ACCOUNTANT']), updateProductController);
+router.patch('/:id/price', requireAuth, verifyRole(['ADMIN', 'OWNER', 'ACCOUNTANT']), updateProductPriceController);
 router.delete('/:id', requireAuth, verifyRole(['ADMIN', 'OWNER']), deleteProductController);
 
 export default router;

@@ -186,7 +186,7 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
           .orWhere('pi.invoice_type', 'RETURN')
           .orWhere('pi.invoice_number', 'like', 'DN-%');
       })
-      .whereNot('pi.status', 'CANCELLED')
+      .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
       .select('pi.*')
       .orderBy('pi.created_at', 'asc');
 
@@ -271,7 +271,7 @@ export async function findPurchaseInvoiceById(id: string) {
   const debitNotesRows = await db('purchase_invoices as pi')
     .where('pi.parent_invoice_id', id)
     .where('pi.invoice_type', 'DEBIT_NOTE')
-    .whereNot('pi.status', 'CANCELLED')
+    .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
     .select('pi.*')
     .orderBy('pi.created_at', 'asc');
 
@@ -812,7 +812,7 @@ export async function processPurchaseReturn(
       .join('purchase_invoice_items as pii', 'pi.id', 'pii.purchase_invoice_id')
       .where('pi.parent_invoice_id', parentInvoiceId)
       .where('pi.invoice_type', 'DEBIT_NOTE')
-      .whereNot('pi.status', 'CANCELLED')
+      .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
       .select('pii.product_id', trx.raw('SUM(ABS(pii.quantity)) as total_returned_qty'))
       .groupBy('pii.product_id');
 
@@ -983,67 +983,12 @@ export async function processPurchaseReturn(
 
     await trx('purchase_invoice_items').insert(finalItems);
 
-    // ── Phase 1: Parent Purchase Invoice Recalculation & Status Flagging ──
-    // Step 1: Subtract returned item's total value from parent purchase_invoices.total_amount
-    const currentParentTotal = Number(parentInvoice.total_amount || 0);
-    const newParentTotalAmount = Math.round((currentParentTotal - totalDebitAmount) * 100) / 100;
-
-    const currentParentSubtotal = Number(parentInvoice.subtotal ?? currentParentTotal);
-    const newParentSubtotal = Math.round((currentParentSubtotal - totalDebitAmount) * 100) / 100;
-
-    // Step 2: Fetch all payment allocations already made to the supplier for this invoice
-    let totalAllocatedPayments = 0;
-    const hasAllocationsTable = await trx.schema.hasTable('supplier_payment_allocations');
-    if (hasAllocationsTable) {
-      const allocRes = await trx('supplier_payment_allocations')
-        .where('purchase_invoice_id', parentInvoiceId)
-        .sum('allocated_amount as total_allocated')
-        .first();
-      totalAllocatedPayments = Number(allocRes?.total_allocated || 0);
-    }
-
-    // Direct payments fallback (if direct unallocated supplier payments exist)
-    const directRes = await trx('supplier_payments')
-      .where('purchase_invoice_id', parentInvoiceId)
-      .where(function() {
-        if (hasAllocationsTable) {
-          this.whereNotIn('id', trx('supplier_payment_allocations').select('payment_id'));
-        }
-      })
-      .sum('amount as total_direct')
-      .first();
-    const totalDirectPayments = Number(directRes?.total_direct || 0);
-
-    const totalPaidAmount = Math.round((totalAllocatedPayments + totalDirectPayments) * 100) / 100 || Number(parentInvoice.paid_amount || 0);
-
-    // Step 3: Recalculate purchase_invoices.balance_due based on new total_amount minus payment allocations
-    const newBalanceDue = Math.round((newParentTotalAmount - totalPaidAmount) * 100) / 100;
-
-    // Step 4: Status determination and set has_returns = true on parent invoice
-    let newStatus = parentInvoice.status;
-    if (parentInvoice.status !== 'CANCELLED') {
-      if (newParentTotalAmount <= 0) {
-        newStatus = 'PAID';
-      } else if (newBalanceDue <= 0) {
-        newStatus = 'PAID';
-      } else if (totalPaidAmount > 0) {
-        newStatus = 'PARTIAL';
-      } else {
-        newStatus = 'UNPAID';
-      }
-    }
-
+    // ── Phase 1: Parent Purchase Invoice Status Flagging ──
+    // Keep the DEBIT_NOTE row as the single accounting record of the return without mutating parent total_amount
     const parentUpdatePayload: Record<string, any> = {
-      total_amount: newParentTotalAmount,
-      subtotal: newParentSubtotal,
-      paid_amount: totalPaidAmount,
-      status: newStatus,
       updated_at: new Date(),
     };
 
-    if (hasBalanceDue) {
-      parentUpdatePayload.balance_due = newBalanceDue;
-    }
     if (hasReturnsCol) {
       parentUpdatePayload.has_returns = true;
     }
@@ -1074,7 +1019,7 @@ export async function getPurchaseInvoiceReturnSummary(parentInvoiceId: string) {
     .join('purchase_invoice_items as pii', 'pi.id', 'pii.purchase_invoice_id')
     .where('pi.parent_invoice_id', parentInvoiceId)
     .where('pi.invoice_type', 'DEBIT_NOTE')
-    .whereNot('pi.status', 'CANCELLED')
+    .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
     .select('pii.product_id', db.raw('SUM(ABS(pii.quantity)) as total_returned_qty'))
     .groupBy('pii.product_id');
 
@@ -1167,7 +1112,7 @@ export async function getRecentPurchasesForStockUpdate(limit: number = 20) {
     .where(function() {
       this.whereNull('pi.invoice_type').orWhere('pi.invoice_type', 'PURCHASE');
     })
-    .whereNot('pi.status', 'CANCELLED')
+    .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
     .select(
       'pi.id',
       'pi.invoice_number',

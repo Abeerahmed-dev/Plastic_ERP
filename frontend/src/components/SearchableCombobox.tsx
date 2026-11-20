@@ -44,9 +44,17 @@ export function SearchableCombobox({
   const inputRef = useRef<HTMLInputElement>(null);
   const optionsListRef = useRef<HTMLDivElement>(null);
 
-  // Find currently selected option
+  // Find currently selected option (exact, or trimmed & case-insensitive fallback)
   const selectedOption = useMemo(() => {
-    return options.find((opt) => opt.value === value);
+    if (!value) return undefined;
+    const directMatch = options.find((opt) => opt.value === value);
+    if (directMatch) return directMatch;
+
+    const normalizedVal = value.trim().toLowerCase();
+    return (
+      options.find((opt) => opt.value.trim().toLowerCase() === normalizedVal) ||
+      options.find((opt) => opt.label.trim().toLowerCase() === normalizedVal)
+    );
   }, [options, value]);
 
   // Sync display text when value or options change
@@ -61,7 +69,10 @@ export function SearchableCombobox({
   // Keep highlightedIndex in sync with value or 0 when open
   useEffect(() => {
     if (isOpen) {
-      const idx = filteredOptions.findIndex((opt) => opt.value === value);
+      const normalizedVal = (value || '').trim().toLowerCase();
+      const idx = filteredOptions.findIndex(
+        (opt) => opt.value === value || (normalizedVal && opt.value.trim().toLowerCase() === normalizedVal)
+      );
       setHighlightedIndex(idx >= 0 ? idx : 0);
     }
   }, [isOpen]);
@@ -86,13 +97,14 @@ export function SearchableCombobox({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [selectedOption]);
 
-  // Filtered options based on search query
+  // Filtered options based on search query (trimmed and case-insensitive)
   const filteredOptions = useMemo(() => {
-    if (!searchQuery.trim()) return options;
-    const q = searchQuery.toLowerCase().trim();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return options;
     return options.filter(
       (opt) =>
         opt.label.toLowerCase().includes(q) ||
+        opt.value.toLowerCase().includes(q) ||
         (opt.subLabel && opt.subLabel.toLowerCase().includes(q)) ||
         (opt.badge && opt.badge.toLowerCase().includes(q))
     );

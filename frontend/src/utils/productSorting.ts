@@ -57,3 +57,69 @@ export function formatProductTitle(name: string, size?: string | null): string {
   if (!cleanSize) return cleanName;
   return `${cleanName}(${cleanSize})`;
 }
+
+/**
+ * Pick a clean canonical display label for a group of names sharing the same case-insensitive key.
+ * Prefers an all-uppercase label (e.g. 'PP', 'HDPE', 'LDPE') if present,
+ * then a Title Case / capitalized label (e.g. 'Abid Gold'),
+ * falling back to the first non-empty trimmed name encountered.
+ */
+export function pickCanonicalGroupName(names: string[]): string {
+  if (!names || names.length === 0) return '';
+  const trimmed = names.map((n) => (n || '').trim()).filter(Boolean);
+  if (trimmed.length === 0) return '';
+
+  // 1. Prefer all-uppercase if it contains at least one letter (e.g. 'PP', 'HDPE')
+  const allUpper = trimmed.find((n) => /[A-Z]/.test(n) && n === n.toUpperCase());
+  if (allUpper) return allUpper;
+
+  // 2. Prefer capitalized / Title Case (starts with capital letter)
+  const titleCase = trimmed.find((n) => /^[A-Z]/.test(n));
+  if (titleCase) return titleCase;
+
+  // 3. Fallback to first encountered
+  return trimmed[0];
+}
+
+export interface NormalizedProductGroup<T> {
+  key: string;       // Normalized grouping key (e.g. "pp")
+  name: string;      // Canonical display label (e.g. "PP")
+  variants: T[];     // Dimensionally sorted variants
+}
+
+/**
+ * Group products by their normalized (trimmed and case-insensitive) name.
+ * Collapses variants such as 'pp', 'Pp', and 'PP' into a single canonical entry (e.g. 'PP')
+ * while preserving all variant records and natural dimensional sorting.
+ */
+export function groupProductsByFamily<T extends { name: string; size?: string | null }>(
+  products: T[]
+): Record<string, NormalizedProductGroup<T>> {
+  const map = new Map<string, { rawNames: string[]; variants: T[] }>();
+
+  for (const p of products || []) {
+    if (!p) continue;
+    const rawName = (p.name || '').trim();
+    if (!rawName) continue;
+    const key = rawName.toLowerCase();
+
+    let entry = map.get(key);
+    if (!entry) {
+      entry = { rawNames: [], variants: [] };
+      map.set(key, entry);
+    }
+    entry.rawNames.push(rawName);
+    entry.variants.push(p);
+  }
+
+  const result: Record<string, NormalizedProductGroup<T>> = {};
+  for (const [key, entry] of map.entries()) {
+    result[key] = {
+      key,
+      name: pickCanonicalGroupName(entry.rawNames),
+      variants: [...entry.variants].sort(compareProducts),
+    };
+  }
+
+  return result;
+}

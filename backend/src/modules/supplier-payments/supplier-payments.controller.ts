@@ -76,7 +76,7 @@ export async function createPaymentController(req: Request, res: Response, next:
             .orWhere('invoice_type', 'RETURN')
             .orWhere('invoice_number', 'like', 'DN-%');
         })
-        .whereNot('status', 'CANCELLED')
+        .whereNotIn('status', ['CANCELLED', 'VOID'])
         .sum('total_amount as total_returned')
         .first();
 

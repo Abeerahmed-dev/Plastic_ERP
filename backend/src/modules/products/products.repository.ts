@@ -494,6 +494,22 @@ export async function softDeleteProduct(id: string): Promise<boolean> {
   return count > 0;
 }
 
+export async function updateProductSellingPrice(
+  id: string,
+  price: number
+): Promise<ProductWithStock | undefined> {
+  const roundedPrice = Math.round(Number(price || 0) * 100) / 100;
+  await db('products')
+    .where({ id })
+    .update({
+      sale_price: roundedPrice,
+      fixed_retail_price_per_kg: roundedPrice,
+      updated_at: new Date(),
+    });
+
+  return findProductById(id);
+}
+
 export async function getAvailableBatches(_productId: string) {
   return [];
 }

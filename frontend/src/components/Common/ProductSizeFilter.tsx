@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChevronDown, X, RotateCcw, Search, Check } from 'lucide-react';
+import { pickCanonicalGroupName } from '../../utils/productSorting';
 
 export interface ProductItem {
   name: string;
@@ -75,18 +76,22 @@ export function ProductSizeFilter({
     };
   }, []);
 
-  // Box 1 Options: Unique, trimmed, case-insensitively deduplicated, alphabetically sorted product names
+  // Box 1 Options: Unique, trimmed, case-insensitively deduplicated, canonicalized, alphabetically sorted product names
   const allProductNames = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, string[]>();
     for (const p of products) {
       const name = (p.name || '').trim();
       if (!name) continue;
       const key = name.toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, name);
+      let names = map.get(key);
+      if (!names) {
+        names = [];
+        map.set(key, names);
       }
+      names.push(name);
     }
-    return Array.from(map.values()).sort((a, b) =>
+    const canonicalNames = Array.from(map.values()).map((names) => pickCanonicalGroupName(names));
+    return canonicalNames.sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: 'base' })
     );
   }, [products]);

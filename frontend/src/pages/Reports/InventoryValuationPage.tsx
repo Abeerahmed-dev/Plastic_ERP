@@ -1,5 +1,6 @@
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   Boxes,
   RefreshCw,
@@ -32,6 +33,7 @@ import { LowStockWidget } from '../../components/Dashboard/LowStockWidget';
 import { ProductSizeFilter } from '../../components/Common/ProductSizeFilter';
 import { invalidateProductQueries } from '../../utils/querySync';
 import { erpSyncBus, useErpSync } from '../../utils/erpSyncBus';
+import { pickCanonicalGroupName } from '../../utils/productSorting';
 
 interface ProductGroup {
   groupKey: string;
@@ -42,6 +44,203 @@ interface ProductGroup {
   hasLowStock: boolean;
   lowStockCount: number;
   totalThreshold: number;
+}
+
+interface SellingPriceEditorCardProps {
+  product: InventoryValuationItem;
+  canEdit?: boolean;
+  onPriceUpdated: (newPrice: number) => void;
+}
+
+function SellingPriceEditorCard({ product, canEdit = true, onPriceUpdated }: SellingPriceEditorCardProps) {
+  const qc = useQueryClient();
+  const initialPrice = product.selling_price !== undefined
+    ? Number(product.selling_price)
+    : Number(product.sale_price || 0);
+
+  const [priceInput, setPriceInput] = useState<string>(initialPrice > 0 ? initialPrice.toString() : '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const cur = product.selling_price !== undefined
+      ? Number(product.selling_price)
+      : Number(product.sale_price || 0);
+    setPriceInput(cur > 0 ? cur.toString() : '');
+  }, [product.id, product.selling_price, product.sale_price]);
+
+  const avgCost = Number(product.current_wac || 0);
+  const parsedPrice = parseFloat(priceInput);
+  const isValidNumber = !isNaN(parsedPrice) && parsedPrice >= 0;
+  const currentSavedPrice = product.selling_price !== undefined
+    ? Number(product.selling_price)
+    : Number(product.sale_price || 0);
+
+  const isChanged = isValidNumber && Math.abs(parsedPrice - currentSavedPrice) > 0.001;
+
+  // Margin calculation against Avg Cost / KG
+  const profitPerKg = isValidNumber && avgCost > 0 ? parsedPrice - avgCost : null;
+  const marginPct =
+    isValidNumber && parsedPrice > 0 && profitPerKg !== null
+      ? Math.round((profitPerKg / parsedPrice) * 100)
+      : null;
+  const isBelowCost = isValidNumber && avgCost > 0 && parsedPrice < avgCost;
+
+  const applyMarginPct = (pct: number) => {
+    if (avgCost <= 0) return;
+    const calculated = Math.round(avgCost * (1 + pct / 100) * 100) / 100;
+    setPriceInput(calculated.toString());
+  };
+
+  const handleSave = async () => {
+    if (!isValidNumber || !isChanged || isSaving || !canEdit) return;
+    try {
+      setIsSaving(true);
+      await productsService.updateSellingPrice(product.id, parsedPrice);
+
+      onPriceUpdated(parsedPrice);
+
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['posProducts'] });
+      qc.invalidateQueries({ queryKey: ['inventoryValuation'] });
+      qc.invalidateQueries({ queryKey: ['inventory-valuation'] });
+      erpSyncBus.emit('products');
+
+      toast.success(`Selling price updated to Rs. ${parsedPrice.toFixed(2)} / KG`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || err.message || 'Failed to update selling price');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50/70 via-indigo-50/50 to-white dark:from-[#181d2e] dark:via-[#151928] dark:to-[#121520] border border-blue-200/80 dark:border-blue-900/50 shadow-xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Left: Title & Input with Live Margin */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white shadow-xs">
+              <DollarSign className="w-3.5 h-3.5" />
+            </span>
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              Selling Price / KG (Daily Market Rate)
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              • Active across POS & Sales Invoices
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="relative inline-flex items-center">
+              <span className="absolute left-3 text-xs font-bold text-slate-400 dark:text-slate-500 select-none">
+                Rs.
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                disabled={!canEdit || isSaving}
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSave();
+                  }
+                }}
+                placeholder="0.00"
+                className={`w-36 pl-9 pr-8 py-2 rounded-xl border text-sm font-bold font-mono outline-none transition bg-white dark:bg-[#0f111a] text-slate-900 dark:text-white shadow-2xs ${
+                  isBelowCost
+                    ? 'border-red-400 ring-2 ring-red-400/20 dark:border-red-600'
+                    : 'border-slate-300 dark:border-[#23283B] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
+                } ${!canEdit ? 'opacity-60 cursor-not-allowed' : ''}`}
+              />
+              <span className="absolute right-2.5 text-[11px] font-bold text-slate-400 dark:text-slate-500 select-none">
+                /KG
+              </span>
+            </div>
+
+            {/* Live Margin % badge */}
+            {avgCost > 0 && isValidNumber && profitPerKg !== null && (
+              <div
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors shadow-2xs ${
+                  isBelowCost
+                    ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/60'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60'
+                }`}
+              >
+                {isBelowCost ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                    <span>
+                      Below Cost ({marginPct}%) • Loss: -Rs. {Math.abs(profitPerKg).toFixed(2)}/KG
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>
+                      +{marginPct}% Margin • Profit: +Rs. {profitPerKg.toFixed(2)}/KG
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {avgCost === 0 && (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 italic">
+                (No Avg Cost recorded yet)
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Quick Margin Pills & Save Button */}
+        {canEdit && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 pt-2 sm:pt-0">
+            {/* Quick Margin Pills */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mr-1 select-none hidden sm:inline">
+                Margin:
+              </span>
+              {[10, 15, 20, 25].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  disabled={avgCost <= 0 || isSaving}
+                  onClick={() => applyMarginPct(pct)}
+                  className="px-2 py-1.5 text-xs font-bold rounded-lg bg-white dark:bg-[#121520] hover:bg-blue-50 dark:hover:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-slate-200 dark:border-[#23283B] hover:border-blue-300 dark:hover:border-blue-800 transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs"
+                  title={avgCost > 0 ? `Set price to Avg Cost + ${pct}%` : 'Requires Avg Cost > 0'}
+                >
+                  +{pct}%
+                </button>
+              ))}
+            </div>
+
+            {/* Save Button */}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!isValidNumber || !isChanged || isSaving}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs sm:text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-xl shadow-md shadow-blue-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Save Price</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function InventoryValuationPage() {
@@ -169,6 +368,7 @@ export default function InventoryValuationPage() {
       }
 
       const group = groupMap.get(normalizedName)!;
+      group.groupName = pickCanonicalGroupName([group.groupName, p.product_name.trim()]);
       group.variants.push(p);
       group.totalGroupStock += stockKg;
       group.totalGroupAssetValue += assetVal;
@@ -292,10 +492,10 @@ export default function InventoryValuationPage() {
             <button
               onClick={() => setIsUpdateStockOpen(true)}
               className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 via-black-700 to-indigo-800 hover:from-blue-700 hover:to-indigo-800 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
-              title="Update Delivery Charges and Selling Price for latest purchase stocks"
+              title="Allocate Delivery Charges and calculate Landed Cost & Pricing for purchase shipments"
             >
               <TrendingUp className="h-4 w-4" />
-              <span>Update Stocks</span>
+              <span>Allocate Delivery Charges & Pricing</span>
             </button>
           )}
           <button
@@ -961,26 +1161,39 @@ export default function InventoryValuationPage() {
 
               {/* Modal Body (Scrollable) */}
               <div className="p-6 overflow-y-auto space-y-6">
-                {/* Quick KPI Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#121520] border border-slate-200/80 dark:border-[#23283B]">
-                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Current Stock on Hand</div>
-                    <div className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
-                      {stockKg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KG
+                {/* Quick KPI Cards & Selling Price Editor */}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#121520] border border-slate-200/80 dark:border-[#23283B]">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Current Stock on Hand</div>
+                      <div className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
+                        {stockKg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KG
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#121520] border border-slate-200/80 dark:border-[#23283B]">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Avg. Cost / KG</div>
+                      <div className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
+                        Rs. {product.current_wac.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#121520] border border-slate-200/80 dark:border-[#23283B]">
+                      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Asset Value</div>
+                      <div className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
+                        Rs. {assetVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
                     </div>
                   </div>
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#121520] border border-slate-200/80 dark:border-[#23283B]">
-                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Avg. Cost / KG</div>
-                    <div className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
-                      Rs. {product.current_wac.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#121520] border border-slate-200/80 dark:border-[#23283B]">
-                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Asset Value</div>
-                    <div className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
-                      Rs. {assetVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                  </div>
+
+                  {/* Fast Selling Price / KG Editor Card */}
+                  <SellingPriceEditorCard
+                    product={product}
+                    canEdit={!isCashier}
+                    onPriceUpdated={(newPrice) => {
+                      setSelectedFifoProduct((prev) =>
+                        prev ? { ...prev, sale_price: newPrice, selling_price: newPrice } : null
+                      );
+                    }}
+                  />
                 </div>
 
                 {/* Purchase Lots (FIFO) */}

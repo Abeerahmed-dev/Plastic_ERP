@@ -48,7 +48,7 @@ async function allocatePaymentToInvoices(
           .orWhere('invoice_type', 'RETURN')
           .orWhere('invoice_number', 'like', 'CN-%');
       })
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .sum('total_amount as total_returned')
       .first();
 
@@ -87,7 +87,7 @@ async function allocatePaymentToInvoices(
 
     const unpaidInvoices = await trx('sales_invoices')
       .where('customer_id', customerId)
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .whereNot('status', 'PAID')
       .where(function() {
         this.whereNull('invoice_type')
@@ -115,7 +115,7 @@ async function allocatePaymentToInvoices(
             .orWhere('invoice_type', 'RETURN')
             .orWhere('invoice_number', 'like', 'CN-%');
         })
-        .whereNot('status', 'CANCELLED')
+        .whereNotIn('status', ['CANCELLED', 'VOID'])
         .sum('total_amount as total_returned')
         .first();
 
@@ -395,7 +395,7 @@ export async function findAllPayments(query?: { search?: string; customer_id?: s
   // 1. Fetch Invoices with their linked payments
   const invoicesQuery = db('sales_invoices as si')
     .join('customers as c', 'si.customer_id', 'c.id')
-    .whereNot('si.status', 'CANCELLED')
+    .whereNotIn('si.status', ['CANCELLED', 'VOID'])
     .modify((qb) => {
       if (customer_id) qb.where('si.customer_id', customer_id);
       if (invoice_id) qb.where('si.id', invoice_id);
@@ -470,7 +470,7 @@ export async function findAllPayments(query?: { search?: string; customer_id?: s
     ? await db('sales_invoices')
         .whereIn('parent_invoice_id', invoiceIds)
         .where('invoice_type', 'CREDIT_NOTE')
-        .whereNot('status', 'CANCELLED')
+        .whereNotIn('status', ['CANCELLED', 'VOID'])
         .select(
           'id',
           'parent_invoice_id',

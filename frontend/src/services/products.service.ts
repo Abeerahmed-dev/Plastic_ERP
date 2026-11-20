@@ -51,6 +51,15 @@ export const productsService = {
     return response.data.data;
   },
 
+  updateSellingPrice: async (id: string, price: number): Promise<Product> => {
+    const response = await api.patch<ApiSuccess<Product>>(`/products/${id}/price`, {
+      sale_price: price,
+      selling_price: price,
+      fixed_retail_price_per_kg: price,
+    });
+    return response.data.data;
+  },
+
   deleteProduct: async (id: string): Promise<void> => {
     await api.delete(`/products/${id}`);
   },

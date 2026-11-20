@@ -1,7 +1,7 @@
 import db from '../../db/knex';
 import { CreateInvoiceInput } from './invoices.schemas';
 import { estimateOverdraftCogs, getLatestMarketBatchPrice } from '../../shared/overdraftPricing';
-import { ValidationError, NotFoundError } from '../../shared/errors';
+import { ValidationError, NotFoundError, ConflictError } from '../../shared/errors';
 
 export interface InvoiceRow {
   id: string;
@@ -1083,7 +1083,7 @@ export async function processSalesReturn(
       const remainingQty = originalQty - previouslyReturned;
 
       if (itemInput.return_quantity > remainingQty + 0.0001) {
-        throw new Error(
+        throw new ValidationError(
           `Return quantity for ${parentItem.product_name} exceeds remaining returnable quantity (Requested: ${itemInput.return_quantity}, Available: ${remainingQty}).`
         );
       }
@@ -1196,32 +1196,16 @@ export async function processSalesReturn(
       });
     }
 
-    // Update Parent Invoice: Deduct total return value from both total_amount and balance_due
-    await trx.raw(
-      `UPDATE sales_invoices 
-       SET total_amount = total_amount - ?, 
-           balance_due = GREATEST(0, COALESCE(balance_due, total_amount - paid_amount) - ?)${hasReturnsCol ? ', has_returns = true' : ''},
-           updated_at = NOW() 
-       WHERE id = ?`,
-      [totalCreditAmount, totalCreditAmount, parentInvoiceId]
-    );
-
-    // Recalculate parent invoice status based on updated total_amount and balance_due
-    const updatedParent = await trx('sales_invoices').where('id', parentInvoiceId).first();
-    if (updatedParent && updatedParent.status !== 'CANCELLED') {
-      const pTotal = Number(updatedParent.total_amount || 0);
-      const pPaid = Number(updatedParent.paid_amount || 0);
-      const pBalance = Number(updatedParent.balance_due || 0);
-      let newStatus = updatedParent.status;
-      if (pTotal <= 0 || pBalance <= 0) {
-        newStatus = 'PAID';
-      } else if (pPaid > 0) {
-        newStatus = 'PARTIAL';
-      } else {
-        newStatus = 'UNPAID';
-      }
-      await trx('sales_invoices').where('id', parentInvoiceId).update({ status: newStatus });
+    // Flag parent invoice that it has returns without mutating total_amount (which causes double-deduction)
+    const parentUpdatePayload: Record<string, any> = {
+      updated_at: new Date(),
+    };
+    if (hasReturnsCol) {
+      parentUpdatePayload.has_returns = true;
     }
+    await trx('sales_invoices')
+      .where('id', parentInvoiceId)
+      .update(parentUpdatePayload);
 
     return creditNote;
   });
@@ -1375,7 +1359,7 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
           .orWhere('si.invoice_type', 'RETURN')
           .orWhere('si.invoice_number', 'like', 'CN-%');
       })
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .select('si.*')
       .orderBy('si.created_at', 'asc');
 
@@ -1467,7 +1451,7 @@ export async function findInvoiceById(id: string) {
         .orWhere('si.invoice_type', 'RETURN')
         .orWhere('si.invoice_number', 'like', 'CN-%');
     })
-    .whereNot('si.status', 'CANCELLED')
+    .whereNotIn('si.status', ['CANCELLED', 'VOID'])
     .select(
       'si.*',
       'c.name as customer_name',
@@ -1968,7 +1952,7 @@ export async function voidInvoice(
     }
 
     if (invoice.status === 'VOID') {
-      throw new Error(`Invoice with ID ${invoiceId} is already VOID`);
+      throw new ConflictError(`Invoice with ID ${invoiceId} is already VOID`);
     }
 
     // 2. Stock Restoration: Fetch all sales_invoice_items tied to this invoice.
@@ -2082,8 +2066,15 @@ export async function voidInvoice(
         });
     }
 
-    // 4. Wallet Transfer: Fetch all payments linked to this invoice_id.
-    // Update these rows to set is_advance = true (or equivalent logic to route cash to Customer's Advance Wallet).
+    // 4. Payment Settlement Handling:
+    // Check whether the invoice belongs to a Cash Customer vs Credit Customer
+    const customer = invoice.customer_id
+      ? await trx('customers').where('id', invoice.customer_id).first()
+      : null;
+    const isCashCustomer =
+      (customer && (customer.customer_type === 'CASH' || Boolean(customer.is_cash_customer))) ||
+      invoice.payment_type === 'CASH';
+
     const hasCustomerPayments = await trx.schema.hasTable('customer_payments');
     const paymentTableName = hasCustomerPayments ? 'customer_payments' : 'payments';
 
@@ -2099,7 +2090,7 @@ export async function voidInvoice(
     const hasLinkedInvoiceId = await trx.schema.hasColumn(paymentTableName, 'linked_invoice_id');
     const hasPaymentType = await trx.schema.hasColumn(paymentTableName, 'payment_type');
 
-    // Remove payment allocations for this invoice so paid amounts route to advance credit
+    // Remove payment allocations for this invoice so paid amounts route to advance credit (for credit customers)
     const hasAllocationsTable = await trx.schema.hasTable('payment_allocations');
     const allocatedPaymentIds: string[] = [];
     if (hasAllocationsTable) {
@@ -2114,16 +2105,6 @@ export async function voidInvoice(
         .where('invoice_id', invoiceId)
         .delete();
     }
-
-    // Convert linked payments to advance
-    const paymentUpdatePayload: Record<string, any> = {
-      is_advance: true,
-      updated_at: new Date(),
-    };
-    if (hasPaymentType) paymentUpdatePayload.payment_type = 'ADVANCE';
-    if (hasSalesInvoiceId) paymentUpdatePayload.sales_invoice_id = null;
-    if (hasInvoiceId) paymentUpdatePayload.invoice_id = null;
-    if (hasLinkedInvoiceId) paymentUpdatePayload.linked_invoice_id = null;
 
     const pmtQuery = trx(paymentTableName);
     pmtQuery.where((qb) => {
@@ -2149,7 +2130,60 @@ export async function voidInvoice(
       }
     });
 
-    await pmtQuery.update(paymentUpdatePayload);
+    const linkedPayments: any[] = await pmtQuery.clone().select('*');
+
+    if (isCashCustomer) {
+      // True Atomic Liquidity Reversal on Cash Customer Void:
+      // 1. Decrement bank account current_balance for any linked bank splits
+      for (const pmt of linkedPayments) {
+        if (pmt.bank_account_id) {
+          const amt = Number(pmt.amount || 0);
+          if (amt > 0) {
+            await trx('bank_accounts')
+              .where('id', pmt.bank_account_id)
+              .decrement('current_balance', amt);
+          }
+        }
+      }
+
+      // 2. Reverse/delete linked bank_transactions for this invoice
+      const hasBankTx = await trx.schema.hasTable('bank_transactions');
+      if (hasBankTx) {
+        await trx('bank_transactions')
+          .where('reference_id', invoiceId)
+          .where((qb) => {
+            qb.whereIn('source', ['SALES', 'POS', 'SALES_INVOICE'])
+              .orWhereIn('source_type', ['SALES', 'POS', 'SALES_INVOICE'])
+              .orWhereIn('category', ['SALES', 'POS']);
+          })
+          .delete();
+      }
+
+      // 3. Delete linked customer_payments so Cash Drawer & Bank balances drop back by the exact split amounts
+      const linkedPaymentIds = linkedPayments.map((p) => p.id).filter(Boolean);
+      if (linkedPaymentIds.length > 0) {
+        if (hasAllocationsTable) {
+          await trx('payment_allocations')
+            .whereIn('payment_id', linkedPaymentIds)
+            .delete();
+        }
+        await trx(paymentTableName)
+          .whereIn('id', linkedPaymentIds)
+          .delete();
+      }
+    } else {
+      // Credit customer: Keep existing behavior (converting linked payments to advance credits)
+      const paymentUpdatePayload: Record<string, any> = {
+        is_advance: true,
+        updated_at: new Date(),
+      };
+      if (hasPaymentType) paymentUpdatePayload.payment_type = 'ADVANCE';
+      if (hasSalesInvoiceId) paymentUpdatePayload.sales_invoice_id = null;
+      if (hasInvoiceId) paymentUpdatePayload.invoice_id = null;
+      if (hasLinkedInvoiceId) paymentUpdatePayload.linked_invoice_id = null;
+
+      await pmtQuery.update(paymentUpdatePayload);
+    }
 
     // 5. Status Update: Update sales_invoices row to status = 'VOID'
     const cleanedReason = (typeof voidReason === 'string' && voidReason.trim().length > 0)

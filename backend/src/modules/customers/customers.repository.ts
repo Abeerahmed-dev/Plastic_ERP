@@ -112,7 +112,7 @@ export async function computeCustomerNetBalance(
     // Query A (Total Billed Invoices/POS): SUM(total_amount) from sales_invoices where customer_id = X (Exclude CREDIT_NOTEs)
     trx('sales_invoices')
       .where('customer_id', customerId)
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .where((qb) => {
         qb.whereNull('invoice_type')
           .orWhereNotIn('invoice_type', ['CREDIT_NOTE', 'RETURN']);
@@ -124,7 +124,7 @@ export async function computeCustomerNetBalance(
     // Query Returns (Total Returned): SUM(ABS(total_amount)) where invoice_type = 'CREDIT_NOTE' / 'RETURN'
     trx('sales_invoices')
       .where('customer_id', customerId)
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .where((qb) => {
         qb.whereIn('invoice_type', ['CREDIT_NOTE', 'RETURN'])
           .orWhere('total_amount', '<', 0);
@@ -136,14 +136,17 @@ export async function computeCustomerNetBalance(
     trx('payment_allocations as pa')
       .join('sales_invoices as si', 'pa.invoice_id', 'si.id')
       .where('si.customer_id', customerId)
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .sum('pa.allocated_amount as total_allocated')
       .first<{ total_allocated: string | number | null }>(),
 
-    // Query B (Total Raw Paid): All raw customer payments received (excluding BOUNCED, FAILED, and synthetic WALLET_ADVANCE)
+    // Query B (Total Raw Paid): All raw customer payments received (excluding BOUNCED, FAILED, PENDING PDCs, and synthetic WALLET_ADVANCE)
     trx('customer_payments')
       .where('customer_id', customerId)
-      .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+      .where((qb) => {
+        qb.whereNull('cheque_status')
+          .orWhereNotIn('cheque_status', ['PENDING', 'BOUNCED', 'FAILED']);
+      })
       .where((qb) => {
         qb.whereNull('payment_method')
           .orWhereNot('payment_method', 'WALLET_ADVANCE');
@@ -155,7 +158,10 @@ export async function computeCustomerNetBalance(
     trx('payment_allocations as pa')
       .join('customer_payments as cp', 'pa.payment_id', 'cp.id')
       .where('cp.customer_id', customerId)
-      .whereNotIn('cp.cheque_status', ['BOUNCED', 'FAILED'])
+      .where((qb) => {
+        qb.whereNull('cp.cheque_status')
+          .orWhereNotIn('cp.cheque_status', ['PENDING', 'BOUNCED', 'FAILED']);
+      })
       .sum('pa.allocated_amount as total_allocated')
       .first<{ total_allocated: string | number | null }>(),
   ]);
@@ -469,7 +475,7 @@ export async function getCustomerStatement(id: string, trx: Knex.Transaction | K
   // 1. Invoices & Credit Notes
   const invoices = await trx('sales_invoices')
     .where('customer_id', id)
-    .whereNot('status', 'CANCELLED')
+    .whereNotIn('status', ['CANCELLED', 'VOID'])
     .select('id', 'date', 'invoice_number', 'total_amount', 'invoice_type', 'notes', 'created_at');
 
   for (const inv of invoices) {
@@ -667,7 +673,7 @@ export async function getCustomerRefundableCredits(
   // 1. Query Overpaid Invoices: Fetch sales invoices where (amount_paid - net_total) > 0
   const salesInvoices = await trx('sales_invoices as si')
     .where('si.customer_id', customerId)
-    .whereNot('si.status', 'CANCELLED')
+    .whereNotIn('si.status', ['CANCELLED', 'VOID'])
     .where((qb) => {
       qb.whereNull('si.invoice_type')
         .orWhereNotIn('si.invoice_type', ['CREDIT_NOTE', 'RETURN']);
@@ -684,7 +690,7 @@ export async function getCustomerRefundableCredits(
         this.whereIn('invoice_type', ['CREDIT_NOTE', 'RETURN'])
           .orWhere('invoice_number', 'like', 'CN-%');
       })
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .select('parent_invoice_id', 'total_amount');
 
     const returnedByInvoice = new Map<string, number>();
@@ -747,7 +753,10 @@ export async function getCustomerRefundableCredits(
           inner.whereNull('invoice_id').whereNull('linked_invoice_id');
         });
     })
-    .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+    .where((qb) => {
+      qb.whereNull('cheque_status')
+        .orWhereNotIn('cheque_status', ['PENDING', 'BOUNCED', 'FAILED']);
+    })
     .where('amount', '>', 0)
     .where((qb) => {
       qb.whereNull('payment_method')

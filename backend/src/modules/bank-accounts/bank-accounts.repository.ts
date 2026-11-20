@@ -91,16 +91,16 @@ export async function getBankAccountBalanceDetail(
     .sum('e.amount as total')
     .first();
 
-  // 4. Bank transactions table (excluding OPEX rows which are already tracked via expenses table, and excluding duplicate payment entries)
+  // 4. Bank transactions table (excluding OPEX rows which are already tracked via expenses table, and excluding duplicate payment/sales entries)
   const hasBankTx = await trx.schema.hasTable('bank_transactions');
   const manualQuery = hasBankTx
     ? trx('bank_transactions')
         .where('bank_account_id', accountId)
         .where((qb) => {
-          qb.whereNull('source').orWhereNotIn('source', ['OPEX', 'PAYMENT', 'SUPPLIER_PAYMENT', 'SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
+          qb.whereNull('source').orWhereNotIn('source', ['OPEX', 'PAYMENT', 'SUPPLIER_PAYMENT', 'SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE', 'SALES', 'POS', 'SALES_INVOICE']);
         })
         .where((qb) => {
-          qb.whereNull('category').orWhereNotIn('category', ['SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
+          qb.whereNull('category').orWhereNotIn('category', ['SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE', 'SALES', 'POS']);
         })
     : Promise.resolve([]);
 
@@ -503,16 +503,16 @@ export async function getBankAccountTransactions(
       'e.created_at'
     );
 
-  // 4. Day Zero Capital Injections / Bank Transactions (excluding OPEX rows which are tracked via expenses, and excluding duplicate payment entries)
+  // 4. Day Zero Capital Injections / Bank Transactions (excluding OPEX rows which are tracked via expenses, and excluding duplicate payment/sales entries)
   const hasBankTx = await db.schema.hasTable('bank_transactions');
   const manualQuery = hasBankTx
     ? db('bank_transactions')
         .where('bank_account_id', accountId)
         .where((qb) => {
-          qb.whereNull('source').orWhereNotIn('source', ['OPEX', 'PAYMENT', 'SUPPLIER_PAYMENT', 'SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
+          qb.whereNull('source').orWhereNotIn('source', ['OPEX', 'PAYMENT', 'SUPPLIER_PAYMENT', 'SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE', 'SALES', 'POS', 'SALES_INVOICE']);
         })
         .where((qb) => {
-          qb.whereNull('category').orWhereNotIn('category', ['SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE']);
+          qb.whereNull('category').orWhereNotIn('category', ['SUPPLIER_ADVANCE', 'CUSTOMER_ADVANCE', 'SALES', 'POS']);
         })
         .select('id', 'amount', 'transaction_date', 'description', 'type', 'category', 'created_at')
     : Promise.resolve([]);

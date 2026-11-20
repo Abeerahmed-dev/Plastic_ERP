@@ -31,6 +31,7 @@ export async function getDashboardMetrics() {
   const getMetricsForPeriod = async (startDate: Date) => {
     const result = await db('sales_invoices')
       .where('customer_id', walkinId)
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .andWhere('created_at', '>=', startDate)
       .sum('total_amount as revenue')
       .count('id as count')
@@ -139,8 +140,26 @@ export async function getInventoryLedgerReport() {
 
   for (const p of products) {
     const total_kg = Math.round(Number(p.total_stock_kg || 0) * 100) / 100;
-    const avg_cost = Math.round(Number(p.rolling_avg_cost_per_kg || 0) * 100) / 100;
-    const total_asset_value = Math.round((total_kg * avg_cost) * 100) / 100;
+    const fallbackAvgCost = Math.round(Number(p.rolling_avg_cost_per_kg || p.cost_price || 0) * 100) / 100;
+
+    const pBatches = batchMap.get(p.product_id) || [];
+    let fifoAssetValue = 0;
+    let totalBatchRem = 0;
+    for (const b of pBatches) {
+      const rem = Number(b.remaining_qty || 0);
+      const buyPrice = Number(b.buy_price_per_kg || 0);
+      if (rem > 0) {
+        fifoAssetValue += rem * buyPrice;
+        totalBatchRem += rem;
+      }
+    }
+
+    const total_asset_value = totalBatchRem > 0
+      ? Math.round(fifoAssetValue * 100) / 100
+      : Math.round((total_kg * fallbackAvgCost) * 100) / 100;
+    const avg_cost = total_kg > 0
+      ? Math.round((total_asset_value / total_kg) * 100) / 100
+      : fallbackAvgCost;
 
     const bagWeight = Number(p.bag_weight_kg || 25.0);
     const approxBags = bagWeight > 0 ? Math.round((total_kg / bagWeight) * 10) / 10 : 0;
@@ -506,7 +525,7 @@ export async function getSalesMarginReport(productId?: string, timeFilter?: stri
   let query = db('sales_invoice_items as sii')
     .innerJoin('sales_invoices as si', 'sii.invoice_id', 'si.id')
     .leftJoin('products as p', 'sii.product_id', 'p.id')
-    .whereNot('si.status', 'CANCELLED')
+    .whereNotIn('si.status', ['CANCELLED', 'VOID'])
     .select(
       'si.id as invoice_id',
       'si.total_amount',
@@ -609,6 +628,7 @@ export async function getCashierTallyReport(userId: string) {
 
   const posSalesResult = await db('sales_invoices')
     .where('created_by', userId)
+    .whereNotIn('status', ['CANCELLED', 'VOID'])
     .where('created_at', '>=', startOfDay)
     .sum('paid_amount as total')
     .count('id as count')
@@ -635,14 +655,14 @@ export async function getPnLReport(startDate?: string, endDate?: string) {
     const { startDate: sDateObj, endDate: eDateObj } = parseDateFilter(startDate, endDate);
 
     let salesQuery = db('sales_invoices as si')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .select(db.raw('SUM(CAST(si.total_amount AS NUMERIC)) as total'));
 
     const cogsQuery = db('sales_invoice_items as sii')
       .whereIn('sii.invoice_id', function () {
         this.select('si.id')
           .from('sales_invoices as si')
-          .whereNot('si.status', 'CANCELLED')
+          .whereNotIn('si.status', ['CANCELLED', 'VOID'])
           .modify((qb: any) => {
             if (sDateObj) {
               qb.whereRaw('COALESCE(si.date, si.created_at::date) >= ?', [sDateObj]);
@@ -1122,7 +1142,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
 
     // 1. Gross Sales & Delivery Revenue Query
     const salesQuery = db('sales_invoices as si')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .where(function () {
         this.whereNull('si.invoice_type').orWhere('si.invoice_type', 'SALE');
       })
@@ -1135,7 +1155,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
 
     // 2. Sales Returns Query
     const returnsQuery = db('sales_invoices as si')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .where(function () {
         this.where('si.invoice_type', 'CREDIT_NOTE')
           .orWhere('si.invoice_type', 'RETURN')
@@ -1150,7 +1170,7 @@ export async function getIncomeStatementReport(startDate?: string, endDate?: str
       .whereIn('sii.invoice_id', function () {
         this.select('si.id')
           .from('sales_invoices as si')
-          .whereNot('si.status', 'CANCELLED')
+          .whereNotIn('si.status', ['CANCELLED', 'VOID'])
           .where(function () {
             this.whereNull('si.invoice_type')
               .orWhere('si.invoice_type', 'SALE')
@@ -1247,7 +1267,7 @@ export async function getIncomeStatementReturnsDetail(startDate?: string, endDat
       .leftJoin('customers as c', 'si.customer_id', 'c.id')
       .leftJoin('products as p', 'sii.product_id', 'p.id')
       .leftJoin('sales_invoices as psi', 'si.parent_invoice_id', 'psi.id')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .where(function () {
         this.where('si.invoice_type', 'CREDIT_NOTE')
           .orWhere('si.invoice_type', 'RETURN')
@@ -1305,7 +1325,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .join('sales_invoices as si', 'sii.invoice_id', 'si.id')
       .join('products as p', 'sii.product_id', 'p.id')
       .leftJoin('categories as c', 'p.category_id', 'c.id')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .where(function () {
         this.whereNull('si.invoice_type')
           .orWhere('si.invoice_type', 'SALE')
@@ -1329,7 +1349,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
       .join('customers as cust', 'si.customer_id', 'cust.id')
       .join('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
       .leftJoin('products as p', 'sii.product_id', 'p.id')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .where(function () {
         this.whereNull('si.invoice_type')
           .orWhere('si.invoice_type', 'SALE')
@@ -1351,7 +1371,7 @@ export async function getMarginAnalyticsReport(startDate?: string, endDate?: str
     let tQuery = db('sales_invoices as si')
       .join('sales_invoice_items as sii', 'sii.invoice_id', 'si.id')
       .leftJoin('products as p', 'sii.product_id', 'p.id')
-      .whereNot('si.status', 'CANCELLED')
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .where(function () {
         this.whereNull('si.invoice_type')
           .orWhere('si.invoice_type', 'SALE')
@@ -1476,7 +1496,9 @@ export async function getInventoryValuationReport() {
         'p.total_stock_kg',
         'p.rolling_avg_cost_per_kg',
         'p.cost_price',
-        'p.low_stock_threshold'
+        'p.low_stock_threshold',
+        'p.sale_price',
+        'p.fixed_retail_price_per_kg'
       )
       .orderBy('p.name', 'asc');
 
@@ -1492,7 +1514,7 @@ export async function getInventoryValuationReport() {
           'ib.id as bucket_id',
           'ib.product_id',
           'ib.batch_number',
-          'ib.batch_buy_price_per_kg as buy_price_per_kg',
+          db.raw('COALESCE(ib.batch_buy_price_per_kg, ib.buy_price_per_kg, 0) as buy_price_per_kg'),
           'ib.original_qty as original_stock',
           'ib.remaining_qty as remaining_stock',
           'ib.status',
@@ -1529,7 +1551,7 @@ export async function getInventoryValuationReport() {
     // Fetch Lifetime Sales per product
     const salesAgg = await db('sales_invoice_items as sii')
       .join('sales_invoices as si', 'sii.invoice_id', 'si.id')
-      .whereRaw('si.status != ?', ['CANCELLED'])
+      .whereNotIn('si.status', ['CANCELLED', 'VOID'])
       .groupBy('sii.product_id')
       .select(
         'sii.product_id',
@@ -1552,7 +1574,7 @@ export async function getInventoryValuationReport() {
     // Fetch Lifetime Purchases per product
     const purchasesAgg = await db('purchase_invoice_items as pii')
       .join('purchase_invoices as pi', 'pii.purchase_invoice_id', 'pi.id')
-      .whereRaw('pi.status != ?', ['CANCELLED'])
+      .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
       .groupBy('pii.product_id')
       .select(
         'pii.product_id',
@@ -1585,12 +1607,30 @@ export async function getInventoryValuationReport() {
 
     const products = rows.map((r: any) => {
       const stock_on_hand = Math.round(Number(r.total_stock_kg || 0) * 100) / 100;
-      const current_wac = Math.round(Number(r.rolling_avg_cost_per_kg || r.cost_price || 0) * 100) / 100;
-      const asset_value = Math.round(stock_on_hand * current_wac * 100) / 100;
+      const fallbackWac = Math.round(Number(r.rolling_avg_cost_per_kg || r.cost_price || 0) * 100) / 100;
+
+      let buckets = batchMap.get(r.id) || [];
+      let fifoValuation = 0;
+      let totalBatchRemaining = 0;
+      for (const b of buckets) {
+        const rem = Number(b.remaining_stock || 0);
+        const price = Number(b.buy_price_per_kg || 0);
+        if (rem > 0) {
+          fifoValuation += rem * price;
+          totalBatchRemaining += rem;
+        }
+      }
+
+      const asset_value = totalBatchRemaining > 0
+        ? Math.round(fifoValuation * 100) / 100
+        : Math.round(stock_on_hand * fallbackWac * 100) / 100;
+
+      const current_wac = stock_on_hand > 0
+        ? Math.round((asset_value / stock_on_hand) * 100) / 100
+        : fallbackWac;
 
       total_warehouse_capital += asset_value;
 
-      let buckets = batchMap.get(r.id) || [];
       if (buckets.length === 0 && stock_on_hand > 0) {
         buckets = [
           {
@@ -1622,6 +1662,8 @@ export async function getInventoryValuationReport() {
         ? Math.max(0, Math.round((low_stock_threshold - stock_on_hand) * 100) / 100)
         : 0;
 
+      const activeSellingPrice = Math.round(Number(r.fixed_retail_price_per_kg || r.sale_price || 0) * 100) / 100;
+
       return {
         id: r.id,
         product_name: r.product_name || 'Unnamed Product',
@@ -1640,6 +1682,8 @@ export async function getInventoryValuationReport() {
         lifetime_kg_sold,
         lifetime_kg_acquired,
         all_time_gross_margin,
+        sale_price: activeSellingPrice,
+        selling_price: activeSellingPrice,
       };
     });
 

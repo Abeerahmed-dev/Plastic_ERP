@@ -158,10 +158,10 @@ export const UpdateStockModal = ({ isOpen, onClose }: UpdateStockModalProps) => 
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
-                Update Stock & Final Selling Price
+                Allocate Delivery Charges & Pricing
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Allocate Delivery Charges (DC) per KG & set active selling price for sales/POS
+                Allocate Delivery Charges (DC) per KG & set active selling price for shipments
               </p>
             </div>
           </div>

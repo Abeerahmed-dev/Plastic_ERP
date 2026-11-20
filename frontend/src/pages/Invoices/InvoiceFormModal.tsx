@@ -15,7 +15,7 @@ import { toast, handleApiError } from '../../utils/toast';
 import { A4SalesInvoice } from '../../components/print/A4SalesInvoice';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
 import { DateInput } from '../../components/DateInput';
-import { compareProducts, formatProductTitle } from '../../utils/productSorting';
+import { compareProducts, formatProductTitle, groupProductsByFamily } from '../../utils/productSorting';
 import { invalidateSalesInvoiceQueries } from '../../utils/querySync';
 import { erpSyncBus } from '../../utils/erpSyncBus';
 
@@ -208,38 +208,28 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     setSplitRows((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Step 1: Group products by product_name
+  // Step 1: Group products by normalized product_name (case-insensitive & trimmed)
   const groupedProducts = useMemo(() => {
-    const groups: Record<string, typeof products> = {};
-    (products || []).forEach((p) => {
-      const family = (p.name || '').trim();
-      if (!family) return;
-      if (!groups[family]) {
-        groups[family] = [];
-      }
-      groups[family].push(p);
-    });
-    Object.keys(groups).forEach((key) => {
-      groups[key].sort(compareProducts);
-    });
-    return groups;
+    return groupProductsByFamily(products || []);
   }, [products]);
 
-  const productFamilies = useMemo(() => {
-    return Object.keys(groupedProducts).sort((a, b) => a.localeCompare(b));
+  const familyOptions: ComboboxOption[] = useMemo(() => {
+    return Object.values(groupedProducts)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      .map((g) => ({
+        value: g.name,
+        label: g.name,
+        subLabel: `${g.variants.length} variant${g.variants.length > 1 ? 's' : ''}`,
+      }));
   }, [groupedProducts]);
 
-  const familyOptions: ComboboxOption[] = useMemo(() => {
-    return productFamilies.map((fam) => ({
-      value: fam,
-      label: fam,
-      subLabel: `${groupedProducts[fam]?.length || 0} variant${(groupedProducts[fam]?.length || 0) > 1 ? 's' : ''}`,
-    }));
-  }, [productFamilies, groupedProducts]);
-
   const handleFamilyChange = (index: number, familyName: string) => {
-    setValue(`items.${index}.selected_family_name`, familyName);
-    const variants = groupedProducts[familyName] || [];
+    const selectedGroupKey = (familyName || '').trim().toLowerCase();
+    const group = groupedProducts[selectedGroupKey];
+    const canonicalName = group ? group.name : (familyName || '').trim();
+    setValue(`items.${index}.selected_family_name`, canonicalName);
+
+    const variants = group?.variants || [];
     if (variants.length === 1) {
       const singleVariant = variants[0];
       setValue(`items.${index}.selected_variant_id`, singleVariant.id);
@@ -266,7 +256,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       const stdWeight = Number(product.bag_weight_kg || 25);
       const unitPrice = Number(product.sale_price || 0);
       setValue(`items.${index}.unit_price`, unitPrice);
-      
+
       const currentBags = items[index]?.bags_input;
       let requestedKg = stdWeight;
       if (currentBags !== undefined && currentBags !== '' && Number(currentBags) > 0) {
@@ -288,7 +278,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     const selectedProd = products.find(p => p.id === selectedProdId);
     const stdWeight = selectedProd && selectedProd.bag_weight_kg ? Number(selectedProd.bag_weight_kg) : 25;
     const unitPrice = Number(items[index]?.unit_price || 0);
-    
+
     if (numBags > 0) {
       const requestedKg = Number((numBags * stdWeight).toFixed(2));
       setValue(`items.${index}.quantity`, requestedKg);
@@ -445,16 +435,21 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   });
 
   const resumeHeldInvoice = (order: POSHeldOrder) => {
-    const parsedItems = (order.items || []).map((it: any) => ({
-      product_id: it.product_id || '',
-      selected_family_name: it.selected_family_name || it.productName || it.name || '',
-      selected_variant_id: it.selected_variant_id || it.product_id || '',
-      bags_input: it.bags_input ?? 1,
-      quantity: Number(it.quantity) || 0,
-      unit_price: Number(it.unit_price) || 0,
-      total: Number(it.total) || 0,
-      total_price: Number(it.total_price || it.total) || 0,
-    }));
+    const parsedItems = (order.items || []).map((it: any) => {
+      const rawFam = (it.selected_family_name || it.productName || it.name || '').trim();
+      const group = groupedProducts[rawFam.toLowerCase()];
+      const canonicalName = group ? group.name : rawFam;
+      return {
+        product_id: it.product_id || '',
+        selected_family_name: canonicalName,
+        selected_variant_id: it.selected_variant_id || it.product_id || '',
+        bags_input: it.bags_input ?? 1,
+        quantity: Number(it.quantity) || 0,
+        unit_price: Number(it.unit_price) || 0,
+        total: Number(it.total) || 0,
+        total_price: Number(it.total_price || it.total) || 0,
+      };
+    });
 
     reset({
       customer_id: order.customer_id || '',
@@ -698,9 +693,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
       const cleanSplits = isCashCustomer && isSplitPayment
         ? splitRows.map((r) => ({
-            payment_account_id: r.payment_account_id,
-            amount: Math.round(Number(r.amount) * 100) / 100,
-          }))
+          payment_account_id: r.payment_account_id,
+          amount: Math.round(Number(r.amount) * 100) / 100,
+        }))
         : undefined;
 
       const cleanData = {
@@ -743,10 +738,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   if (!isOpen) return null;
 
   const inputCls = (hasError: boolean) =>
-    `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
-      hasError
-        ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
-        : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
+    `block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${hasError
+      ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+      : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500/20'
     }`;
 
   const formatCurrency = (val: number) => {
@@ -936,8 +930,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                     const rowFamily = items[index]?.selected_family_name || (
                       selectedProd ? selectedProd.name : ''
                     ) || '';
+                    const selectedGroupKey = rowFamily.trim().toLowerCase();
+                    const group = groupedProducts[selectedGroupKey];
 
-                    const variantList = rowFamily ? [...(groupedProducts[rowFamily] || [])].sort(compareProducts) : [];
+                    const variantList = group ? [...group.variants].sort(compareProducts) : [];
                     const variantOptions: ComboboxOption[] = variantList.map((p) => {
                       const vStock = Number(p.total_stock_kg ?? p.current_stock ?? 0);
                       const vBagWeight = Number(p.bag_weight_kg || 25);
@@ -945,7 +941,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                       const isZero = vStock <= 0;
                       return {
                         value: p.id,
-                        label: p.size ? `${formatProductTitle(p.name, p.size)} (${p.code})` : `${p.name} (${p.code})`,
+                        label: p.size ? `${formatProductTitle(group?.name || p.name, p.size)} (${p.code})` : `${group?.name || p.name} (${p.code})`,
                         badge: isZero ? 'Out of Stock' : `${vStock.toLocaleString()} KG`,
                         subLabel: `Stock: ${vStock.toLocaleString()} KG (${vBags} Bags) • Std: ${vBagWeight.toFixed(0)} KG/bag`,
                       };
@@ -1025,18 +1021,16 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                             <div className="mt-1.5 space-y-1">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span
-                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
-                                    isOutOfStock
-                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                      : isLowStock
+                                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${isOutOfStock
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : isLowStock
                                       ? 'bg-amber-50 text-amber-700 border-amber-200'
                                       : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  }`}
+                                    }`}
                                 >
                                   <span
-                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                      isOutOfStock ? 'bg-rose-500' : isLowStock ? 'bg-amber-500' : 'bg-emerald-500'
-                                    }`}
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${isOutOfStock ? 'bg-rose-500' : isLowStock ? 'bg-amber-500' : 'bg-emerald-500'
+                                      }`}
                                   />
                                   <span>
                                     Available Stock: <strong>{available_stock.toLocaleString()} KG</strong>
@@ -1087,13 +1081,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                               onChange={(e) => handleQuantityChange(index, e.target.value)}
                               onFocus={(e) => e.target.select()}
                               onKeyDown={(e) => handleRowKeyDown(e, index, 'quantity')}
-                              className={`block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${
-                                itemError?.quantity
-                                  ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
-                                  : shortfall > 0
+                              className={`block w-full rounded-xl border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 bg-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed ${itemError?.quantity
+                                ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20 text-red-900'
+                                : shortfall > 0
                                   ? 'border-amber-400 text-amber-900 focus:border-amber-500 focus:ring-amber-500/20'
                                   : 'border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-blue-500/20'
-                              }`}
+                                }`}
                             />
                             {shortfall > 0 && (
                               <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md mt-1 font-semibold flex items-center gap-1">
@@ -1157,11 +1150,10 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                   type="button"
                   disabled={hasAnyEmptySize}
                   onClick={() => append({ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 })}
-                  className={`inline-flex items-center text-sm font-bold transition-colors ${
-                    hasAnyEmptySize
-                      ? 'text-slate-400 cursor-not-allowed opacity-60'
-                      : 'text-blue-600 hover:text-blue-700 cursor-pointer'
-                  }`}
+                  className={`inline-flex items-center text-sm font-bold transition-colors ${hasAnyEmptySize
+                    ? 'text-slate-400 cursor-not-allowed opacity-60'
+                    : 'text-blue-600 hover:text-blue-700 cursor-pointer'
+                    }`}
                   title={hasAnyEmptySize ? "Please select a size/variant for all items before adding another row" : "Add line item"}
                 >
                   <Plus className="mr-1 h-4 w-4" /> Add Line Item
@@ -1560,8 +1552,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                 hasAnyEmptySize
                   ? "All line items must have a size/variant selected"
                   : isCashCustomer && isSplitPayment && !isSplitBalanced
-                  ? "Split payment must be balanced and all rows have valid amounts"
-                  : "Save and Print Invoice"
+                    ? "Split payment must be balanced and all rows have valid amounts"
+                    : "Save and Print Invoice"
               }
             >
               {mutation.isPending ? (
@@ -1594,7 +1586,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       {/* A4 Print Portal */}
       {printInvoiceData && createPortal(
         <div className="invoice-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-          <style dangerouslySetInnerHTML={{ __html: `
+          <style dangerouslySetInnerHTML={{
+            __html: `
             @page {
               size: A4 portrait !important;
               margin: 8mm !important;

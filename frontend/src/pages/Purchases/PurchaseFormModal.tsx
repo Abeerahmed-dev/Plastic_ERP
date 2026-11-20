@@ -9,7 +9,7 @@ import { getSuppliers } from '../../services/suppliers.service';
 import { productsService } from '../../services/products.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { DateInput } from '../../components/DateInput';
-import { compareProducts, formatProductTitle } from '../../utils/productSorting';
+import { compareProducts, formatProductTitle, groupProductsByFamily } from '../../utils/productSorting';
 import { invalidatePurchaseQueries } from '../../utils/querySync';
 import { erpSyncBus } from '../../utils/erpSyncBus';
 
@@ -51,15 +51,15 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   const [advanceAppliedAmount, setAdvanceAppliedAmount] = useState('0');
 
   // Fetch dependencies
-  const { data: suppliersResponse } = useQuery({ 
-    queryKey: ['suppliers'], 
+  const { data: suppliersResponse } = useQuery({
+    queryKey: ['suppliers'],
     queryFn: () => getSuppliers({ limit: 100 })
   });
   const suppliers = suppliersResponse?.data || [];
 
-  const { data: productsResponse } = useQuery({ 
-    queryKey: ['products'], 
-    queryFn: () => productsService.getProducts() 
+  const { data: productsResponse } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => productsService.getProducts()
   });
   const products = productsResponse || [];
 
@@ -97,6 +97,42 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
     return !prod || !prod.size || prod.size.trim() === '';
   });
 
+  // Step 1: Group products by normalized product_name (case-insensitive & trimmed)
+  const groupedProducts = useMemo(() => {
+    return groupProductsByFamily(products || []);
+  }, [products]);
+
+  const familyOptions: ComboboxOption[] = useMemo(() => {
+    return Object.values(groupedProducts)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      .map((g) => ({
+        value: g.name,
+        label: g.name,
+        subLabel: `${g.variants.length} variant${g.variants.length > 1 ? 's' : ''}`,
+      }));
+  }, [groupedProducts]);
+
+  const handleFamilyChange = (index: number, familyName: string) => {
+    const selectedGroupKey = (familyName || '').trim().toLowerCase();
+    const group = groupedProducts[selectedGroupKey];
+    const canonicalName = group ? group.name : (familyName || '').trim();
+    setValue(`items.${index}.selected_family_name`, canonicalName);
+
+    const variants = group?.variants || [];
+    if (variants.length === 1) {
+      const singleVariant = variants[0];
+      setValue(`items.${index}.selected_variant_id`, singleVariant.id);
+      setValue(`items.${index}.product_id`, singleVariant.id);
+      handleProductChange(index, singleVariant.id);
+    } else {
+      setValue(`items.${index}.selected_variant_id`, '');
+      setValue(`items.${index}.product_id`, '');
+      setValue(`items.${index}.unit_price`, 0);
+      setValue(`items.${index}.total`, 0);
+      setValue(`items.${index}.total_price`, 0);
+    }
+  };
+
   // Prefill when initialProductId is passed (e.g. from Low Stock alert "Order Stock" action)
   useEffect(() => {
     if (initialProductId && products.length > 0) {
@@ -104,9 +140,11 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
       if (p) {
         const stdWeight = Number(p.bag_weight_kg || 25);
         const costPrice = Number(p.cost_price || 0);
+        const group = groupedProducts[(p.name || '').trim().toLowerCase()];
+        const canonicalName = group ? group.name : (p.name || '').trim();
         setValue('items', [{
           product_id: p.id,
-          selected_family_name: p.name,
+          selected_family_name: canonicalName,
           selected_variant_id: p.id,
           bags_input: 1,
           quantity: stdWeight,
@@ -116,7 +154,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
         }]);
       }
     }
-  }, [initialProductId, products, setValue]);
+  }, [initialProductId, products, setValue, groupedProducts]);
 
   // Phase 2: Explicitly rounded line-item totals summation
   const subtotal = Math.round(
@@ -138,52 +176,6 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   const dcPerKg = totalKg > 0 ? Math.round((deliveryChargesNum / totalKg) * 100) / 100 : 0;
   const grandTotalWithDc = Math.round((total + deliveryChargesNum) * 100) / 100;
 
-  // Step 1: Group products by product_name
-  const groupedProducts = useMemo(() => {
-    const groups: Record<string, typeof products> = {};
-    (products || []).forEach((p) => {
-      const family = (p.name || '').trim();
-      if (!family) return;
-      if (!groups[family]) {
-        groups[family] = [];
-      }
-      groups[family].push(p);
-    });
-    Object.keys(groups).forEach((key) => {
-      groups[key].sort(compareProducts);
-    });
-    return groups;
-  }, [products]);
-
-  const productFamilies = useMemo(() => {
-    return Object.keys(groupedProducts).sort((a, b) => a.localeCompare(b));
-  }, [groupedProducts]);
-
-  const familyOptions: ComboboxOption[] = useMemo(() => {
-    return productFamilies.map((fam) => ({
-      value: fam,
-      label: fam,
-      subLabel: `${groupedProducts[fam]?.length || 0} variant${(groupedProducts[fam]?.length || 0) > 1 ? 's' : ''}`,
-    }));
-  }, [productFamilies, groupedProducts]);
-
-  const handleFamilyChange = (index: number, familyName: string) => {
-    setValue(`items.${index}.selected_family_name`, familyName);
-    const variants = groupedProducts[familyName] || [];
-    if (variants.length === 1) {
-      const singleVariant = variants[0];
-      setValue(`items.${index}.selected_variant_id`, singleVariant.id);
-      setValue(`items.${index}.product_id`, singleVariant.id);
-      handleProductChange(index, singleVariant.id);
-    } else {
-      setValue(`items.${index}.selected_variant_id`, '');
-      setValue(`items.${index}.product_id`, '');
-      setValue(`items.${index}.unit_price`, 0);
-      setValue(`items.${index}.total`, 0);
-      setValue(`items.${index}.total_price`, 0);
-    }
-  };
-
   const handleVariantChange = (index: number, variantId: string) => {
     setValue(`items.${index}.selected_variant_id`, variantId);
     setValue(`items.${index}.product_id`, variantId);
@@ -196,7 +188,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
       const stdWeight = Number(product.bag_weight_kg || 25);
       const unitPrice = Number(product.cost_price || 0);
       setValue(`items.${index}.unit_price`, unitPrice);
-      
+
       const currentBags = watchItems[index]?.bags_input;
       let qty = stdWeight;
       if (currentBags !== undefined && currentBags !== '' && Number(currentBags) > 0) {
@@ -217,7 +209,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
     const selectedProdId = watchItems[index]?.product_id;
     const selectedProd = products.find(p => p.id === selectedProdId);
     const stdWeight = selectedProd && selectedProd.bag_weight_kg ? Number(selectedProd.bag_weight_kg) : 25;
-    
+
     if (numBags > 0) {
       const newQty = Number((numBags * stdWeight).toFixed(2));
       setValue(`items.${index}.quantity`, newQty);
@@ -416,16 +408,15 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   }, [mutation.isPending, hasAnyEmptySize, fields.length]);
 
   const inputCls = (err?: boolean) =>
-    `w-full rounded-lg border ${
-      err
-        ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
-        : 'border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+    `w-full rounded-lg border ${err
+      ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
+      : 'border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
     } py-2 px-3 text-sm outline-none transition bg-white text-slate-900 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed`;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="w-full max-w-5xl bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-300">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div>
@@ -440,13 +431,13 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
         {/* Body */}
         <div className="px-6 py-6 overflow-y-auto flex-1">
           <form id="purchase-form" onSubmit={handleSubmit(onSubmit, (errs) => console.log('Validation failed:', errs))} className="space-y-6">
-            
+
             {mutation.isError && (
               <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
                 {mutation.error instanceof Error ? mutation.error.message : 'Failed to create invoice.'}
               </div>
             )}
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -521,20 +512,19 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
                   type="button"
                   disabled={hasAnyEmptySize}
                   onClick={() => append({ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0 })}
-                  className={`text-xs font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-colors ${
-                    hasAnyEmptySize
-                      ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
-                      : 'text-emerald-600 hover:text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
-                  }`}
+                  className={`text-xs font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-colors ${hasAnyEmptySize
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                    : 'text-emerald-600 hover:text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+                    }`}
                   title={hasAnyEmptySize ? "Please select a size/variant for all items before adding another row" : "Add Row"}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add Row
                 </button>
               </div>
-              
+
               {errors.items?.root && <p className="text-sm text-red-600 p-3">{errors.items.root.message}</p>}
-              
+
               <div className="overflow-visible">
                 <table className="w-full text-sm text-left">
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 text-xs uppercase font-semibold">
@@ -557,11 +547,13 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
                       const rowFamily = watchItems[index]?.selected_family_name || (
                         selectedProd ? selectedProd.name : ''
                       ) || '';
+                      const selectedGroupKey = rowFamily.trim().toLowerCase();
+                      const group = groupedProducts[selectedGroupKey];
 
-                      const variantList = rowFamily ? [...(groupedProducts[rowFamily] || [])].sort(compareProducts) : [];
+                      const variantList = group ? [...group.variants].sort(compareProducts) : [];
                       const variantOptions: ComboboxOption[] = variantList.map((p) => ({
                         value: p.id,
-                        label: p.size ? `${formatProductTitle(p.name, p.size)} (${p.code})` : `${p.name} (${p.code})`,
+                        label: p.size ? `${formatProductTitle(group?.name || p.name, p.size)} (${p.code})` : `${group?.name || p.name} (${p.code})`,
                         badge: p.code,
                         subLabel: `Std: ${Number(p.bag_weight_kg || 25).toFixed(2)} KG/bag`,
                       }));
@@ -571,7 +563,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
                       const currentLineTotal = watchItems[index]?.total !== undefined && watchItems[index]?.total !== null && watchItems[index]?.total !== ''
                         ? watchItems[index]?.total
                         : (qty && price ? Math.round(qty * price * 100) / 100 : '');
-                      
+
                       return (
                         <tr key={field.id} className="hover:bg-slate-50/60 transition-colors">
                           <td className="px-4 py-3 align-top min-w-[190px]">

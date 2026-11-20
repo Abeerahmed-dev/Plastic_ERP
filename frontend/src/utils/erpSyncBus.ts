@@ -11,15 +11,22 @@ import {
 
 export type ErpSyncDomain =
   | 'invoice'
+  | 'invoices'
   | 'pos'
   | 'payment'
+  | 'payments'
   | 'purchase'
+  | 'purchases'
   | 'product'
+  | 'products'
   | 'stock'
+  | 'stocks'
   | 'void'
   | 'expense'
+  | 'expenses'
   | 'bank-account'
   | 'customer'
+  | 'customers'
   | 'offline-sync'
   | 'all';
 

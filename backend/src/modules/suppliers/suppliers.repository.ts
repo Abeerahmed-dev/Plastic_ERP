@@ -118,7 +118,7 @@ export async function computeSupplierNetBalance(
     // Query 1 (SUM(PURCHASE_INVOICE)): Total Billed Standard Purchase Invoices
     trx('purchase_invoices')
       .where('supplier_id', supplierId)
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .where((qb) => {
         qb.whereNull('invoice_type')
           .orWhereNotIn('invoice_type', ['DEBIT_NOTE', 'RETURN']);
@@ -130,7 +130,7 @@ export async function computeSupplierNetBalance(
     // Query 2 (SUM(DEBIT_NOTE)): Total Debit Notes / Returns
     trx('purchase_invoices')
       .where('supplier_id', supplierId)
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .where((qb) => {
         qb.whereIn('invoice_type', ['DEBIT_NOTE', 'RETURN'])
           .orWhere('total_amount', '<', 0);
@@ -138,10 +138,13 @@ export async function computeSupplierNetBalance(
       .select(trx.raw('SUM(ABS(total_amount)) as total'))
       .first<{ total: string | number | null }>(),
 
-    // Query 3 (Total Paid): All raw supplier payments except BOUNCED, FAILED, and synthetic WALLET_ADVANCE
+    // Query 3 (Total Paid): All raw supplier payments except BOUNCED, FAILED, PENDING PDCs, and synthetic WALLET_ADVANCE
     trx('supplier_payments')
       .where('supplier_id', supplierId)
-      .whereNotIn('cheque_status', ['BOUNCED', 'FAILED'])
+      .where((qb) => {
+        qb.whereNull('cheque_status')
+          .orWhereNotIn('cheque_status', ['PENDING', 'BOUNCED', 'FAILED']);
+      })
       .where((qb) => {
         qb.whereNull('payment_method')
           .orWhereNot('payment_method', 'WALLET_ADVANCE');
@@ -153,7 +156,7 @@ export async function computeSupplierNetBalance(
     trx('supplier_payment_allocations as spa')
       .join('purchase_invoices as pi', 'spa.purchase_invoice_id', 'pi.id')
       .where('pi.supplier_id', supplierId)
-      .whereNot('pi.status', 'CANCELLED')
+      .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
       .sum('spa.allocated_amount as total_allocated')
       .first<{ total_allocated: string | number | null }>(),
 
@@ -161,7 +164,10 @@ export async function computeSupplierNetBalance(
     trx('supplier_payment_allocations as spa')
       .join('supplier_payments as sp', 'spa.payment_id', 'sp.id')
       .where('sp.supplier_id', supplierId)
-      .whereNotIn('sp.cheque_status', ['BOUNCED', 'FAILED'])
+      .where((qb) => {
+        qb.whereNull('sp.cheque_status')
+          .orWhereNotIn('sp.cheque_status', ['PENDING', 'BOUNCED', 'FAILED']);
+      })
       .sum('spa.allocated_amount as total_allocated')
       .first<{ total_allocated: string | number | null }>(),
   ]);
@@ -403,7 +409,7 @@ export async function getSupplierStatement(id: string): Promise<SupplierLedgerEn
   // 1. Purchase Invoices & Debit Notes (Returns)
   const invoices = await db('purchase_invoices')
     .where('supplier_id', id)
-    .whereNot('status', 'CANCELLED')
+    .whereNotIn('status', ['CANCELLED', 'VOID'])
     .select('id', 'date', 'invoice_number', 'total_amount', 'invoice_type', 'notes', 'created_at');
 
   for (const inv of invoices) {
@@ -581,7 +587,7 @@ export async function getSupplierRefundableCredits(supplierId: string): Promise<
   // 1. Query Overpaid Invoices: Fetch purchase invoices where (amount_paid - net_total) > 0
   const purchaseInvoices = await db('purchase_invoices as pi')
     .where('pi.supplier_id', supplierId)
-    .whereNot('pi.status', 'CANCELLED')
+    .whereNotIn('pi.status', ['CANCELLED', 'VOID'])
     .where((qb) => {
       qb.whereNull('pi.invoice_type')
         .orWhereNotIn('pi.invoice_type', ['DEBIT_NOTE', 'RETURN']);
@@ -598,7 +604,7 @@ export async function getSupplierRefundableCredits(supplierId: string): Promise<
         this.whereIn('invoice_type', ['DEBIT_NOTE', 'RETURN'])
           .orWhere('invoice_number', 'like', 'DN-%');
       })
-      .whereNot('status', 'CANCELLED')
+      .whereNotIn('status', ['CANCELLED', 'VOID'])
       .select('parent_invoice_id', 'total_amount');
 
     const returnedByInvoice = new Map<string, number>();

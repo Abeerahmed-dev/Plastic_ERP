@@ -46,6 +46,16 @@ export async function editProduct(
   return updated;
 }
 
+export async function updateProductPrice(
+  id: string,
+  price: number
+): Promise<productsRepo.ProductWithStock> {
+  await getProduct(id);
+  const updated = await productsRepo.updateProductSellingPrice(id, price);
+  if (!updated) throw new NotFoundError('Product');
+  return updated;
+}
+
 export async function deactivateProduct(id: string): Promise<void> {
   await getProduct(id);
   await productsRepo.softDeleteProduct(id);

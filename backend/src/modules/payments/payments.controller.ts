@@ -53,7 +53,7 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
             .orWhere('invoice_type', 'RETURN')
             .orWhere('invoice_number', 'like', 'CN-%');
         })
-        .whereNot('status', 'CANCELLED')
+        .whereNotIn('status', ['CANCELLED', 'VOID'])
         .sum('total_amount as total_returned')
         .first();
 

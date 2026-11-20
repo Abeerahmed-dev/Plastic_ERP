@@ -104,6 +104,8 @@ export interface InventoryValuationItem {
   lifetime_kg_sold: number;
   lifetime_kg_acquired: number;
   all_time_gross_margin: number;
+  sale_price?: number;
+  selling_price?: number;
 }
 
 export interface InventoryValuationData {

@@ -3,6 +3,7 @@ import { ok } from '../../shared/apiResponse';
 import {
   createProductSchema,
   updateProductSchema,
+  updateProductPriceSchema,
   productQuerySchema,
 } from './products.schemas';
 import * as productsService from './products.service';
@@ -85,6 +86,28 @@ export async function updateProductController(req: Request, res: Response, next:
       throw new ValidationError(parsed.error.errors.map(e => e.message).join(', '));
     }
     const product = await productsService.editProduct(req.params.id, parsed.data);
+    res.status(200).json(ok(product));
+  } catch (err) { next(err); }
+}
+
+export async function updateProductPriceController(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const parsed = updateProductPriceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.errors.map((e) => e.message).join(', '));
+    }
+    const rawPrice =
+      parsed.data.selling_price !== undefined
+        ? parsed.data.selling_price
+        : parsed.data.sale_price !== undefined
+        ? parsed.data.sale_price
+        : parsed.data.fixed_retail_price_per_kg;
+
+    if (rawPrice === undefined || rawPrice < 0) {
+      throw new ValidationError('A valid non-negative selling price must be provided');
+    }
+
+    const product = await productsService.updateProductPrice(req.params.id, rawPrice);
     res.status(200).json(ok(product));
   } catch (err) { next(err); }
 }
