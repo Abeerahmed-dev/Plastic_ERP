@@ -10,6 +10,7 @@ import { getCustomers } from '../../services/customers.service';
 import { useAuthStore } from '../../store/auth.store';
 import { useReportStore } from '../../store/useReportStore';
 import { printThermalReceipt } from '../../utils/printThermal';
+import { connectQzLocal, findPrinters } from '../../utils/qzPrint';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ShiftAuditModal } from './ShiftAuditModal';
@@ -319,8 +320,10 @@ cart.every((item) => Number(item.quantity) > 0);
 
       setLastInvoice(receiptData);
 
-      // Print immediately to thermal printer / browser dialog
-      printThermalReceipt(receiptData);
+      // Print immediately to thermal printer via QZ Tray
+      printThermalReceipt(receiptData)
+        .then(() => toast.success('POS receipt sent to thermal printer'))
+        .catch((err) => toast.error(err?.message || 'Failed to print POS receipt via QZ Tray'));
 
       // Clear cart and reset state immediately
       setCart([]);
@@ -628,8 +631,9 @@ cart.every((item) => Number(item.quantity) > 0);
       if (e.altKey && (e.key === 'r' || e.key === 'R')) {
         if (lastInvoice) {
           e.preventDefault();
-          printThermalReceipt(lastInvoice);
-          toast.info('Reprinting last POS receipt...');
+          printThermalReceipt(lastInvoice)
+            .then(() => toast.success('POS reprint sent to thermal printer'))
+            .catch((err) => toast.error(err?.message || 'Failed to reprint POS receipt via QZ Tray'));
         }
         return;
       }
@@ -672,6 +676,18 @@ cart.every((item) => Number(item.quantity) > 0);
     checkoutMutation,
   ]);
 
+  const handleTestQz = async () => {
+    try {
+      toast.loading('Checking QZ Tray connection...', { id: 'test-qz' });
+      await connectQzLocal();
+      const printers = await findPrinters();
+      const count = Array.isArray(printers) ? printers.length : 1;
+      toast.success(`QZ Tray Connected! Found ${count} printer(s). Ready for silent printing.`, { id: 'test-qz' });
+    } catch (err: any) {
+      toast.error(err?.message || 'QZ Tray connection failed', { id: 'test-qz' });
+    }
+  };
+
 return (
     <>
       <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-slate-50 print:hidden dark:bg-[#0b0d14]">
@@ -698,6 +714,15 @@ return (
                   {heldOrders.length}
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={handleTestQz}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all shadow-2xs border bg-white hover:bg-slate-100 text-slate-700 border-slate-300 dark:bg-[#161925] dark:hover:bg-[#1c2030] dark:text-slate-200 dark:border-[#23283B] cursor-pointer"
+                title="Test local QZ Tray silent print connection"
+              >
+                <Printer className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Test QZ Tray</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -706,7 +731,11 @@ return (
                   <button
                     type="button"
                     onClick={() => {
-                      if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: false });
+                      if (lastInvoice) {
+                        printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: false })
+                          .then(() => toast.success('Original POS receipt sent to thermal printer'))
+                          .catch((err) => toast.error(err?.message || 'Failed to print POS receipt via QZ Tray'));
+                      }
                     }}
                     className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer dark:bg-[#161925] dark:hover:bg-[#1c2030] dark:text-slate-200 dark:border-[#23283B]"
                     title="Reprint Single Original Slip"
@@ -717,7 +746,11 @@ return (
                   <button
                     type="button"
                     onClick={() => {
-                      if (lastInvoice) printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: true });
+                      if (lastInvoice) {
+                        printThermalReceipt({ ...lastInvoice, isDuplicate: false, printBoth: true })
+                          .then(() => toast.success('Both POS receipts (Original + Duplicate) sent to thermal printer'))
+                          .catch((err) => toast.error(err?.message || 'Failed to print POS receipts via QZ Tray'));
+                      }
                     }}
                     className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 px-2 py-1 rounded-lg text-[11px] font-bold transition-all shadow-2xs cursor-pointer dark:bg-amber-950/40 dark:hover:bg-amber-900/50 dark:text-amber-300 dark:border-amber-800/60"
                     title="Reprint Both Slips: Original + Duplicate"

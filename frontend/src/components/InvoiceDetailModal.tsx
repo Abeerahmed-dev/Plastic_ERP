@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2, Ban } from 'lucide-react';
+import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2, Ban, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useAuthStore } from '../store/auth.store';
 import { productsService } from '../services/products.service';
 import sabirLogo from '../assets/sabirlogo.png';
-import { ThermalReceipt80mm, A4SalesInvoice } from './print';
 import { getUrduProductName } from '../utils/bilingual';
+import { generateA4InvoiceHtml, printErpA4Invoice } from '../utils/qzPrint';
+import { printThermalReceipt } from '../utils/printThermal';
 
 export interface InvoiceDetailItem {
   id?: string;
@@ -85,14 +86,8 @@ interface InvoiceDetailModalProps {
 export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn }: InvoiceDetailModalProps) {
   const { user } = useAuthStore();
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
-  const [printMode, setPrintMode] = useState<'A4' | 'POS' | null>(null);
+  const [isPrinting, setIsPrinting] = useState(false);
   const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
-
-  useEffect(() => {
-    return () => {
-      document.body.classList.remove('printing-a4', 'printing-pos');
-    };
-  }, []);
 
   const { data: allProducts = [] } = useQuery({
     queryKey: ['products'],
@@ -207,31 +202,44 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
     );
   };
 
-  const triggerPrint = (mode: 'A4' | 'POS') => {
-    setPrintMode(mode);
-    const wasDark = document.documentElement.classList.contains('dark');
-    if (wasDark) {
-      document.documentElement.classList.remove('dark');
+  const handlePrintA4 = async () => {
+    if (!invoice) return;
+    try {
+      setIsPrinting(true);
+      const html = await generateA4InvoiceHtml({
+        invoice,
+        type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales'),
+        printCopyMode,
+      });
+      await printErpA4Invoice(html);
+      toast.success('A4 invoice sent to printer successfully!');
+    } catch (err: any) {
+      console.error('Failed to print A4 invoice via QZ Tray:', err);
+      toast.error(err?.message || 'Failed to print A4 invoice via QZ Tray');
+    } finally {
+      setIsPrinting(false);
     }
-    if (mode === 'A4') {
-      document.body.classList.add('printing-a4');
-    } else if (mode === 'POS') {
-      document.body.classList.add('printing-pos');
+  };
+
+  const handlePrintPos = async () => {
+    if (!invoice) return;
+    try {
+      setIsPrinting(true);
+      await printThermalReceipt({
+        invoice,
+        items: invoice.items || [],
+        cashierName: invoice.creator?.name || invoice.created_by_name || user?.name || 'Cashier',
+        customerName: invoice.customer_name || 'Walk-In Customer',
+        isDuplicate: false,
+        printBoth: false,
+      });
+      toast.success('POS receipt sent to thermal printer!');
+    } catch (err: any) {
+      console.error('Failed to print POS receipt via QZ Tray:', err);
+      toast.error(err?.message || 'Failed to print POS receipt via QZ Tray');
+    } finally {
+      setIsPrinting(false);
     }
-
-    const handleAfterPrint = () => {
-      setPrintMode(null);
-      document.body.classList.remove('printing-a4', 'printing-pos');
-      if (wasDark) {
-        document.documentElement.classList.add('dark');
-      }
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
-
-    window.addEventListener('afterprint', handleAfterPrint);
-    setTimeout(() => {
-      window.print();
-    }, 150);
   };
 
 
@@ -624,10 +632,18 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             {isPosInvoice && (
               <button
                 type="button"
-                onClick={() => triggerPrint('POS')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+                onClick={handlePrintPos}
+                disabled={isPrinting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-50 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
               >
-                🖨️ POS Receipt (80mm)
+                {isPrinting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Printing...</span>
+                  </>
+                ) : (
+                  <span>🖨️ POS Receipt (80mm)</span>
+                )}
               </button>
             )}
 
@@ -639,6 +655,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                     type="checkbox"
                     checked={printCopyMode === 'ORIGINAL'}
                     onChange={() => setPrintCopyMode('ORIGINAL')}
+                    disabled={isPrinting}
                     className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 focus:ring-offset-0 cursor-pointer"
                   />
                   <span>Original</span>
@@ -648,6 +665,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                     type="checkbox"
                     checked={printCopyMode === 'DUPLICATE'}
                     onChange={() => setPrintCopyMode('DUPLICATE')}
+                    disabled={isPrinting}
                     className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 focus:ring-offset-0 cursor-pointer"
                   />
                   <span>Duplicate</span>
@@ -657,6 +675,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                     type="checkbox"
                     checked={printCopyMode === 'BOTH'}
                     onChange={() => setPrintCopyMode('BOTH')}
+                    disabled={isPrinting}
                     className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 focus:ring-offset-0 cursor-pointer"
                   />
                   <span>Both</span>
@@ -667,91 +686,27 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             {!isPosInvoice && (
               <button
                 type="button"
-                onClick={() => triggerPrint('A4')}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+                onClick={handlePrintA4}
+                disabled={isPrinting}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 disabled:opacity-50 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
               >
-                <Printer className="w-4 h-4 text-slate-950" />
-                Print A4 Invoice
+                {isPrinting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                    <span>Printing A4...</span>
+                  </>
+                ) : (
+                  <>
+                    <Printer className="w-4 h-4 text-slate-950" />
+                    <span>Print A4 Invoice</span>
+                  </>
+                )}
               </button>
             )}
           </div>
         </div>
       </div>
     </div>
-
-    {/* Print-Only Targeted Invoice Components */}
-    {printMode === 'POS' && createPortal(
-      <div className="pos-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-        <style dangerouslySetInnerHTML={{ __html: `
-          @page {
-            size: 80mm auto !important;
-            margin: 0 !important;
-          }
-          html, html.dark, body, html.dark body {
-            background-color: #ffffff !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            color-scheme: light !important;
-          }
-          .pos-print-portal,
-          .pos-print-portal * {
-            color-scheme: light !important;
-          }
-          body {
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-        ` }} />
-        <ThermalReceipt80mm data={invoice} />
-      </div>,
-      document.body
-    )}
-
-    {printMode === 'A4' && createPortal(
-      <div className="invoice-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-        <style dangerouslySetInnerHTML={{ __html: `
-          @page {
-            size: A4 portrait !important;
-            margin: 8mm !important;
-          }
-          html, html.dark, body, html.dark body {
-            background-color: #ffffff !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            color-scheme: light !important;
-          }
-          .invoice-print-portal,
-          .invoice-print-portal * {
-            color-scheme: light !important;
-          }
-          @media print {
-            .page-break-after-always {
-              page-break-after: always !important;
-              break-after: page !important;
-            }
-          }
-        ` }} />
-        {printCopyMode === 'BOTH' ? (
-          <>
-            <div className="page-break-after-always">
-              <A4SalesInvoice data={{ ...invoice, isDuplicate: false, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
-            </div>
-            <div>
-              <A4SalesInvoice data={{ ...invoice, isDuplicate: true, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
-            </div>
-          </>
-        ) : (
-          <A4SalesInvoice
-            data={{
-              ...invoice,
-              isDuplicate: printCopyMode === 'DUPLICATE',
-              type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales')
-            }}
-          />
-        )}
-      </div>,
-      document.body
-    )}
   </>
 );
 }

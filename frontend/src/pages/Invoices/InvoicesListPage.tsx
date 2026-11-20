@@ -15,6 +15,7 @@ import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
 import { getCustomers } from '../../services/customers.service';
 import { Pagination } from '../../components/Common/Pagination';
 import { printThermalReceipt } from '../../utils/printThermal';
+import { toast } from 'sonner';
 
 interface InvoicesListPageProps {
   defaultType?: 'erp' | 'pos' | 'all';
@@ -228,8 +229,10 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
         cashierName: (detail as any)?.creator?.name || (detail as any)?.created_by_name || user?.name || 'Cashier',
         customerName: (detail as any)?.customer_name || 'Walk-In Customer',
       });
-    } catch (err) {
+      toast.success('Thermal receipt sent to printer successfully');
+    } catch (err: any) {
       console.error('Failed to print thermal receipt:', err);
+      toast.error(err?.message || 'Failed to print thermal receipt via QZ Tray');
     } finally {
       setPrintingInvoiceId(null);
     }

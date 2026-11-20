@@ -1,5 +1,4 @@
 import { useEffect, useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw, Printer, PauseCircle, Clock } from 'lucide-react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -11,7 +10,7 @@ import { productsService } from '../../services/products.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { toast, handleApiError } from '../../utils/toast';
-import { A4SalesInvoice } from '../../components/print/A4SalesInvoice';
+import { generateA4InvoiceHtml, printErpA4Invoice } from '../../utils/qzPrint';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
 import { DateInput } from '../../components/DateInput';
 import { compareProducts, formatProductTitle } from '../../utils/productSorting';
@@ -320,7 +319,6 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   };
 
   const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
-  const [printInvoiceData, setPrintInvoiceData] = useState<any>(null);
   const [isHolding, setIsHolding] = useState(false);
   const [isHeldModalOpen, setIsHeldModalOpen] = useState(false);
 
@@ -429,7 +427,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     }
   };
 
-  const triggerA4Print = (createdInvoice: any) => {
+  const triggerA4Print = async (createdInvoice: any) => {
     const selectedCust = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
     const enrichedItems = (createdInvoice.items || []).map((item: any) => {
       const prod = products.find(p => p.id === item.product_id);
@@ -453,30 +451,21 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       type: 'sales',
     };
 
-    const wasDark = document.documentElement.classList.contains('dark');
-    if (wasDark) {
-      document.documentElement.classList.remove('dark');
-    }
-
-    setPrintInvoiceData(invoiceToPrint);
-    document.body.classList.add('printing-a4');
-
-    const handleAfterPrint = () => {
-      document.body.classList.remove('printing-a4');
-      if (wasDark) {
-        document.documentElement.classList.add('dark');
-      }
-      setPrintInvoiceData(null);
-      window.removeEventListener('afterprint', handleAfterPrint);
+    try {
+      const html = await generateA4InvoiceHtml({
+        invoice: invoiceToPrint,
+        type: 'sales',
+        printCopyMode,
+      });
+      await printErpA4Invoice(html);
+      toast.success('Sales invoice sent to A4 printer successfully!');
+    } catch (printErr: any) {
+      console.error('Failed to print A4 invoice via QZ Tray:', printErr);
+      toast.error(printErr?.message || 'Failed to print A4 invoice via QZ Tray');
+    } finally {
       onSuccess();
       onClose();
-    };
-
-    window.addEventListener('afterprint', handleAfterPrint);
-
-    setTimeout(() => {
-      window.print();
-    }, 250);
+    }
   };
 
   const mutation = useMutation({
@@ -1209,59 +1198,6 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         onDelete={(id) => deleteHeldOrderMutation.mutate(id)}
         isDeleting={deleteHeldOrderMutation.isPending}
       />
-
-      {/* A4 Print Portal */}
-      {printInvoiceData && createPortal(
-        <div className="invoice-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-          <style dangerouslySetInnerHTML={{ __html: `
-            @page {
-              size: A4 portrait !important;
-              margin: 8mm !important;
-            }
-            html, html.dark, body, html.dark body {
-              background-color: #ffffff !important;
-              background: #ffffff !important;
-              color: #000000 !important;
-              color-scheme: light !important;
-            }
-            .invoice-print-portal,
-            .invoice-print-portal * {
-              color-scheme: light !important;
-            }
-            @media print {
-              html, html.dark, body, html.dark body {
-                background-color: #ffffff !important;
-                background: #ffffff !important;
-                color: #000000 !important;
-                color-scheme: light !important;
-              }
-              .page-break-after-always {
-                page-break-after: always !important;
-                break-after: page !important;
-              }
-            }
-          ` }} />
-          {printCopyMode === 'BOTH' ? (
-            <>
-              <div className="page-break-after-always">
-                <A4SalesInvoice data={{ ...printInvoiceData, isDuplicate: false, type: 'sales' }} />
-              </div>
-              <div>
-                <A4SalesInvoice data={{ ...printInvoiceData, isDuplicate: true, type: 'sales' }} />
-              </div>
-            </>
-          ) : (
-            <A4SalesInvoice
-              data={{
-                ...printInvoiceData,
-                isDuplicate: printCopyMode === 'DUPLICATE',
-                type: 'sales'
-              }}
-            />
-          )}
-        </div>,
-        document.body
-      )}
     </div>
   );
 };

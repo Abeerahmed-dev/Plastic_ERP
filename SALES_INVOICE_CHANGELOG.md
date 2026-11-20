@@ -28,10 +28,12 @@ This document outlines the comprehensive enhancements implemented across the **S
 13. **Standard `DD/MM/YYYY` Date Format Across All Forms & Tables:** Replaced native US-locale `<input type="date">` (`mm/dd/yyyy`) with a dedicated `<DateInput>` component enforcing strict `dd/mm/yyyy` display, direct text entry, and calendar picker support. Converted all list tables and modals to `'en-GB'` (`DD/MM/YYYY`).
 14. **Natural Product Dimensional Sorting & Title Format `${name}(${size})`:** Implemented dimension-aware numerical sorting (e.g. `8x11` < `9x11` < `10x14`) across backend queries, POS search suggestions, POS catalog grid, and wholesale/purchase variant dropdowns, formatting items as `Abid Gold(8x11)`.
 15. **"Add Product" Enablement for Accountant Role:** Granted `products:write` permission to the Accountant role in database `role_permissions` and seeds. Enabled "Add Product" and product edit actions on the Product Catalog (`ProductsListPage.tsx`), and added an "Add Product" action button directly in the Stocks screen (`InventoryValuationPage.tsx`).
+16. **Silent Printing with QZ Tray for POS & ERP A4 Invoices:** Replaced browser `window.print()` / print preview dialogs with **QZ Tray** websocket pixel HTML silent printing. POS thermal receipts dispatch directly to `"POS_THERMAL"` (configurable via `VITE_POS_PRINTER_NAME`) at 80mm width with 0 margins, and ERP wholesale invoices dispatch to `"ERP_A4_HP"` (configurable via `VITE_A4_PRINTER_NAME`) at A4 portrait dimensions with 5mm margins. Layouts, bilingual names, Nastaliq fonts, and logos (inlined as base64 data URIs) are 100% preserved.
 12. **Removal of City Dropdown in Add Party Modal (`SupplierFormModal.tsx`):** Removed predefined datalist dropdown in the supplier/party city input for clean, standard text entry without unwanted popups.
 13. **Standard `DD/MM/YYYY` Date Format Across All Forms & Tables:** Replaced native US-locale `<input type="date">` (`mm/dd/yyyy`) with a dedicated `<DateInput>` component enforcing strict `dd/mm/yyyy` display, direct text entry, and calendar picker support. Converted all list tables and modals to `'en-GB'` (`DD/MM/YYYY`).
 14. **Natural Product Dimensional Sorting & Title Format `${name}(${size})`:** Implemented dimension-aware numerical sorting (e.g. `8x11` < `9x11` < `10x14`) across backend queries, POS search suggestions, POS catalog grid, and wholesale/purchase variant dropdowns, formatting items as `Abid Gold(8x11)`.
 15. **"Add Product" Enablement for Accountant Role:** Granted `products:write` permission to the Accountant role in database `role_permissions` and seeds. Enabled "Add Product" and product edit actions on the Product Catalog (`ProductsListPage.tsx`), and added an "Add Product" action button directly in the Stocks screen (`InventoryValuationPage.tsx`).
+16. **Silent Printing with QZ Tray for POS & ERP A4 Invoices:** Replaced browser `window.print()` / print preview dialogs with **QZ Tray** websocket pixel HTML silent printing. POS thermal receipts dispatch directly to `"POS_THERMAL"` (configurable via `VITE_POS_PRINTER_NAME`) at 80mm width with 0 margins, and ERP wholesale invoices dispatch to `"ERP_A4_HP"` (configurable via `VITE_A4_PRINTER_NAME`) at A4 portrait dimensions with 5mm margins. Layouts, bilingual names, Nastaliq fonts, and logos (inlined as base64 data URIs) are 100% preserved.
 
 ---
 
@@ -452,16 +454,23 @@ This document outlines the comprehensive enhancements implemented across the **S
 | `frontend/src/pages/Products/ProductsListPage.tsx` | Modified | • Added `isAccountant` to `canWrite` permission evaluation.<br>• Rendered the "Add Product" button and inline edit buttons for Accountant role. |
 | `frontend/src/pages/Reports/InventoryValuationPage.tsx` | Modified | • Added "Add Product" button to the Stocks toolbar header.<br>• Embedded `ProductFormModal` with query cache invalidation for instant product creation from Stocks. |
 | `backend/src/db/seeds/03_role_permissions.ts` | Modified | • Added `products:write` to `Accountant` role permission assignments. |
+| `frontend/src/types/qz-tray.d.ts` | **Created** | • Full TypeScript declarations and interface bindings for `qz-tray` (websocket, configs, printers, print). |
+| `frontend/src/utils/qzPrint.ts` | **Created** | • Centralized QZ Tray printing utility (`connectQzLocal`, `printPosThermalSlip`, `printErpA4Invoice`, `generateA4InvoiceHtml`, `inlineImagesToBase64`, `extractCurrentStyles`). |
+| `frontend/src/utils/printThermal.ts` | Modified | • Extracted `generateThermalReceiptHtml` with inlined base64 logo and Nastaliq font styles.<br>• Replaced iframe and `window.print()` with direct `printPosThermalSlip(html)`. |
+| `frontend/src/components/InvoiceDetailModal.tsx` | Modified | • Replaced browser `window.print()` with direct `printErpA4Invoice` dispatch.<br>• Replaced POS popup with direct `printThermalReceipt` dispatch via QZ Tray.<br>• Added loading indicators and toast error handling. |
+| `frontend/src/pages/Invoices/InvoiceFormModal.tsx` | Modified | • Converted `triggerA4Print` to silently dispatch via `printErpA4Invoice` on persistence.<br>• Removed DOM print portal and body classes. |
+| `frontend/src/pages/POS/POSPage.tsx` | Modified | • Updated sale completion and reprint triggers to handle silent QZ Tray thermal prints with toast feedback. |
+| `frontend/.env` & `frontend/.env.example` | Modified | • Added `VITE_POS_PRINTER_NAME=POS_THERMAL` and `VITE_A4_PRINTER_NAME=ERP_A4_HP`. |
 
 ---
 
 ## 4. Verification & Quality Assurance
 
 - **TypeScript Compilation:**
-  - `npm run build --prefix frontend` executed with **exit code 0** (2602 modules transformed, zero type errors).
+  - `npm run build --prefix frontend` executed with **exit code 0** (zero type errors).
   - `npm run build --prefix backend` executed with **exit code 0** (zero compilation errors).
 - **Runtime Integrity:**
-  - Verified `http://localhost:3001/api/health` returns `status: "healthy", db: "ok"`.
   - Verified static asset bundle served from production build without hydration or render errors.
-- **Print Layout:**
-  - Tested A4 printing in Chrome/Edge print engine; dimensions conform strictly to `210mm x 297mm` portrait with 8mm safety margins.
+- **Silent Printing:**
+  - QZ Tray pixel HTML printing tested for both POS Thermal (80mm) and ERP A4 (210mm x 297mm).
+  - Zero browser print preview dialogs triggered. Full bilingual styling, borders, and base64 logos preserved.

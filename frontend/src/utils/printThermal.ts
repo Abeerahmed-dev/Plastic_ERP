@@ -1,5 +1,6 @@
 import sabirLogoThermal from '../assets/sabirlogo_thermal.png';
 import { getUrduProductName } from './bilingual';
+import { printPosThermalSlip, urlToBase64 } from './qzPrint';
 
 export interface ThermalReceiptData {
   invoice: any;
@@ -41,10 +42,11 @@ export function getNextSequentialBillNumber(invoice?: any): string | number {
   }
 }
 
-export async function printThermalReceipt(data: ThermalReceiptData) {
+export async function generateThermalReceiptHtml(data: ThermalReceiptData): Promise<string> {
   const { invoice, items, cashierName, customerName, isDuplicate = false, printBoth = false } = data;
-  if (!invoice) return;
+  if (!invoice) return '';
 
+  const logoBase64 = await urlToBase64(sabirLogoThermal);
   const isRefund = Number(invoice.total_amount) < 0;
   const billNumber = getNextSequentialBillNumber(invoice);
   const invoiceNumber = invoice.invoice_number || invoice.code || `POS-${billNumber}`;
@@ -142,7 +144,7 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
     <div class="single-slip" style="width: 100%;">
       <!-- Logo & Header -->
       <div class="text-center" style="margin-bottom: 3px;">
-        <img src="${sabirLogoThermal}" alt="Logo" style="height: 38px; max-width: 140px; object-fit: contain; margin-bottom: 2px;" />
+        <img src="${logoBase64}" alt="Logo" style="height: 38px; max-width: 140px; object-fit: contain; margin-bottom: 2px;" />
         <h1 style="font-size: 13.5px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 3px; font-family: 'Arial Black', Arial, sans-serif;">SABIR PLASTIC STORE</h1>
         
         <!-- Address & Phones Box -->
@@ -296,27 +298,6 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
     </div>
   `;
 
-  // Remove existing print iframe if any
-  const existingIframe = document.getElementById('thermal-print-frame');
-  if (existingIframe) {
-    existingIframe.remove();
-  }
-  const iframe = document.createElement('iframe');
-  iframe.id = 'thermal-print-frame';
-  iframe.style.position = 'fixed';
-  iframe.style.top = '0';
-  iframe.style.left = '0';
-  iframe.style.width = '80mm';
-  iframe.style.height = '1px';
-  iframe.style.opacity = '0';
-  iframe.style.pointerEvents = 'none';
-  iframe.style.zIndex = '-9999';
-  iframe.style.border = 'none';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow?.document;
-  if (!doc) return;
-
   const html = `
     <!DOCTYPE html>
     <html>
@@ -325,6 +306,7 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
         <title>${printBoth ? 'Receipt-Both' : (isDuplicate ? 'Duplicate' : 'Receipt')}-${billNumber}</title>
         <style>
           @page {
+            size: 80mm auto;
             margin: 0 !important;
           }
           * {
@@ -369,6 +351,7 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
           }
           @media print {
             @page {
+              size: 80mm auto;
               margin: 0 !important;
             }
             * {
@@ -426,58 +409,17 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
     </html>
   `;
 
-  doc.open();
-  doc.write(html);
-  doc.close();
+  return html;
+}
 
-  // Wait for images and fonts to be ready in the isolated iframe, then print immediately
-  // Logo aur fonts load hone ka intezar
-  await Promise.all(
-    Array.from(doc.images).map((img) =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise<void>((res) => {
-            img.onload = img.onerror = () => res();
-          })
-    )
-  );
-  try { await (doc as any).fonts?.ready; } catch {}
-
-  // Receipt ki asli height measure karein
-  const slipPages = doc.querySelectorAll('.slip-page');
-  let heightMm = 0;
-  if (slipPages.length > 1) {
-    const heights = Array.from(slipPages).map((el) => Math.ceil((el as HTMLElement).getBoundingClientRect().height));
-    const maxHeightPx = Math.max(...heights);
-    heightMm = Math.ceil((maxHeightPx * 25.4) / 96) + 4; // 4mm safety
-    iframe.style.height = `${maxHeightPx}px`;
-  } else {
-    const container = doc.querySelector('.receipt-container') as HTMLElement;
-    const heightPx = Math.ceil(container.getBoundingClientRect().height);
-    heightMm = Math.ceil((heightPx * 25.4) / 96) + 4; // 4mm safety
-    iframe.style.height = `${heightPx}px`;
-  }
- 
-  // Page ki exact size set karein (size: auto ki jagah)
-  const pageStyle = doc.createElement('style');
-  pageStyle.textContent = `@page { size: 80mm ${heightMm}mm; margin: 0; }`;
-  doc.head.appendChild(pageStyle);
-
-  return new Promise<void>((resolve) => {
-    let resolved = false;
-    const finish = () => {
-      if (!resolved) {
-        resolved = true;
-        resolve();
-      }
-    };
-
-    const win = iframe.contentWindow;
-    if (win) {
-      win.onafterprint = finish;
-      win.focus();
-      win.print();
-    }
-    setTimeout(finish, 500);
-  });
+/**
+ * Print POS thermal receipt silently using QZ Tray
+ */
+export async function printThermalReceipt(
+  data: ThermalReceiptData,
+  printerName?: string
+): Promise<void> {
+  if (!data?.invoice) return;
+  const html = await generateThermalReceiptHtml(data);
+  await printPosThermalSlip(html, printerName);
 }
