@@ -45,6 +45,7 @@ export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState<number>(0);
   const [deliveryCharges, setDeliveryCharges] = useState<number>(0);
+  const [slipCharges, setSlipCharges] = useState<number>(2);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [splitCashAmount, setSplitCashAmount] = useState<number | ''>('');
@@ -281,9 +282,22 @@ export default function POSPage() {
     (acc, item) => acc + (Number(item.quantity) || 0) * (Number(item.price !== undefined ? item.price : item.unit_price) || 0),
     0
   );
+
+  const totalWeightKg = cart.reduce((acc, item) => {
+    const isItemReturn = Number(item.quantity) < 0;
+    const absQty = Math.abs(Number(item.quantity) || 0);
+    const unitMultiplier = (item.selected_unit?.toLowerCase() === 'bag' || item.selected_unit?.toLowerCase() === 'bora')
+      ? Number(item.bag_weight_kg || 25.0)
+      : 1.0;
+    const kg = absQty * unitMultiplier;
+    return isItemReturn ? acc - kg : acc + kg;
+  }, 0);
+  const formattedTotalWeight = Number(totalWeightKg.toFixed(2)).toString();
+
   const effectiveDiscount = isCashier ? 0 : discount;
   const effectiveDeliveryCharges = Math.max(0, Number(deliveryCharges) || 0);
-  const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount + effectiveDeliveryCharges);
+  const effectiveSlipCharges = Math.max(0, Number(slipCharges) || 0);
+  const netBeforeCredit = Math.max(0, subtotal - effectiveDiscount + effectiveDeliveryCharges + effectiveSlipCharges);
   const appliedCredit = hasCreditBalance ? Math.min(netBeforeCredit, availableCredit) : 0;
   const total = Math.max(0, netBeforeCredit - appliedCredit);
 
@@ -296,7 +310,7 @@ export default function POSPage() {
 
   const isCartValid =
     cart.length > 0 &&
-cart.every((item) => Number(item.quantity) > 0);
+    cart.every((item) => Number(item.quantity) > 0 && Number(item.price !== undefined ? item.price : item.unit_price) >= 0);
 
   const checkoutMutation = useMutation({
     mutationFn: () =>
@@ -314,6 +328,7 @@ cart.every((item) => Number(item.quantity) > 0);
         }),
         discount: effectiveDiscount,
         delivery_charges: effectiveDeliveryCharges,
+        slip_charges: effectiveSlipCharges,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
         bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
@@ -338,6 +353,7 @@ cart.every((item) => Number(item.quantity) > 0);
           ...invoice,
           delivery_charges: effectiveDeliveryCharges,
           delivery_charge: effectiveDeliveryCharges,
+          slip_charges: effectiveSlipCharges,
           payment_method: activeMethod,
           bank_name: selectedBank ? selectedBank.bank_name : (invoice.bank_name || undefined),
           paid_amount: effectiveAmountPaid,
@@ -363,6 +379,7 @@ cart.every((item) => Number(item.quantity) > 0);
       setCart([]);
       setDiscount(0);
       setDeliveryCharges(0);
+      setSlipCharges(2);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -407,6 +424,7 @@ cart.every((item) => Number(item.quantity) > 0);
         discount: effectiveDiscount,
         delivery_charges: effectiveDeliveryCharges,
         delivery_charge: effectiveDeliveryCharges,
+        slip_charges: effectiveSlipCharges,
         amount_paid: effectiveAmountPaid,
         payment_method: paymentMethod,
         bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
@@ -439,6 +457,7 @@ cart.every((item) => Number(item.quantity) > 0);
       setCart([]);
       setDiscount(0);
       setDeliveryCharges(0);
+      setSlipCharges(2);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -465,6 +484,7 @@ cart.every((item) => Number(item.quantity) > 0);
         discount,
         delivery_charges: effectiveDeliveryCharges,
         delivery_charge: effectiveDeliveryCharges,
+        slip_charges: effectiveSlipCharges,
         total_amount: total,
         payment_method: paymentMethod,
         split_cash_amount: splitCashAmount !== '' ? Number(splitCashAmount) : null,
@@ -478,6 +498,7 @@ cart.every((item) => Number(item.quantity) > 0);
       setCart([]);
       setDiscount(0);
       setDeliveryCharges(0);
+      setSlipCharges(2);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -511,6 +532,7 @@ cart.every((item) => Number(item.quantity) > 0);
     setSelectedCustomerId(order.customer_id || '');
     setDiscount(Number(order.discount || 0));
     setDeliveryCharges(Number((order as any).delivery_charges || (order as any).delivery_charge || 0));
+    setSlipCharges((order as any).slip_charges !== undefined ? Number((order as any).slip_charges) : 2);
     setPaymentMethod(order.payment_method || 'CASH');
     setSplitCashAmount(order.split_cash_amount !== null && order.split_cash_amount !== undefined ? Number(order.split_cash_amount) : '');
     setSplitBankAmount(order.split_bank_amount !== null && order.split_bank_amount !== undefined ? Number(order.split_bank_amount) : '');
@@ -675,6 +697,7 @@ cart.every((item) => Number(item.quantity) > 0);
             setCart([]);
             setDiscount(0);
             setDeliveryCharges(0);
+            setSlipCharges(2);
             setAmountPaid('');
             setSplitCashAmount('');
             setSplitBankAmount('');
@@ -1018,12 +1041,6 @@ return (
                 ? item.bag_weight_kg
                 : 1.0;
 
-              const floorPricePerKg = item.rolling_avg_cost_per_kg * 1.05;
-              const floorPricePerUnit = floorPricePerKg * unitMultiplier;
-              const itemUnitPriceNum = Number(item.price !== undefined ? item.price : item.unit_price) || 0;
-              const sellingPricePerKg = unitMultiplier > 0 ? (itemUnitPriceNum / unitMultiplier) : itemUnitPriceNum;
-              const isBelowFloor = sellingPricePerKg < floorPricePerKg - 0.01;
-
               const itemQtyKg = (Number(item.quantity) || 0) * unitMultiplier;
               const liveStockKg = Number(item.current_stock || 0);
               const isOverdraft = itemQtyKg > liveStockKg;
@@ -1033,7 +1050,7 @@ return (
                 <div
                   key={item.product_id}
                   className={`py-2 px-0.5 transition-all ${
-                    isBelowFloor || isOverdraft ? 'bg-amber-50/50 -mx-1 px-1.5 rounded dark:bg-amber-950/30' : ''
+                    isOverdraft ? 'bg-amber-50/50 -mx-1 px-1.5 rounded dark:bg-amber-950/30' : ''
                   }`}
                 >
                   {/* Top: Product Name & Delete Button */}
@@ -1065,13 +1082,6 @@ return (
                     <div className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50/90 p-1 rounded border border-amber-300/80 font-medium my-1 dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300">
                       <AlertCircle className="w-3 h-3 shrink-0 text-amber-600 dark:text-amber-400" />
                       Backorder: {deferredQtyKg.toFixed(1)} KG deferred to pending delivery
-                    </div>
-                  )}
-
-                  {isBelowFloor && (
-                    <div className="flex items-center gap-1 text-[10px] text-amber-800 bg-amber-50 p-1 rounded border border-amber-300 font-medium my-1 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300">
-                      <AlertCircle className="w-3 h-3 shrink-0 text-amber-600 dark:text-amber-400" />
-                      Notice: Below floor margin (Rs. {floorPricePerUnit.toFixed(1)} / {item.selected_unit})
                     </div>
                   )}
 
@@ -1207,6 +1217,11 @@ return (
         {/* Footer Payment Form */}
         <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-col gap-2 dark:bg-[#0c101c] dark:border-[#1e2235]">
           <div className="flex justify-between items-center text-xs text-slate-600 font-medium dark:text-slate-400">
+            <span>Total Weight</span>
+            <span className="font-bold text-slate-800 dark:text-white">{formattedTotalWeight} KG</span>
+          </div>
+
+          <div className="flex justify-between items-center text-xs text-slate-600 font-medium dark:text-slate-400">
             <span>Subtotal</span>
             <span className="font-bold text-slate-800 dark:text-white">Rs. {subtotal.toLocaleString()}</span>
           </div>
@@ -1239,6 +1254,20 @@ className={`w-20 text-right text-xs font-bold rounded py-0.5 px-2 ${
               onChange={(e) => setDeliveryCharges(Math.max(0, parseFloat(e.target.value) || 0))}
               className="w-20 text-right text-xs font-bold rounded py-0.5 px-2 bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
               placeholder="0"
+            />
+          </div>
+
+          <div className="flex justify-between items-center text-xs text-slate-600 font-medium dark:text-slate-400">
+            <span className="flex items-center gap-1">
+              Slip Charges (Rs)
+            </span>
+            <input
+              type="number"
+              min="0"
+              value={slipCharges === 0 ? '0' : (slipCharges || '')}
+              onChange={(e) => setSlipCharges(e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0))}
+              className="w-20 text-right text-xs font-bold rounded py-0.5 px-2 bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
+              placeholder="2"
             />
           </div>
 

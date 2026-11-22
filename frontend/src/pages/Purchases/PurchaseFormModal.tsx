@@ -9,7 +9,7 @@ import { getSuppliers } from '../../services/suppliers.service';
 import { productsService } from '../../services/products.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { DateInput } from '../../components/DateInput';
-import { compareProducts, formatProductTitle, groupProductsByFamily } from '../../utils/productSorting';
+import { compareProducts, formatProductTitle, groupProductsByFamily, formatSizeOnly } from '../../utils/productSorting';
 import { invalidatePurchaseQueries } from '../../utils/querySync';
 import { erpSyncBus } from '../../utils/erpSyncBus';
 
@@ -94,7 +94,9 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
     const prodId = item.product_id || item.selected_variant_id;
     if (!prodId) return true;
     const prod = products.find(p => p.id === prodId);
-    return !prod || !prod.size || prod.size.trim() === '';
+    if (!prod) return true;
+    const resolvedSize = formatSizeOnly(prod, item.selected_family_name);
+    return !resolvedSize || resolvedSize.trim() === '';
   });
 
   // Step 1: Group products by normalized product_name (case-insensitive & trimmed)
@@ -361,7 +363,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
         : Math.round(qty * unitPrice * 100) / 100;
 
       const prod = products.find(p => p.id === rest.product_id);
-      const resolvedSize = (prod?.size || 'Standard').trim();
+      const resolvedSize = (prod?.size || formatSizeOnly(prod, selected_family_name) || 'Standard').trim();
 
       return {
         ...rest,
@@ -551,12 +553,19 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
                       const group = groupedProducts[selectedGroupKey];
 
                       const variantList = group ? [...group.variants].sort(compareProducts) : [];
-                      const variantOptions: ComboboxOption[] = variantList.map((p) => ({
-                        value: p.id,
-                        label: p.size ? `${formatProductTitle(group?.name || p.name, p.size)} (${p.code})` : `${group?.name || p.name} (${p.code})`,
-                        badge: p.code,
-                        subLabel: `Std: ${Number(p.bag_weight_kg || 25).toFixed(2)} KG/bag`,
-                      }));
+                      const variantOptions: ComboboxOption[] = variantList.map((p) => {
+                        const vStock = Number(p.total_stock_kg ?? p.current_stock ?? 0);
+                        const vBagWeight = Number(p.bag_weight_kg || 25);
+                        const vBags = vBagWeight > 0 ? (vStock / vBagWeight).toFixed(1) : '0';
+                        const isZero = vStock <= 0;
+                        const sizeLabel = formatSizeOnly(p, group?.name);
+                        return {
+                          value: p.id,
+                          label: sizeLabel,
+                          badge: isZero ? 'Out of Stock' : `${vStock.toLocaleString()} KG`,
+                          subLabel: `Stock: ${vStock.toLocaleString()} KG (${vBags} Bags) • Std: ${vBagWeight.toFixed(2)} KG/bag${p.code ? ` • ${p.code}` : ''}`,
+                        };
+                      });
 
                       const qty = Number(watchItems[index]?.quantity) || 0;
                       const price = Number(watchItems[index]?.unit_price) || 0;

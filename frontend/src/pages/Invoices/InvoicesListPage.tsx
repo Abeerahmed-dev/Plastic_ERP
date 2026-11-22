@@ -16,6 +16,9 @@ import { getCustomers } from '../../services/customers.service';
 import { Pagination } from '../../components/Common/Pagination';
 import { printThermalReceipt } from '../../utils/printThermal';
 import { useErpSync } from '../../utils/erpSyncBus';
+import { A4InvoicePrintPortal, prepareInvoiceForPrint } from '../../components/print';
+import { productsService } from '../../services/products.service';
+import { toast } from '../../utils/toast';
 
 interface InvoicesListPageProps {
   defaultType?: 'erp' | 'pos' | 'all';
@@ -54,6 +57,15 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
   const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [printingInvoiceId, setPrintingInvoiceId] = useState<string | null>(null);
+  const [printingA4InvoiceId, setPrintingA4InvoiceId] = useState<string | null>(null);
+  const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
+  const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
+
+  const { data: allProducts = [] } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => productsService.getProducts(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const [returnInvoiceId, setReturnInvoiceId] = useState<string | null>(null);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
@@ -166,7 +178,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
     return roleFilteredInvoices.map((inv: any) => ({
       ...inv,
       city: inv.city || inv.customer_city || null,
-      name: inv.customer_name || inv.name || '',
+      name: inv.walk_in_customer_name || inv.customer_name || inv.name || '',
       invoice_number: inv.invoice_number || '',
     }));
   }, [roleFilteredInvoices]);
@@ -232,12 +244,30 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
         invoice: detail,
         items,
         cashierName: (detail as any)?.creator?.name || (detail as any)?.created_by_name || user?.name || 'Cashier',
-        customerName: (detail as any)?.customer_name || 'Walk-In Customer',
+        customerName: (detail as any)?.walk_in_customer_name || (detail as any)?.customer_name || 'Walk-In Customer',
       });
     } catch (err) {
       console.error('Failed to print thermal receipt:', err);
     } finally {
       setPrintingInvoiceId(null);
+    }
+  };
+
+  const handlePrintA4 = async (invoice: any) => {
+    try {
+      setPrintingA4InvoiceId(invoice.id);
+      let fullInvoice = invoice;
+      if (!fullInvoice.items || fullInvoice.items.length === 0) {
+        fullInvoice = await invoicesService.getInvoice(invoice.id);
+      }
+      const prepared = prepareInvoiceForPrint(fullInvoice, allProducts);
+      setPrintCopyMode('ORIGINAL');
+      setInvoiceToPrint(prepared);
+    } catch (err) {
+      console.error('Failed to load invoice for A4 printing:', err);
+      toast.error('Failed to load invoice details for printing');
+    } finally {
+      setPrintingA4InvoiceId(null);
     }
   };
 
@@ -641,8 +671,8 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-slate-900 flex items-center gap-1.5">
-                          <span>{invoice.customer_name}</span>
-                          {invoice.customer_name?.toLowerCase().includes('walk-in') && (
+                          <span>{invoice.walk_in_customer_name || invoice.customer_name}</span>
+                          {(invoice.walk_in_customer_name || invoice.customer_name?.toLowerCase().includes('walk-in')) && (
                             <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
                               Walk-in
                             </span>
@@ -712,6 +742,16 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                           )}
 
                           <button
+                            onClick={() => handlePrintA4(invoice)}
+                            disabled={printingA4InvoiceId === invoice.id}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-slate-800 bg-slate-100 hover:bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-300 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50"
+                            title={isPos ? 'Print A4 Bill' : 'Print A4 Invoice'}
+                          >
+                            <Printer className="w-3.5 h-3.5 text-slate-700" />
+                            <span>{printingA4InvoiceId === invoice.id ? 'Loading…' : (isPos ? 'Print A4' : 'Print')}</span>
+                          </button>
+
+                          <button
                             onClick={() => handleOpenInvoice(invoice.id)}
                             className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition-all active:scale-95 shadow-2xs cursor-pointer"
                             title="View Full Invoice Details"
@@ -757,11 +797,26 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
           setIsModalOpen(false);
           setResumedHeldData(null);
         }}
-        onSuccess={() => {
+        onSuccess={async (createdInvoice, copyMode) => {
           setIsModalOpen(false);
           setResumedHeldData(null);
           refetch();
           refetchHeldOrders();
+          if (createdInvoice) {
+            if (copyMode) {
+              setPrintCopyMode(copyMode);
+            }
+            let fullInvoice = createdInvoice;
+            if (!fullInvoice.items || fullInvoice.items.length === 0) {
+              try {
+                fullInvoice = await invoicesService.getInvoice(createdInvoice.id);
+              } catch (err) {
+                console.error('Failed to fetch full created invoice:', err);
+              }
+            }
+            const prepared = prepareInvoiceForPrint(fullInvoice, allProducts);
+            setInvoiceToPrint(prepared);
+          }
         }}
       />
 
@@ -812,6 +867,13 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
         onSuccess={() => {
           refetch();
         }}
+      />
+
+      {/* A4 Print Portal - Top Level, Never unmounted on modal close */}
+      <A4InvoicePrintPortal
+        invoice={invoiceToPrint}
+        copyMode={printCopyMode}
+        onAfterPrint={() => setInvoiceToPrint(null)}
       />
     </div>
   );

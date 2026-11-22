@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import db from '../../db/knex';
 import { CreateCustomerInput, UpdateCustomerInput, CustomerQuery } from './customers.schemas';
+import { ValidationError } from '../../shared/errors';
 
 export interface CustomerRow {
   id: string;
@@ -409,6 +410,15 @@ export async function updateCustomer(
   id: string,
   data: UpdateCustomerInput,
 ): Promise<CustomerWithBalance | undefined> {
+  const existing = await db('customers').where({ id }).first();
+  if (
+    existing?.name === 'Walk-in Cash Customer' &&
+    data.customer_type !== undefined &&
+    data.customer_type !== 'CASH'
+  ) {
+    throw new ValidationError("Cannot change customer type of 'Walk-in Cash Customer'");
+  }
+
   const updatePayload: Record<string, any> = {
     ...data,
     email: data.email || null,
@@ -433,6 +443,10 @@ export async function updateCustomer(
  * Hard deletes are blocked — customers may have financial history.
  */
 export async function softDeleteCustomer(id: string): Promise<boolean> {
+  const existing = await db('customers').where({ id }).first();
+  if (existing?.name === 'Walk-in Cash Customer') {
+    throw new ValidationError("Cannot delete 'Walk-in Cash Customer'");
+  }
   const count = await db('customers').where({ id }).update({ is_active: false, updated_at: new Date() });
   return count > 0;
 }

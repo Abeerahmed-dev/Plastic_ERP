@@ -30,14 +30,21 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
     const subtotal = Number(invoice.subtotal || invoice.total_amount || 0);
     const discount = Number(invoice.discount || 0);
     const deliveryCharge = Number(invoice.delivery_charge ?? invoice.delivery_charges ?? invoice.deliveryCharges ?? 0);
+    const slipCharges = Number(invoice.slip_charges ?? invoice.slipCharges ?? 0);
     const totalAmount = Number(invoice.total_amount || 0);
 
     const totalWeight = items.reduce((sum, item) => {
       const isItemReturn = item.isReturn || item.quantity < 0;
-      const qty = isItemReturn ? -Math.abs(Number(item.quantity) || 0) : (Number(item.quantity) || 0);
-      return sum + qty;
+      const unitMultiplier = (item.selected_unit?.toLowerCase() === 'bag' || item.selected_unit?.toLowerCase() === 'bora')
+        ? Number(item.bag_weight_kg || 25.0)
+        : (Number(item.actual_weight_per_unit) > 0 ? Number(item.actual_weight_per_unit) : 1.0);
+      const rawQty = Math.abs(Number(item.quantity) || 0);
+      const qtyKg = Number(item.net_kg_processed) !== 0 && !isNaN(Number(item.net_kg_processed))
+        ? Math.abs(Number(item.net_kg_processed))
+        : rawQty * unitMultiplier;
+      return isItemReturn ? sum - qtyKg : sum + qtyKg;
     }, 0);
-    const formattedTotalWeight = Number(totalWeight.toFixed(3)).toString();
+    const formattedTotalWeight = Number(totalWeight.toFixed(2)).toString();
 
     const paymentMethod = String(invoice.payment_method || invoice.paymentMethod || 'CASH').toUpperCase();
     const isSplit = paymentMethod === 'SPLIT' || (Number(invoice.split_cash_amount) > 0 && Number(invoice.split_bank_amount) > 0);
@@ -107,7 +114,7 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
         <div className="text-center mb-1 flex flex-col items-center justify-center">
           <img src={sabirLogoThermal} alt="Sabir Plastic" className="h-10 w-auto object-contain mb-0.5" />
           <h1 className="font-black text-sm tracking-wide uppercase mb-1">SABIR PLASTIC STORE</h1>
-          
+
           {/* Address & Phones Box */}
           <div className="w-full border-2 border-black rounded-sm py-0.5 px-1 mb-1 text-center">
             <p className="text-[9.5px] font-bold text-black leading-tight">Tower Market, Hyderabad</p>
@@ -142,8 +149,14 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
           </div>
           <div className="flex justify-between">
             <span>Customer:</span>
-            <span className="font-semibold">{customerName || invoice.customer_name || 'Walk-in Customer'}</span>
+            <span className="font-semibold">{customerName || invoice.walk_in_customer_name || invoice.customer_name || 'Walk-in Customer'}</span>
           </div>
+          {invoice.transport && String(invoice.transport).trim() !== '' && (
+            <div className="flex justify-between">
+              <span>Transport:</span>
+              <span className="font-semibold">{invoice.transport}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span>Cashier:</span>
             <span>{cashierName}</span>
@@ -221,12 +234,28 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
         {/* Financial Summary */}
         <div className="pt-1 mb-2 text-[11px] space-y-0.5">
           {isDuplicate ? (
-            <div className="flex justify-between font-extrabold text-sm border-t border-b border-black py-1 my-1">
-              <span>TOTAL / کل رقم:</span>
-              <span>Rs. {Math.abs(totalAmount).toLocaleString()}</span>
-            </div>
+            <>
+              <div className="flex justify-between font-bold">
+                <span>Total Weight / کل وزن:</span>
+                <span>{formattedTotalWeight} KG</span>
+              </div>
+              {slipCharges > 0 && (
+                <div className="flex justify-between text-gray-800">
+                  <span>Slip Charges / پرچی چارجز:</span>
+                  <span>+ Rs. {slipCharges.toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-extrabold text-sm border-t border-b border-black py-1 my-1">
+                <span>TOTAL / کل رقم:</span>
+                <span>Rs. {Math.abs(totalAmount).toLocaleString()}</span>
+              </div>
+            </>
           ) : (
             <>
+              <div className="flex justify-between font-bold">
+                <span>Total Weight / کل وزن:</span>
+                <span>{formattedTotalWeight} KG</span>
+              </div>
               <div className="flex justify-between">
                 <span>Gross Subtotal / کل رقم:</span>
                 <span>Rs. {subtotal.toLocaleString()}</span>
@@ -241,6 +270,12 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
                 <div className="flex justify-between text-gray-800">
                   <span>Delivery / ڈلیوری:</span>
                   <span>+ Rs. {deliveryCharge.toLocaleString()}</span>
+                </div>
+              )}
+              {slipCharges > 0 && (
+                <div className="flex justify-between text-gray-800">
+                  <span>Slip Charges / پرچی چارجز:</span>
+                  <span>+ Rs. {slipCharges.toLocaleString()}</span>
                 </div>
               )}
               <div className="flex justify-between font-extrabold text-sm border-t border-b border-black py-1 my-1">
@@ -316,3 +351,4 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
 );
 
 ReceiptPrinter.displayName = 'ReceiptPrinter';
+

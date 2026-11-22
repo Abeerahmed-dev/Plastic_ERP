@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2, Ban } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
 import { productsService } from '../services/products.service';
 import sabirLogo from '../assets/sabirlogo.png';
-import { ThermalReceipt80mm, A4SalesInvoice } from './print';
+import { ThermalReceipt80mm, A4SalesInvoice, A4InvoicePrintPortal, prepareInvoiceForPrint } from './print';
+import { invoicesService } from '../services/invoices.service';
+import { printThermalReceipt } from '../utils/printThermal';
 import { getUrduProductName } from '../utils/bilingual';
 
 export interface InvoiceDetailItem {
@@ -41,6 +42,7 @@ export interface InvoiceDetailData {
   invoice_type?: string;
   parent_invoice_id?: string | null;
   return_reason?: string | null;
+  walk_in_customer_name?: string | null;
   customer_name?: string;
   customer_code?: string;
   customer_phone?: string;
@@ -53,6 +55,7 @@ export interface InvoiceDetailData {
   discount: number;
   delivery_charge?: number;
   delivery_charges?: number;
+  slip_charges?: number;
   total_amount: number;
   paid_amount: number;
   amount_paid?: number;
@@ -86,8 +89,10 @@ interface InvoiceDetailModalProps {
 export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn }: InvoiceDetailModalProps) {
   const { user } = useAuthStore();
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
-  const [printMode, setPrintMode] = useState<'A4' | 'POS' | null>(null);
   const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
+  const [invoiceToPrint, setInvoiceToPrint] = useState<any | null>(null);
+  const [isPrintingA4, setIsPrintingA4] = useState(false);
+  const [isPrintingPOS, setIsPrintingPOS] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -118,7 +123,9 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
     return new Intl.NumberFormat('en-PK', { maximumFractionDigits: 2 }).format(val);
   };
 
-  const entityName = type === 'purchase' ? (invoice.supplier_name || 'Party') : (invoice.customer_name || 'Customer');
+  const entityName = type === 'purchase'
+    ? (invoice.supplier_name || 'Party')
+    : (invoice.walk_in_customer_name || invoice.customer_name || 'Customer');
   const entityCode = type === 'purchase' ? invoice.supplier_code : invoice.customer_code;
   const entityPhone = type === 'purchase' ? invoice.supplier_phone : invoice.customer_phone;
   const entityCity = type === 'purchase' ? invoice.supplier_city : invoice.customer_city;
@@ -126,6 +133,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
   const subtotal = Number(invoice.subtotal || invoice.total_amount + (invoice.discount || 0));
   const discount = Number(invoice.discount || 0);
   const deliveryCharge = type === 'purchase' ? 0 : Number(invoice.delivery_charge || 0);
+  const slipCharges = type === 'purchase' ? 0 : Number(invoice.slip_charges || 0);
   const totalAmount = Number(invoice.total_amount || 0);
   const paidAmount = Number(invoice.paid_amount || invoice.amount_paid || 0);
 
@@ -208,31 +216,46 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
     );
   };
 
-  const triggerPrint = (mode: 'A4' | 'POS') => {
-    setPrintMode(mode);
-    const wasDark = document.documentElement.classList.contains('dark');
-    if (wasDark) {
-      document.documentElement.classList.remove('dark');
-    }
-    if (mode === 'A4') {
-      document.body.classList.add('printing-a4');
-    } else if (mode === 'POS') {
-      document.body.classList.add('printing-pos');
-    }
-
-    const handleAfterPrint = () => {
-      setPrintMode(null);
-      document.body.classList.remove('printing-a4', 'printing-pos');
-      if (wasDark) {
-        document.documentElement.classList.add('dark');
+  const handlePrintA4 = async () => {
+    if (!invoice) return;
+    try {
+      setIsPrintingA4(true);
+      let fullInvoice: any = invoice;
+      if (!fullInvoice.items || fullInvoice.items.length === 0) {
+        fullInvoice = await invoicesService.getInvoice(invoice.id);
       }
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
+      const prepared = prepareInvoiceForPrint({
+        ...fullInvoice,
+        type: fullInvoice.type || (type === 'purchase' ? 'purchase' : 'sales'),
+      }, allProducts);
+      setInvoiceToPrint(prepared);
+    } catch (err) {
+      console.error('Failed to prepare invoice for A4 print:', err);
+    } finally {
+      setIsPrintingA4(false);
+    }
+  };
 
-    window.addEventListener('afterprint', handleAfterPrint);
-    setTimeout(() => {
-      window.print();
-    }, 150);
+  const handlePrintPOS = async () => {
+    if (!invoice) return;
+    try {
+      setIsPrintingPOS(true);
+      let fullInvoice: any = invoice;
+      if (!fullInvoice.items || fullInvoice.items.length === 0) {
+        fullInvoice = await invoicesService.getInvoice(invoice.id);
+      }
+      const items = fullInvoice.items || [];
+      await printThermalReceipt({
+        invoice: fullInvoice,
+        items,
+        cashierName: fullInvoice.creator?.name || fullInvoice.created_by_name || user?.name || 'Cashier',
+        customerName: fullInvoice.walk_in_customer_name || fullInvoice.customer_name || 'Walk-In Customer',
+      });
+    } catch (err) {
+      console.error('Failed to print thermal receipt:', err);
+    } finally {
+      setIsPrintingPOS(false);
+    }
   };
 
 
@@ -334,7 +357,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                 <Calendar className="w-4 h-4 text-purple-600 print:hidden" />
                 Date: {invoice.date ? new Date(invoice.date).toLocaleDateString('en-PK', { dateStyle: 'medium' }) : 'N/A'}
               </div>
-              {invoice.due_date && (
+              {type === 'purchase' && invoice.due_date && (
                 <p className="text-xs text-slate-500">
                   Due Date: {new Date(invoice.due_date).toLocaleDateString('en-PK', { dateStyle: 'medium' })}
                 </p>
@@ -513,6 +536,12 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                   <span className="font-mono font-semibold">+{formatPKR(deliveryCharge)}</span>
                 </div>
               )}
+              {type !== 'purchase' && slipCharges > 0 && (
+                <div className="flex justify-between text-indigo-600">
+                  <span>Slip Charges:</span>
+                  <span className="font-mono font-semibold">+{formatPKR(slipCharges)}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-slate-900 text-sm pt-1 border-t border-slate-200">
                 <span>Original Grand Total:</span>
                 <span className={`font-mono ${isReturnNote ? 'text-red-600 font-bold' : ''}`}>{formatPKR(totalAmount)}</span>
@@ -628,10 +657,11 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             {isPosInvoice && (
               <button
                 type="button"
-                onClick={() => triggerPrint('POS')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+                onClick={handlePrintPOS}
+                disabled={isPrintingPOS}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
               >
-                🖨️ POS Receipt (80mm)
+                🖨️ {isPrintingPOS ? 'Printing…' : 'POS Receipt (80mm)'}
               </button>
             )}
 
@@ -671,11 +701,12 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
             {!isPosInvoice && (
               <button
                 type="button"
-                onClick={() => triggerPrint('A4')}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer"
+                onClick={handlePrintA4}
+                disabled={isPrintingA4}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 text-sm font-bold shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
               >
                 <Printer className="w-4 h-4 text-slate-950" />
-                Print A4 Invoice
+                {isPrintingA4 ? 'Loading…' : 'Print A4 Invoice'}
               </button>
             )}
           </div>
@@ -683,79 +714,12 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
       </div>
     </div>
 
-    {/* Print-Only Targeted Invoice Components */}
-    {printMode === 'POS' && createPortal(
-      <div className="pos-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-        <style dangerouslySetInnerHTML={{ __html: `
-          @page {
-            size: 80mm auto !important;
-            margin: 0 !important;
-          }
-          html, html.dark, body, html.dark body {
-            background-color: #ffffff !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            color-scheme: light !important;
-          }
-          .pos-print-portal,
-          .pos-print-portal * {
-            color-scheme: light !important;
-          }
-          body {
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-        ` }} />
-        <ThermalReceipt80mm data={invoice} />
-      </div>,
-      document.body
-    )}
-
-    {printMode === 'A4' && createPortal(
-      <div className="invoice-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-        <style dangerouslySetInnerHTML={{ __html: `
-          @page {
-            size: A4 portrait !important;
-            margin: 8mm !important;
-          }
-          html, html.dark, body, html.dark body {
-            background-color: #ffffff !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            color-scheme: light !important;
-          }
-          .invoice-print-portal,
-          .invoice-print-portal * {
-            color-scheme: light !important;
-          }
-          @media print {
-            .page-break-after-always {
-              page-break-after: always !important;
-              break-after: page !important;
-            }
-          }
-        ` }} />
-        {printCopyMode === 'BOTH' ? (
-          <>
-            <div className="page-break-after-always">
-              <A4SalesInvoice data={{ ...invoice, isDuplicate: false, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
-            </div>
-            <div>
-              <A4SalesInvoice data={{ ...invoice, isDuplicate: true, type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales') }} />
-            </div>
-          </>
-        ) : (
-          <A4SalesInvoice
-            data={{
-              ...invoice,
-              isDuplicate: printCopyMode === 'DUPLICATE',
-              type: invoice.type || (type === 'purchase' ? 'purchase' : 'sales')
-            }}
-          />
-        )}
-      </div>,
-      document.body
-    )}
+    {/* A4 Print Portal */}
+    <A4InvoicePrintPortal
+      invoice={invoiceToPrint}
+      copyMode={printCopyMode}
+      onAfterPrint={() => setInvoiceToPrint(null)}
+    />
   </>
 );
 }

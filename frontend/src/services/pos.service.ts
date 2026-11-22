@@ -17,6 +17,7 @@ export interface POSCheckoutData {
   discount?: number;
   delivery_charges?: number;
   delivery_charge?: number;
+  slip_charges?: number;
   amount_paid?: number;
   payment_method?: string;
   bank_account_id?: string;
@@ -58,6 +59,7 @@ export interface POSHeldOrder {
   subtotal: number;
   discount: number;
   total_amount: number;
+  slip_charges?: number;
   payment_method: string;
   split_cash_amount?: number | null;
   split_bank_amount?: number | null;

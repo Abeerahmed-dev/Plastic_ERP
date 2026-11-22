@@ -123,3 +123,86 @@ export function groupProductsByFamily<T extends { name: string; size?: string | 
 
   return result;
 }
+
+/**
+ * Formats a product's display size/variant for UI selectors by extracting only
+ * the size/variant portion (e.g. "1x10" instead of "GGGG(1x10)").
+ *
+ * 1. Prefers dedicated `product.size` if present and non-empty.
+ *    (Strips any wrapping parentheses e.g. "(1x10)" -> "1x10" or embedded name)
+ * 2. Otherwise strips leading base/product name or group name from `product.name`
+ *    and extracts the size within parentheses/brackets or trailing dimensions.
+ * 3. Falls back to `product.name` only if no size can be extracted.
+ */
+export function formatSizeOnly(
+  product?: { name?: string | null; size?: string | null; [key: string]: any } | null,
+  groupName?: string | null
+): string {
+  if (!product) return '';
+
+  // 1. First prefer dedicated product.size if it exists and is non-empty
+  const rawSize = (product.size || '').trim();
+  if (rawSize) {
+    // If size contains parentheses (e.g. "(1x10)" or "GGGG(1x10)"), extract the inner size
+    const parenInSize = rawSize.match(/\(([^)]+)\)/);
+    if (parenInSize && parenInSize[1]?.trim()) {
+      return parenInSize[1].trim();
+    }
+    // If group name is supplied and rawSize starts with it, strip it
+    if (groupName && groupName.trim()) {
+      const cleanGroup = groupName.trim().toLowerCase();
+      if (rawSize.toLowerCase().startsWith(cleanGroup)) {
+        const stripped = rawSize
+          .slice(cleanGroup.length)
+          .replace(/^[-–—:\s()]+/, '')
+          .replace(/[-–—:\s()]+$/, '')
+          .trim();
+        if (stripped) return stripped;
+      }
+    }
+    // Clean outer parentheses or quotes if any
+    const cleanSize = rawSize.replace(/^\((.*)\)$/, '$1').trim();
+    return cleanSize || rawSize;
+  }
+
+  // 2. Otherwise, strip leading product/base name from product.name
+  const rawName = (product.name || '').trim();
+  if (!rawName) return '';
+
+  // Extract from parentheses: e.g. "GGGG(1x10)" -> "1x10", "Abid Gold (8x11)" -> "8x11"
+  const parenMatch = rawName.match(/\(([^)]+)\)[^()]*$/);
+  if (parenMatch && parenMatch[1]?.trim()) {
+    return parenMatch[1].trim();
+  }
+
+  // Extract from square brackets: e.g. "GGGG[1x10]" -> "1x10"
+  const bracketMatch = rawName.match(/\[([^\]]+)\][^[\]]*$/);
+  if (bracketMatch && bracketMatch[1]?.trim()) {
+    return bracketMatch[1].trim();
+  }
+
+  // If group name is supplied, strip it from the start of product.name
+  if (groupName && groupName.trim()) {
+    const cleanGroup = groupName.trim().toLowerCase();
+    if (rawName.toLowerCase().startsWith(cleanGroup)) {
+      const remainder = rawName
+        .slice(cleanGroup.length)
+        .replace(/^[-–—:\s()]+/, '')
+        .replace(/[-–—:\s()]+$/, '')
+        .trim();
+      if (remainder) {
+        return remainder;
+      }
+    }
+  }
+
+  // Check for trailing dimension or size pattern: e.g. "GGGG 1x10", "Poly 10 x 14", "Film 25kg"
+  const dimMatch = rawName.match(/(\d+(?:\.\d+)?\s*[*xX×]\s*\d+(?:\.\d+)?(?:\s*[a-zA-Z]+)?)$/);
+  if (dimMatch && dimMatch[1]?.trim()) {
+    return dimMatch[1].trim();
+  }
+
+  // 3. Fallback to product.name only if no size can be extracted
+  return rawName;
+}
+

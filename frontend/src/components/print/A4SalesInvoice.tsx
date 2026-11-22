@@ -12,8 +12,8 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
   const invoice = data;
 
   const invoiceNumber = String(data.invoice_number || data.code || data.id || 'N/A');
-  const billNumber = data.bill_number 
-    ? String(data.bill_number) 
+  const billNumber = data.bill_number
+    ? String(data.bill_number)
     : (invoiceNumber.startsWith('POS-') ? invoiceNumber.replace(/^POS-/i, '') : invoiceNumber);
 
   // Format Date & Time: e.g. 14-Nov-2026, 09:47 pm
@@ -65,7 +65,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
   const entityLabel = isPurchase ? 'Party' : 'Customer';
   const entityName = isPurchase
     ? (data.supplier_name || data.supplier?.name || data.party_name || 'Party')
-    : (data.customer_name || data.customer?.name || 'Walk-In Customer');
+    : (data.walk_in_customer_name || data.customer_name || data.customer?.name || 'Walk-In Customer');
   const entityCode = isPurchase ? (data.supplier_code || data.supplier?.code) : (data.customer_code || data.customer?.code);
   const entityPhone = isPurchase ? (data.supplier_phone || data.supplier?.phone) : (data.customer_phone || data.customer?.phone);
   const entityCity = isPurchase ? (data.supplier_city || data.city || data.supplier?.city) : (data.customer_city || data.customer?.city);
@@ -76,6 +76,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
   const subtotal = Number(data.subtotal ?? (data.total_amount + (data.discount || 0)));
   const discount = Number(data.discount || 0);
   const deliveryCharge = Number(data.delivery_charge || data.delivery_charges || 0);
+  const slipCharges = Number(data.slip_charges || data.slipCharges || 0);
   const totalAmount = Number(data.total_amount || 0);
   const paidAmount = Number(data.paid_amount ?? data.amount_paid ?? 0);
 
@@ -327,7 +328,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
               <span className="w-24 font-semibold text-slate-700">{isPurchase ? 'Received By:' : 'Cashier:'}</span>
               <span className="text-black font-bold">{cashierOrCreator}</span>
             </div>
-            {data.due_date && (
+            {isPurchase && data.due_date && (
               <div className="flex items-center">
                 <span className="w-24 font-semibold text-slate-700">Due Date:</span>
                 <span className="text-black font-medium">{formatDateOnly(data.due_date)}</span>
@@ -501,6 +502,13 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
             </div>
           )}
 
+          {slipCharges > 0 && (
+            <div className="flex justify-between text-indigo-700 font-semibold">
+              <span>Slip Charges:</span>
+              <span className="font-mono font-bold">+ Rs. {formatDecimal(slipCharges)}</span>
+            </div>
+          )}
+
           {childReturns.length > 0 && (
             <>
               <div className="flex justify-between text-rose-700 font-semibold">
@@ -540,7 +548,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
       {/* ── Footer Urdu Highlight Box & Business Note ── */}
       <div className="text-center mt-3 pt-2 border-t border-dashed border-black">
         <p className="font-bold text-xs text-black">Thank You For Your Business!</p>
-        
+
         {/* Highlighted Urdu Warning Box */}
         <div className="border-2 border-black rounded-md py-1.5 px-3 my-2 text-center max-w-lg mx-auto box-border">
           <p className="text-xs font-bold text-black leading-relaxed" dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif" }}>

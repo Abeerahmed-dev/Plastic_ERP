@@ -21,6 +21,10 @@ interface SearchableComboboxProps {
   onSelectNext?: () => void;
   onTabNext?: () => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  allowCustom?: boolean;
+  customValue?: string;
+  onCustomSelect?: (val: string) => void;
+  customOptionLabel?: (typedText: string) => string;
 }
 
 export function SearchableCombobox({
@@ -36,6 +40,10 @@ export function SearchableCombobox({
   onSelectNext,
   onTabNext,
   onKeyDown,
+  allowCustom = false,
+  customValue = '',
+  onCustomSelect,
+  customOptionLabel,
 }: SearchableComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,14 +65,52 @@ export function SearchableCombobox({
     );
   }, [options, value]);
 
-  // Sync display text when value or options change
+  // Sync display text when value, customValue, or options change
   useEffect(() => {
-    if (!value) {
-      setSearchQuery('');
-    } else if (!isOpen) {
-      setSearchQuery(selectedOption ? selectedOption.label : '');
+    if (!isOpen) {
+      if (value && selectedOption) {
+        setSearchQuery(selectedOption.label);
+      } else if (allowCustom && customValue) {
+        setSearchQuery(customValue);
+      } else if (!value && !customValue) {
+        setSearchQuery('');
+      }
     }
-  }, [value, selectedOption, isOpen]);
+  }, [value, customValue, selectedOption, isOpen, allowCustom]);
+
+  // Filtered options based on search query (trimmed and case-insensitive)
+  const filteredOptions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return options;
+    const qNorm = q.replace(/\s*[*xX×]\s*/g, 'x');
+    return options.filter((opt) => {
+      if (
+        opt.label.toLowerCase().includes(q) ||
+        opt.value.toLowerCase().includes(q) ||
+        (opt.subLabel && opt.subLabel.toLowerCase().includes(q)) ||
+        (opt.badge && opt.badge.toLowerCase().includes(q))
+      ) {
+        return true;
+      }
+      if (qNorm !== q) {
+        const labelNorm = opt.label.toLowerCase().replace(/\s*[*xX×]\s*/g, 'x');
+        if (labelNorm.includes(qNorm)) return true;
+      }
+      return false;
+    });
+  }, [options, searchQuery]);
+
+  const trimmedQuery = searchQuery.trim();
+  const exactMatch = useMemo(() => {
+    if (!trimmedQuery) return false;
+    const q = trimmedQuery.toLowerCase();
+    return options.some(
+      (opt) => opt.label.trim().toLowerCase() === q || opt.value.trim().toLowerCase() === q
+    );
+  }, [options, trimmedQuery]);
+
+  const showCustomOption = Boolean(allowCustom && trimmedQuery && !exactMatch);
+  const totalNavigable = filteredOptions.length + (showCustomOption ? 1 : 0);
 
   // Keep highlightedIndex in sync with value or 0 when open
   useEffect(() => {
@@ -81,34 +127,38 @@ export function SearchableCombobox({
   useEffect(() => {
     if (disabled) {
       setIsOpen(false);
-      if (!value) setSearchQuery('');
+      if (!value && !customValue) setSearchQuery('');
     }
-  }, [disabled, value]);
+  }, [disabled, value, customValue]);
 
   // Click outside listener
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
-        setSearchQuery(selectedOption ? selectedOption.label : '');
+        if (allowCustom) {
+          const q = searchQuery.trim();
+          if (q) {
+            if (value && selectedOption && q.toLowerCase() === selectedOption.label.trim().toLowerCase()) {
+              setSearchQuery(selectedOption.label);
+            } else {
+              onChange('');
+              onCustomSelect?.(q);
+              setSearchQuery(q);
+            }
+          } else {
+            onChange('');
+            onCustomSelect?.('');
+            setSearchQuery('');
+          }
+        } else {
+          setSearchQuery(selectedOption ? selectedOption.label : '');
+        }
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [selectedOption]);
-
-  // Filtered options based on search query (trimmed and case-insensitive)
-  const filteredOptions = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter(
-      (opt) =>
-        opt.label.toLowerCase().includes(q) ||
-        opt.value.toLowerCase().includes(q) ||
-        (opt.subLabel && opt.subLabel.toLowerCase().includes(q)) ||
-        (opt.badge && opt.badge.toLowerCase().includes(q))
-    );
-  }, [options, searchQuery]);
+  }, [selectedOption, searchQuery, allowCustom, value, onChange, onCustomSelect]);
 
   const scrollToOption = (index: number) => {
     if (optionsListRef.current) {
@@ -119,10 +169,21 @@ export function SearchableCombobox({
     }
   };
 
-  const handleSelect = (optValue: string) => {
+  const handleSelectSaved = (optValue: string) => {
     onChange(optValue);
+    onCustomSelect?.('');
     const chosen = options.find((o) => o.value === optValue);
     setSearchQuery(chosen ? chosen.label : '');
+    setIsOpen(false);
+  };
+
+  const handleSelectCustom = (customText: string) => {
+    const cleanText = customText.trim();
+    if (cleanText) {
+      onChange('');
+      onCustomSelect?.(cleanText);
+      setSearchQuery(cleanText);
+    }
     setIsOpen(false);
   };
 
@@ -142,9 +203,9 @@ export function SearchableCombobox({
       e.preventDefault();
       if (!isOpen) {
         setIsOpen(true);
-      } else if (filteredOptions.length > 0) {
+      } else if (totalNavigable > 0) {
         setHighlightedIndex((prev) => {
-          const next = prev < filteredOptions.length - 1 ? prev + 1 : 0;
+          const next = prev < totalNavigable - 1 ? prev + 1 : 0;
           scrollToOption(next);
           return next;
         });
@@ -153,22 +214,35 @@ export function SearchableCombobox({
       e.preventDefault();
       if (!isOpen) {
         setIsOpen(true);
-      } else if (filteredOptions.length > 0) {
+      } else if (totalNavigable > 0) {
         setHighlightedIndex((prev) => {
-          const next = prev > 0 ? prev - 1 : filteredOptions.length - 1;
+          const next = prev > 0 ? prev - 1 : totalNavigable - 1;
           scrollToOption(next);
           return next;
         });
       }
     } else if (e.key === 'Enter') {
-      if (isOpen && filteredOptions.length > 0) {
+      if (isOpen && totalNavigable > 0) {
         e.preventDefault();
-        const targetOpt = filteredOptions[highlightedIndex] || filteredOptions[0];
-        if (targetOpt) {
-          handleSelect(targetOpt.value);
+        if (highlightedIndex < filteredOptions.length) {
+          const targetOpt = filteredOptions[highlightedIndex];
+          if (targetOpt) {
+            handleSelectSaved(targetOpt.value);
+            if (onSelectNext) {
+              setTimeout(() => onSelectNext(), 50);
+            }
+          }
+        } else if (showCustomOption) {
+          handleSelectCustom(trimmedQuery);
           if (onSelectNext) {
             setTimeout(() => onSelectNext(), 50);
           }
+        }
+      } else if (isOpen && allowCustom && trimmedQuery) {
+        e.preventDefault();
+        handleSelectCustom(trimmedQuery);
+        if (onSelectNext) {
+          setTimeout(() => onSelectNext(), 50);
         }
       } else if (!isOpen && onSelectNext) {
         e.preventDefault();
@@ -181,11 +255,17 @@ export function SearchableCombobox({
         setIsOpen(false);
       }
     } else if (e.key === 'Tab') {
-      if (isOpen && filteredOptions.length > 0 && highlightedIndex >= 0) {
-        const targetOpt = filteredOptions[highlightedIndex];
-        if (targetOpt) {
-          handleSelect(targetOpt.value);
+      if (isOpen && totalNavigable > 0 && highlightedIndex >= 0) {
+        if (highlightedIndex < filteredOptions.length) {
+          const targetOpt = filteredOptions[highlightedIndex];
+          if (targetOpt) {
+            handleSelectSaved(targetOpt.value);
+          }
+        } else if (showCustomOption) {
+          handleSelectCustom(trimmedQuery);
         }
+      } else if (allowCustom && trimmedQuery) {
+        handleSelectCustom(trimmedQuery);
       }
       setIsOpen(false);
       if (onTabNext) {
@@ -197,6 +277,7 @@ export function SearchableCombobox({
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
     onChange('');
+    onCustomSelect?.('');
     setSearchQuery('');
     setIsOpen(false);
     inputRef.current?.focus();
@@ -237,13 +318,26 @@ export function SearchableCombobox({
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className={`w-full py-2 pl-3 pr-8 text-sm outline-none rounded-lg bg-transparent truncate ${
+          className={`w-full py-2 pl-3 text-sm outline-none rounded-lg bg-transparent truncate ${
+            allowCustom && (value || customValue) ? 'pr-24' : 'pr-10'
+          } ${
             disabled ? 'text-slate-400 cursor-not-allowed' : 'text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500'
           }`}
         />
 
-        <div className="absolute right-2 flex items-center gap-1 text-slate-400">
-          {!disabled && value && (
+        <div className="absolute right-2 flex items-center gap-1.5 text-slate-400">
+          {allowCustom && (
+            value ? (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300">
+                Saved
+              </span>
+            ) : customValue ? (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300">
+                Walk-In
+              </span>
+            ) : null
+          )}
+          {!disabled && (value || (allowCustom && customValue) || searchQuery) && (
             <button
               type="button"
               onClick={handleClear}
@@ -277,54 +371,95 @@ export function SearchableCombobox({
           ref={optionsListRef}
           className="absolute left-0 right-0 top-full mt-1 z-50 max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#161925] p-1 shadow-xl animate-in fade-in zoom-in-95 duration-100"
         >
-          {filteredOptions.length === 0 ? (
+          {filteredOptions.length === 0 && !showCustomOption ? (
             <div className="py-3 px-3 text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
               <Search className="w-3.5 h-3.5" />
               <span>No matching options found</span>
             </div>
           ) : (
-            filteredOptions.map((opt, idx) => {
-              const isSelected = opt.value === value;
-              const isHighlighted = idx === highlightedIndex;
-              return (
+            <>
+              {filteredOptions.map((opt, idx) => {
+                const isSelected = opt.value === value;
+                const isHighlighted = idx === highlightedIndex;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onMouseEnter={() => setHighlightedIndex(idx)}
+                    onClick={() => {
+                      handleSelectSaved(opt.value);
+                      if (onSelectNext) {
+                        setTimeout(() => onSelectNext(), 50);
+                      }
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition cursor-pointer ${
+                      isHighlighted
+                        ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-950 dark:text-blue-100 font-bold ring-1 ring-blue-400'
+                        : isSelected
+                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-300 font-semibold'
+                        : 'hover:bg-slate-50 hover:dark:bg-[#1f2438] text-slate-700 dark:text-slate-200'
+                    }`}
+                  >
+                    <div className="flex flex-col min-w-0">
+                      <span className="truncate">{opt.label}</span>
+                      {opt.subLabel && (
+                        <span className="text-[11px] text-slate-400 font-normal truncate mt-0.5">
+                          {opt.subLabel}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {opt.badge && (
+                        <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-600 dark:text-slate-300">
+                          {opt.badge}
+                        </span>
+                      )}
+                      {isSelected && <Check className="w-4 h-4 text-blue-600" />}
+                    </div>
+                  </button>
+                );
+              })}
+
+              {showCustomOption && (
                 <button
-                  key={opt.value}
+                  key="__custom_walk_in__"
                   type="button"
-                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  onMouseEnter={() => setHighlightedIndex(filteredOptions.length)}
                   onClick={() => {
-                    handleSelect(opt.value);
+                    handleSelectCustom(trimmedQuery);
                     if (onSelectNext) {
                       setTimeout(() => onSelectNext(), 50);
                     }
                   }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition ${
-                    isHighlighted
-                      ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-950 dark:text-blue-100 font-bold ring-1 ring-blue-400'
-                      : isSelected
-                      ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-300 font-semibold'
-                      : 'hover:bg-slate-50 hover:dark:bg-[#1f2438] text-slate-700 dark:text-slate-200'
+                  className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center justify-between gap-2 transition cursor-pointer ${
+                    filteredOptions.length > 0 ? 'mt-1 border-t border-slate-100 dark:border-slate-800' : ''
+                  } ${
+                    highlightedIndex === filteredOptions.length
+                      ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 font-bold ring-1 ring-amber-400'
+                      : 'bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/40 dark:hover:bg-amber-950/70 text-amber-900 dark:text-amber-200 font-semibold'
                   }`}
                 >
-                  <div className="flex flex-col min-w-0">
-                    <span className="truncate">{opt.label}</span>
-                    {opt.subLabel && (
-                      <span className="text-[11px] text-slate-400 font-normal truncate mt-0.5">
-                        {opt.subLabel}
-                      </span>
-                    )}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-xs font-bold shrink-0">
+                      +
+                    </span>
+                    <span className="truncate">
+                      {customOptionLabel
+                        ? customOptionLabel(trimmedQuery)
+                        : (
+                          <>
+                            Use &ldquo;<span className="underline font-bold">{trimmedQuery}</span>&rdquo; as Walk-In Customer
+                          </>
+                        )}
+                    </span>
                   </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {opt.badge && (
-                      <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-600 dark:text-slate-300">
-                        {opt.badge}
-                      </span>
-                    )}
-                    {isSelected && <Check className="w-4 h-4 text-blue-600" />}
-                  </div>
+                  <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100 border border-amber-300 dark:border-amber-700">
+                    Walk-In
+                  </span>
                 </button>
-              );
-            })
+              )}
+            </>
           )}
         </div>
       )}

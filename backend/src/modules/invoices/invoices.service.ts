@@ -3,8 +3,7 @@ import { CreateInvoiceInput, CreateSalesReturnInput } from './invoices.schemas';
 import { NotFoundError } from '../../shared/errors';
 
 export async function createInvoice(input: CreateInvoiceInput, userId?: string) {
-  const invoiceNumber = await invoicesRepo.generateNextInvoiceNumber();
-  const invoiceId = await invoicesRepo.createInvoiceWithItems(input, invoiceNumber, userId);
+  const invoiceId = await invoicesRepo.createInvoiceWithItems(input, undefined, userId);
   return await getInvoice(invoiceId);
 }
 

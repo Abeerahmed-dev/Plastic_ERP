@@ -1,17 +1,21 @@
 import db from '../../db/knex';
+import { Knex } from 'knex';
 import { CreateInvoiceInput } from './invoices.schemas';
 import { estimateOverdraftCogs, getLatestMarketBatchPrice } from '../../shared/overdraftPricing';
 import { ValidationError, NotFoundError, ConflictError } from '../../shared/errors';
+import { generateCustomerCode } from '../customers/customers.repository';
 
 export interface InvoiceRow {
   id: string;
   customer_id: string;
+  walk_in_customer_name?: string | null;
   invoice_number: string;
   date: Date;
   due_date: Date | null;
   subtotal: number;
   discount: number;
   delivery_charge: number;
+  slip_charges: number;
   total_amount: number;
   paid_amount: number;
   status: string;
@@ -21,8 +25,12 @@ export interface InvoiceRow {
   updated_at: Date;
 }
 
-export async function generateNextInvoiceNumber(): Promise<string> {
-  const rows = await db('sales_invoices')
+export async function generateNextInvoiceNumber(trx?: Knex.Transaction | Knex): Promise<string> {
+  const query = trx || db;
+  if (trx) {
+    await trx.raw('SELECT pg_advisory_xact_lock(90001)');
+  }
+  const rows = await query('sales_invoices')
     .where('invoice_number', 'like', 'INV-%')
     .select('invoice_number');
 
@@ -42,14 +50,20 @@ export async function generateNextInvoiceNumber(): Promise<string> {
 
 export async function createInvoiceWithItems(
   input: CreateInvoiceInput,
-  invoiceNumber: string,
+  invoiceNumber?: string,
   userId?: string
 ): Promise<string> {
   return await db.transaction(async (trx) => {
+    if (!invoiceNumber) {
+      invoiceNumber = await generateNextInvoiceNumber(trx);
+    }
     // Force truncation to 2 decimal places before inserting into sales_invoice_items
     const sanitizedItems = (input.items || []).map((item: any) => {
       const quantity = Number(item.quantity) || 0;
       const unit_price = Math.round(Number(item.unit_price) * 100) / 100;
+      if (unit_price < 0) {
+        throw new Error('Unit price cannot be negative');
+      }
       const total_price = item.total_price !== undefined || item.total !== undefined
         ? Math.round(Number(item.total_price ?? item.total) * 100) / 100
         : Math.round(quantity * unit_price * 100) / 100;
@@ -260,15 +274,6 @@ export async function createInvoiceWithItems(
           ? Math.round((estimated_cogs / sold_kg) * 10000) / 10000
           : (latestBatchPrice || Number(product.rolling_avg_cost_per_kg || product.cost_price || 0));
 
-        // Price Floor Check against rolling average cost / estimated cost
-        const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
-        const floorPricePerKg = appliedCogsPerKg * (1 + (minMarkupPercent / 100));
-        const sellingPricePerKg = sold_kg > 0 ? (total_price / sold_kg) : Number(item.unit_price);
-
-        if (floorPricePerKg > 0 && sellingPricePerKg < floorPricePerKg - 0.01) {
-          throw new Error(`Selling price for ${product.name} is below minimum authorized margin.`);
-        }
-
         itemsToInsert.push({
           product_id: item.product_id,
           variant_id: (item as any).variant_id || null,
@@ -294,10 +299,47 @@ export async function createInvoiceWithItems(
     subtotal = Math.round(subtotal * 100) / 100;
     const discount = Math.round(Number(input.discount || 0) * 100) / 100;
     const deliveryCharge = Math.round(Number((input as any).delivery_charge || 0) * 100) / 100;
-    const total_amount = Math.round((Math.max(0, subtotal - discount) + deliveryCharge) * 100) / 100;
+    const isAllReturns = sanitizedItems.length > 0 && sanitizedItems.every((item: any) => Number(item.quantity) < 0);
+    const slipCharges = isAllReturns && (input as any).slip_charges === undefined
+      ? 0
+      : Math.round(Number((input as any).slip_charges !== undefined ? (input as any).slip_charges : 2) * 100) / 100;
+    const total_amount = Math.round((Math.max(0, subtotal - discount) + deliveryCharge + slipCharges) * 100) / 100;
 
     // ── Customer & Account Validation ──
-    const customer = await trx('customers').where({ id: input.customer_id }).first();
+    let customerId = input.customer_id ? String(input.customer_id).trim() : '';
+    const walkInCustomerName = input.walk_in_customer_name ? String(input.walk_in_customer_name).trim() : null;
+
+    if (!customerId && walkInCustomerName) {
+      let walkInCust = await trx('customers')
+        .where({ name: 'Walk-in Cash Customer', customer_type: 'CASH' })
+        .first();
+
+      if (!walkInCust) {
+        const hasWalkinCode = await trx('customers').where({ code: 'CUST-WALKIN' }).first();
+        const code = hasWalkinCode ? await generateCustomerCode(trx) : 'CUST-WALKIN';
+        const [inserted] = await trx('customers')
+          .insert({
+            code,
+            name: 'Walk-in Cash Customer',
+            customer_type: 'CASH',
+            is_active: true,
+            credit_limit: 0,
+            opening_balance: 0,
+            created_by: userId || null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          })
+          .returning('*');
+        walkInCust = inserted;
+      }
+      customerId = walkInCust.id;
+    }
+
+    if (!customerId) {
+      throw new ValidationError('Customer or Walk-in Customer Name is required');
+    }
+
+    const customer = await trx('customers').where({ id: customerId }).first();
     if (!customer) {
       throw new NotFoundError('Customer');
     }
@@ -417,7 +459,8 @@ export async function createInvoiceWithItems(
     // Insert Invoice (Financial Lock: Total amount locked in at full selling price)
     const [invoice] = await trx('sales_invoices')
       .insert({
-        customer_id: input.customer_id,
+        customer_id: customerId,
+        walk_in_customer_name: walkInCustomerName,
         invoice_number: invoiceNumber,
         invoice_type: 'SALE',
         date: input.date,
@@ -425,6 +468,7 @@ export async function createInvoiceWithItems(
         subtotal,
         discount,
         delivery_charge: deliveryCharge,
+        slip_charges: slipCharges,
         total_amount,
         paid_amount: initialPaidAmount,
         cash_tendered: isCashCustomer ? total_amount : 0,
@@ -507,7 +551,7 @@ export async function createInvoiceWithItems(
           const paymentNumber = `RCV-${invoiceNumber}${splitSuffix}`;
 
           const [pmt] = await trx('customer_payments').insert({
-            customer_id: input.customer_id,
+            customer_id: customerId,
             invoice_id: invoiceId,
             payment_number: paymentNumber,
             payment_date: input.date || new Date().toISOString().split('T')[0],
@@ -579,7 +623,7 @@ export async function createInvoiceWithItems(
       // Record direct customer payment if directPaid > 0
       if (directPaid > 0) {
         const [pmt] = await trx('customer_payments').insert({
-          customer_id: input.customer_id,
+          customer_id: customerId,
           invoice_id: invoiceId,
           payment_number: `RCV-${invoiceNumber}`,
           payment_date: input.date || new Date().toISOString().split('T')[0],
@@ -616,7 +660,7 @@ export async function createInvoiceWithItems(
         const paymentNumber = `RCV-${(maxNum + 1).toString().padStart(5, '0')}`;
 
         const [virtualPayment] = await trx('customer_payments').insert({
-          customer_id: input.customer_id,
+          customer_id: customerId,
           invoice_id: invoiceId,
           payment_number: paymentNumber,
           payment_date: input.date || new Date().toISOString().split('T')[0],
@@ -639,9 +683,12 @@ export async function createInvoiceWithItems(
   });
 }
 
-export async function generateNextCreditNoteNumber(trx?: any): Promise<string> {
-  const query = trx ? trx('sales_invoices') : db('sales_invoices');
-  const rows = await query
+export async function generateNextCreditNoteNumber(trx?: Knex.Transaction | Knex): Promise<string> {
+  const query = trx || db;
+  if (trx) {
+    await trx.raw('SELECT pg_advisory_xact_lock(90002)');
+  }
+  const rows = await query('sales_invoices')
     .where('invoice_number', 'like', 'CN-%')
     .select('invoice_number');
 
@@ -1165,6 +1212,7 @@ export async function processSalesReturn(
         due_date: null,
         subtotal: -Math.round(Math.abs(totalCreditAmount) * 100) / 100,
         discount: 0,
+        slip_charges: 0,
         total_amount: -Math.round(Math.abs(totalCreditAmount) * 100) / 100,
         paid_amount: 0,
         status: 'UNPAID',
@@ -1243,9 +1291,11 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
     'si.subtotal',
     'si.discount',
     'si.delivery_charge',
+    'si.slip_charges',
     'si.total_amount',
     'si.paid_amount',
     'si.transport',
+    'si.walk_in_customer_name',
     'si.status',
     'si.invoice_type',
     'si.parent_invoice_id',
@@ -1792,7 +1842,10 @@ export async function processOfflineSyncInvoices(
           ? Math.round((estimated_cogs / requested_qty) * 10000) / 10000
           : (latestBatchPrice || previousWAC);
 
-        const unit_price = Number(item.unit_price || liveProduct.sale_price || 0);
+        const unit_price = Number(item.unit_price !== undefined && item.unit_price !== null ? item.unit_price : (liveProduct.sale_price || 0));
+        if (unit_price < 0) {
+          throw new Error('Unit price cannot be negative');
+        }
         const lineTotal = Math.round(requested_qty * unit_price * 100) / 100;
 
         invoiceSubtotal += lineTotal;
@@ -1821,7 +1874,11 @@ export async function processOfflineSyncInvoices(
 
       const discount = Number(invPayload.discount || 0);
       const deliveryCharge = Number(invPayload.delivery_charges ?? invPayload.delivery_charge ?? 0);
-      invoiceTotal = Math.max(0, invoiceSubtotal - discount) + deliveryCharge;
+      const isOfflineAllReturns = processedItems.length > 0 && processedItems.every((item: any) => Number(item.quantity) < 0);
+      const slipCharges = isOfflineAllReturns && invPayload.slip_charges === undefined
+        ? 0
+        : Number(invPayload.slip_charges ?? 2);
+      invoiceTotal = Math.max(0, invoiceSubtotal - discount) + deliveryCharge + slipCharges;
       const paidAmount = Number(invPayload.paid_amount ?? invPayload.amount_paid ?? invoiceTotal);
 
       // Save Invoice Header
@@ -1834,6 +1891,7 @@ export async function processOfflineSyncInvoices(
           subtotal: invoiceSubtotal,
           discount,
           delivery_charge: deliveryCharge,
+          slip_charges: slipCharges,
           total_amount: invoiceTotal,
           paid_amount: paidAmount,
           requested_qty: invoiceRequestedTotal,

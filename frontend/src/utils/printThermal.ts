@@ -60,15 +60,22 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
   const subtotal = Number(invoice.subtotal || invoice.total_amount || 0);
   const discount = Number(invoice.discount || 0);
   const deliveryCharge = Number(invoice.delivery_charge ?? invoice.delivery_charges ?? invoice.deliveryCharges ?? 0);
+  const slipCharges = Number(invoice.slip_charges ?? invoice.slipCharges ?? 0);
   const totalAmount = Number(invoice.total_amount || 0);
 
   // Total weight calculation
   const totalWeight = items.reduce((sum, item) => {
     const isItemReturn = item.isReturn || item.quantity < 0;
-    const qty = isItemReturn ? -Math.abs(Number(item.quantity) || 0) : (Number(item.quantity) || 0);
-    return sum + qty;
+    const unitMultiplier = (item.selected_unit?.toLowerCase() === 'bag' || item.selected_unit?.toLowerCase() === 'bora')
+      ? Number(item.bag_weight_kg || 25.0)
+      : (Number(item.actual_weight_per_unit) > 0 ? Number(item.actual_weight_per_unit) : 1.0);
+    const rawQty = Math.abs(Number(item.quantity) || 0);
+    const qtyKg = Number(item.net_kg_processed) !== 0 && !isNaN(Number(item.net_kg_processed))
+      ? Math.abs(Number(item.net_kg_processed))
+      : rawQty * unitMultiplier;
+    return isItemReturn ? sum - qtyKg : sum + qtyKg;
   }, 0);
-  const formattedTotalWeight = Number(totalWeight.toFixed(3)).toString();
+  const formattedTotalWeight = Number(totalWeight.toFixed(2)).toString();
 
   // Payment method & tender calculation
   const paymentMethod = String(invoice.payment_method || invoice.paymentMethod || 'CASH').toUpperCase();
@@ -185,8 +192,14 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
         </div>
         <div class="flex">
           <span>Customer:</span>
-          <span style="font-weight: bold;">${customerName || invoice.customer_name || 'Walk-in Customer'}</span>
+          <span style="font-weight: bold;">${customerName || invoice.walk_in_customer_name || invoice.customer_name || 'Walk-in Customer'}</span>
         </div>
+        ${invoice.transport && String(invoice.transport).trim() !== '' ? `
+        <div class="flex">
+          <span>Transport:</span>
+          <span style="font-weight: bold;">${invoice.transport}</span>
+        </div>
+        ` : ''}
         <div class="flex">
           <span>Cashier:</span>
           <span>${cashierName}</span>
@@ -218,7 +231,17 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
 
       <!-- Financial Summary -->
       <div style="padding-top: 1px; margin-bottom: 4px; font-size: 9.5px;">
+        <div class="flex" style="margin-bottom: 2px; padding-right: 2px; font-weight: bold;">
+          <span>Total Weight:</span>
+          <span>${formattedTotalWeight} KG</span>
+        </div>
         ${asDuplicate ? `
+          ${slipCharges > 0 ? `
+            <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
+              <span>Slip Charges:</span>
+              <span>+ Rs. ${slipCharges.toLocaleString()}</span>
+            </div>
+          ` : ''}
           <div class="flex" style="font-weight: 900; font-size: 11px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 2px 0; padding-right: 2px;">
             <span>TOTAL:</span>
             <span>Rs. ${Math.abs(totalAmount).toLocaleString()}</span>
@@ -238,6 +261,12 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
             <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
               <span>Delivery:</span>
               <span>+ Rs. ${deliveryCharge.toLocaleString()}</span>
+            </div>
+          ` : ''}
+          ${slipCharges > 0 ? `
+            <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
+              <span>Slip Charges:</span>
+              <span>+ Rs. ${slipCharges.toLocaleString()}</span>
             </div>
           ` : ''}
           <div class="flex" style="font-weight: 900; font-size: 11px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 2px 0; padding-right: 2px;">

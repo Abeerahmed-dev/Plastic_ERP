@@ -17,20 +17,40 @@ export const paymentSplitSchema = z.object({
   amount: z.coerce.number().min(0.01, 'Split amount must be greater than 0'),
 });
 
-export const createInvoiceSchema = z.object({
-  customer_id: z.string().uuid('Invalid customer ID'),
-  date: z.string(), // ISO date string
-  due_date: z.string().optional(),
-  discount: z.number().min(0).optional().default(0),
-  delivery_charge: z.number().min(0).optional().default(0),
-  advance_applied_amount: z.number().min(0).optional().default(0),
-  notes: z.string().optional(),
-  transport: z.string().trim().optional().nullable(),
-  payment_account_id: z.string().optional().nullable(),
-  payment_method: z.string().optional().nullable(),
-  payment_splits: z.array(paymentSplitSchema).optional().nullable(),
-  items: z.array(invoiceItemSchema).min(1, 'At least one item is required'),
-});
+export const createInvoiceSchema = z
+  .object({
+    customer_id: z
+      .preprocess((val) => (val === '' || val === null || val === undefined ? undefined : val), z.string().uuid('Invalid customer ID').optional())
+      .optional()
+      .nullable(),
+    walk_in_customer_name: z.string().trim().max(255).optional().nullable(),
+    date: z.string(), // ISO date string
+    due_date: z
+      .preprocess((val) => (val === '' || val === undefined ? null : val), z.string().optional().nullable())
+      .optional()
+      .nullable(),
+    discount: z.number().min(0).optional().default(0),
+    delivery_charge: z.number().min(0).optional().default(0),
+    slip_charges: z.number().min(0).optional().default(2),
+    advance_applied_amount: z.number().min(0).optional().default(0),
+    notes: z.string().optional().nullable(),
+    transport: z.string().trim().optional().nullable(),
+    payment_account_id: z.string().optional().nullable(),
+    payment_method: z.string().optional().nullable(),
+    payment_splits: z.array(paymentSplitSchema).optional().nullable(),
+    items: z.array(invoiceItemSchema).min(1, 'At least one item is required'),
+  })
+  .refine(
+    (data) => {
+      const hasCustomerId = !!data.customer_id && String(data.customer_id).trim() !== '';
+      const hasWalkInName = !!data.walk_in_customer_name && String(data.walk_in_customer_name).trim() !== '';
+      return hasCustomerId || hasWalkInName;
+    },
+    {
+      message: 'Either customer_id or walk_in_customer_name must be provided',
+      path: ['customer_id'],
+    }
+  );
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
 

@@ -14,6 +14,7 @@ export interface InvoiceItem {
 export interface Invoice {
   id: string;
   customer_id: string;
+  walk_in_customer_name?: string | null;
   customer_name?: string;
   customer_code?: string;
   invoice_number: string;
@@ -24,6 +25,8 @@ export interface Invoice {
   due_date: string | null;
   subtotal: string | number;
   discount: string | number;
+  delivery_charge?: string | number;
+  slip_charges?: string | number;
   total_amount: string | number;
   paid_amount: string | number;
   cash_tendered?: number | null;
@@ -55,11 +58,13 @@ export interface CreateInvoiceItemData {
 }
 
 export interface CreateInvoiceData {
-  customer_id: string;
+  customer_id?: string;
+  walk_in_customer_name?: string | null;
   date: string;
-  due_date?: string;
+  due_date?: string | null;
   discount: number;
   delivery_charge?: number;
+  slip_charges?: number;
   advance_applied_amount?: number;
   payment_account_id?: string | null;
   payment_method?: string | null;

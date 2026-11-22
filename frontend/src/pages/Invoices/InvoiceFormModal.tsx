@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw, Printer, PauseCircle, Clock, Banknote, CheckCircle2, Split } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw, Printer, PauseCircle, Clock, Banknote, CheckCircle2, Split, CreditCard, User } from 'lucide-react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,10 +11,9 @@ import { bankAccountsService } from '../../services/bank-accounts.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { toast, handleApiError } from '../../utils/toast';
-import { A4SalesInvoice } from '../../components/print/A4SalesInvoice';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
 import { DateInput } from '../../components/DateInput';
-import { compareProducts, formatProductTitle, groupProductsByFamily } from '../../utils/productSorting';
+import { compareProducts, formatProductTitle, groupProductsByFamily, formatSizeOnly } from '../../utils/productSorting';
 import { invalidateSalesInvoiceQueries } from '../../utils/querySync';
 import { erpSyncBus } from '../../utils/erpSyncBus';
 
@@ -31,11 +29,13 @@ const itemSchema = z.object({
 });
 
 const schema = z.object({
-  customer_id: z.string().min(1, 'Customer is required'),
+  customer_id: z.string().optional().or(z.literal('')),
+  walk_in_customer_name: z.string().optional().or(z.literal('')),
   date: z.string(),
   due_date: z.string().optional().or(z.literal('')),
   discount: z.coerce.number().min(0).default(0),
   delivery_charge: z.coerce.number().min(0).default(0),
+  slip_charges: z.coerce.number().min(0).default(2),
   notes: z.string().optional(),
   transport: z.string().optional(),
   items: z.array(itemSchema).min(1, 'At least one item is required'),
@@ -51,7 +51,7 @@ interface SplitPaymentRow {
 interface Props {
   isOpen?: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (createdInvoice?: any, printCopyMode?: 'ORIGINAL' | 'DUPLICATE' | 'BOTH') => void;
   initialHeldData?: any;
 }
 
@@ -84,14 +84,27 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
   const products = productsResponse || [];
 
+  const [invoiceMode, setInvoiceMode] = useState<'CREDIT' | 'CASH'>('CREDIT');
+  const [walkInName, setWalkInName] = useState('');
+
+  const handleModeSwitch = (mode: 'CREDIT' | 'CASH') => {
+    if (mode === invoiceMode) return;
+    setInvoiceMode(mode);
+    setValue('customer_id', '');
+    setValue('walk_in_customer_name', '');
+    setWalkInName('');
+  };
+
   const { register, control, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
       customer_id: '',
+      walk_in_customer_name: '',
       date: new Date().toISOString().split('T')[0],
       due_date: '',
       discount: 0,
       delivery_charge: 0,
+      slip_charges: 2,
       notes: '',
       transport: '',
       items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
@@ -106,25 +119,25 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const items = watch('items');
   const discount = watch('discount');
   const delivery_charge = watch('delivery_charge');
+  const slip_charges = watch('slip_charges');
   const selectedCustomerId = watch('customer_id');
+  const walkInCustomerName = watch('walk_in_customer_name');
+  const effectiveWalkIn = (walkInCustomerName || walkInName || '').trim();
+  const isCustomWalkIn = invoiceMode === 'CASH' && !selectedCustomerId && Boolean(effectiveWalkIn);
 
   const selectedCustomer = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
-  const isCashCustomer = selectedCustomer?.customer_type === 'CASH';
-  const isCreditCustomer = Boolean(selectedCustomer && !isCashCustomer);
+  const isCashCustomer = invoiceMode === 'CASH';
+  const isCreditCustomer = invoiceMode === 'CREDIT';
   const walletBalance = Number(selectedCustomer?.advance_credit || (selectedCustomer as any)?.advance_wallet || 0);
-
-  useEffect(() => {
-    if (isCashCustomer) {
-      setValue('transport', '');
-    }
-  }, [isCashCustomer, setValue]);
 
   // Check if any row has missing product or empty size/variant
   const hasAnyEmptySize = !items || items.length === 0 || items.some((item) => {
     const prodId = item.product_id || item.selected_variant_id;
     if (!prodId) return true;
     const prod = products.find(p => p.id === prodId);
-    return !prod || !prod.size || prod.size.trim() === '';
+    if (!prod) return true;
+    const resolvedSize = formatSizeOnly(prod, item.selected_family_name);
+    return !resolvedSize || resolvedSize.trim() === '';
   });
 
   // Phase 2: Explicitly rounded line-item totals summation
@@ -138,8 +151,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   ) / 100;
 
   const deliveryChargeNum = Math.round(Number(delivery_charge || 0) * 100) / 100;
+  const slipChargesNum = Math.round(Number(slip_charges !== undefined ? slip_charges : 2) * 100) / 100;
   const discountNum = Math.round(Number(discount || 0) * 100) / 100;
-  const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100) + deliveryChargeNum;
+  const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100) + deliveryChargeNum + slipChargesNum;
 
   const splitTotalAllocated = Math.round(
     splitRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0) * 100
@@ -331,8 +345,17 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     }
   };
 
+  const filteredCustomers = useMemo(() => {
+    const list = customersResponse?.data || [];
+    if (invoiceMode === 'CREDIT') {
+      return list.filter((c: any) => c.customer_type === 'CREDIT');
+    } else {
+      return list.filter((c: any) => c.customer_type === 'CASH');
+    }
+  }, [customersResponse?.data, invoiceMode]);
+
   const customerOptions: ComboboxOption[] = useMemo(() => {
-    return (customersResponse?.data || []).map((c) => ({
+    return filteredCustomers.map((c: any) => ({
       value: c.id,
       label: `${c.name}${c.city ? ` (${c.city})` : ''}`,
       badge: c.customer_type === 'CASH' ? 'CASH' : (c.code || undefined),
@@ -342,7 +365,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         c.address
       ].filter(Boolean).join(' • ') || undefined,
     }));
-  }, [customersResponse?.data]);
+  }, [filteredCustomers]);
 
   const focusField = (id: string) => {
     setTimeout(() => {
@@ -409,7 +432,6 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   };
 
   const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
-  const [printInvoiceData, setPrintInvoiceData] = useState<any>(null);
   const [isHolding, setIsHolding] = useState(false);
   const [isHeldModalOpen, setIsHeldModalOpen] = useState(false);
 
@@ -435,6 +457,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   });
 
   const resumeHeldInvoice = (order: POSHeldOrder) => {
+    const isCashOrder = order.payment_method === 'CASH' || order.payment_method === 'SPLIT' || !!(order as any).walk_in_customer_name;
+    setInvoiceMode(isCashOrder ? 'CASH' : 'CREDIT');
+    if ((order as any).walk_in_customer_name) {
+      setWalkInName((order as any).walk_in_customer_name);
+    } else {
+      setWalkInName('');
+    }
+
     const parsedItems = (order.items || []).map((it: any) => {
       const rawFam = (it.selected_family_name || it.productName || it.name || '').trim();
       const group = groupedProducts[rawFam.toLowerCase()];
@@ -453,10 +483,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
     reset({
       customer_id: order.customer_id || '',
+      walk_in_customer_name: (order as any).walk_in_customer_name || '',
       date: (order as any).date || new Date().toISOString().split('T')[0],
       due_date: (order as any).due_date || '',
       discount: Number(order.discount) || 0,
       delivery_charge: Number((order as any).delivery_charge) || 0,
+      slip_charges: Number((order as any).slip_charges !== undefined ? (order as any).slip_charges : 2),
       notes: (order as any).notes || '',
       transport: (order as any).transport || '',
       items: parsedItems.length > 0 ? parsedItems : [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
@@ -480,8 +512,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   };
 
   const handleHoldInvoice = async () => {
-    if (!selectedCustomerId) {
-      toast.error('Please select a customer before holding the invoice.');
+    const hasCustomer = invoiceMode === 'CASH'
+      ? Boolean(selectedCustomerId || effectiveWalkIn)
+      : Boolean(selectedCustomerId);
+
+    if (!hasCustomer) {
+      toast.error('Please select a customer or type a walk-in name before holding the invoice.');
       return;
     }
     const validItems = (items || []).filter(i => i.product_id);
@@ -494,12 +530,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       setIsHolding(true);
       const cust = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
       const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-      const refNote = `[ERP] Sale - ${cust?.name || 'Customer'} (${timeStr})`;
+      const currentCustName = (invoiceMode === 'CASH' && !selectedCustomerId && effectiveWalkIn ? effectiveWalkIn : cust?.name) || 'Customer';
+      const refNote = `[ERP] Sale - ${currentCustName} (${timeStr})`;
 
       const heldPayload = {
         reference_note: refNote,
-        customer_id: selectedCustomerId,
-        customer_name: cust?.name || 'Customer',
+        customer_id: invoiceMode === 'CASH' && !selectedCustomerId ? undefined : selectedCustomerId,
+        customer_name: currentCustName,
+        walk_in_customer_name: invoiceMode === 'CASH' && !selectedCustomerId && effectiveWalkIn ? effectiveWalkIn : undefined,
         items: (items || []).map(i => {
           const prod = products.find(p => p.id === i.product_id);
           return {
@@ -518,12 +556,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         subtotal: subtotal,
         discount: Number(discount) || 0,
         delivery_charge: Number(delivery_charge) || 0,
+        slip_charges: Number(slip_charges !== undefined ? slip_charges : 2),
         total_amount: total,
         payment_method: isCashCustomer ? (isSplitPayment ? 'SPLIT' : (paymentAccountId === 'CASH_DRAWER' ? 'CASH' : 'BANK_TRANSFER')) : 'CREDIT',
         payment_account_id: isCashCustomer ? (isSplitPayment ? splitRows[0]?.payment_account_id : paymentAccountId) : undefined,
         payment_splits: isCashCustomer && isSplitPayment ? splitRows.map((r) => ({ payment_account_id: r.payment_account_id, amount: Number(r.amount) || 0 })) : undefined,
         notes: watch('notes') || '',
-        due_date: watch('due_date') || '',
+        transport: watch('transport')?.trim() || '',
+        due_date: '',
         date: watch('date') || new Date().toISOString().split('T')[0],
       };
 
@@ -538,65 +578,33 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     }
   };
 
-  const triggerA4Print = (createdInvoice: any) => {
-    const selectedCust = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
-    const enrichedItems = (createdInvoice.items || []).map((item: any) => {
-      const prod = products.find(p => p.id === item.product_id);
-      return {
-        ...item,
-        product_name: item.product_name || prod?.name || item.name || 'Product',
-        product_name_urdu: item.product_name_urdu || prod?.name_urdu,
-        product_code: item.product_code || prod?.code,
-        size: item.size || prod?.size || '',
-        category: item.category || prod?.category_name || prod?.category,
-      };
-    });
-
-    const invoiceToPrint = {
-      ...createdInvoice,
-      customer_name: createdInvoice.customer_name || selectedCust?.name || 'Customer',
-      customer_code: createdInvoice.customer_code || selectedCust?.code,
-      customer_phone: createdInvoice.customer_phone || selectedCust?.phone,
-      customer_city: createdInvoice.customer_city || selectedCust?.city,
-      transport: createdInvoice.transport ?? (isCashCustomer ? null : (watch('transport')?.trim() || null)),
-      items: enrichedItems.length > 0 ? enrichedItems : createdInvoice.items,
-      type: 'sales',
-    };
-
-    const wasDark = document.documentElement.classList.contains('dark');
-    if (wasDark) {
-      document.documentElement.classList.remove('dark');
-    }
-
-    setPrintInvoiceData(invoiceToPrint);
-    document.body.classList.add('printing-a4');
-
-    const handleAfterPrint = () => {
-      document.body.classList.remove('printing-a4');
-      if (wasDark) {
-        document.documentElement.classList.add('dark');
-      }
-      setPrintInvoiceData(null);
-      window.removeEventListener('afterprint', handleAfterPrint);
-      onSuccess();
-      onClose();
-    };
-
-    window.addEventListener('afterprint', handleAfterPrint);
-
-    setTimeout(() => {
-      window.print();
-    }, 250);
-  };
-
   const mutation = useMutation({
     mutationFn: (data: FormData) => invoicesService.createInvoice(data as any),
     onSuccess: (createdInvoice: any) => {
       invalidateSalesInvoiceQueries(qc);
       erpSyncBus.emit('invoice', { invoice: createdInvoice });
-      onSuccess();
       toast.success('Sales invoice created and saved successfully!');
-      triggerA4Print(createdInvoice);
+
+      const selectedCust = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
+      const resolvedWalkIn = createdInvoice.walk_in_customer_name || (invoiceMode === 'CASH' && !selectedCustomerId ? effectiveWalkIn : null);
+      const resolvedCustomerName = resolvedWalkIn ||
+        createdInvoice.customer_name ||
+        selectedCust?.name ||
+        'Customer';
+
+      const fullCreatedInvoice = {
+        ...createdInvoice,
+        customer_name: resolvedCustomerName,
+        walk_in_customer_name: resolvedWalkIn || null,
+        customer_code: createdInvoice.customer_code || selectedCust?.code || (resolvedWalkIn ? 'WALK-IN' : undefined),
+        customer_phone: createdInvoice.customer_phone || selectedCust?.phone,
+        customer_city: createdInvoice.customer_city || selectedCust?.city,
+        transport: createdInvoice.transport ?? (watch('transport')?.trim() || null),
+        type: 'sales',
+      };
+
+      onSuccess(fullCreatedInvoice, printCopyMode);
+      onClose();
     },
     onError: (error: any) => {
       handleApiError(error);
@@ -609,12 +617,16 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       if (initialHeldData) {
         resumeHeldInvoice(initialHeldData);
       } else {
+        setInvoiceMode('CREDIT');
+        setWalkInName('');
         reset({
           customer_id: '',
+          walk_in_customer_name: '',
           date: new Date().toISOString().split('T')[0],
           due_date: '',
           discount: 0,
           delivery_charge: 0,
+          slip_charges: 2,
           notes: '',
           transport: '',
           items: [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
@@ -673,7 +685,21 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
   const onSubmit = async (data: FormData) => {
     try {
-      if (isCashCustomer) {
+      if (invoiceMode === 'CREDIT') {
+        if (!data.customer_id || data.customer_id.trim() === '') {
+          toast.error('Please select a credit customer.');
+          return;
+        }
+      } else {
+        // Cash mode
+        const hasCustomerId = Boolean(data.customer_id && data.customer_id.trim());
+        const hasWalkInName = Boolean(effectiveWalkIn);
+
+        if (!hasCustomerId && !hasWalkInName) {
+          toast.error('Please select a cash customer or type a walk-in name.');
+          return;
+        }
+
         if (isSplitPayment) {
           if (!isSplitBalanced) {
             toast.error('Split payment total must equal the invoice Grand Total.');
@@ -700,10 +726,15 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
       const cleanData = {
         ...data,
-        transport: isCashCustomer ? undefined : (data.transport && data.transport.trim() ? data.transport.trim() : undefined),
-        due_date: isCashCustomer ? undefined : (data.due_date ? data.due_date : undefined),
+        customer_id: isCashCustomer
+          ? (data.customer_id && data.customer_id.trim() ? data.customer_id.trim() : undefined)
+          : (data.customer_id && data.customer_id.trim() ? data.customer_id.trim() : undefined),
+        walk_in_customer_name: isCashCustomer && (!data.customer_id || !data.customer_id.trim()) && effectiveWalkIn ? effectiveWalkIn : undefined,
+        transport: data.transport && data.transport.trim() ? data.transport.trim() : undefined,
+        due_date: undefined,
         discount: Math.round(Number(data.discount || 0) * 100) / 100,
         delivery_charge: Math.round(Number(data.delivery_charge || 0) * 100) / 100,
+        slip_charges: Math.round(Number(data.slip_charges !== undefined ? data.slip_charges : 2) * 100) / 100,
         advance_applied_amount: (!isCashCustomer && applyAdvance) ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
         payment_splits: cleanSplits,
         payment_account_id: isCashCustomer ? (isSplitPayment ? cleanSplits?.[0]?.payment_account_id : paymentAccountId) : undefined,
@@ -716,7 +747,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
             : Math.round(qty * unitPrice * 100) / 100;
 
           const prod = products.find(p => p.id === i.product_id);
-          const resolvedSize = (prod?.size || 'Standard').trim();
+          const resolvedSize = (prod?.size || formatSizeOnly(prod, selected_family_name) || 'Standard').trim();
 
           return {
             product_id: i.product_id,
@@ -815,29 +846,120 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
               </div>
             )}
 
-            <div className={`grid grid-cols-1 ${isCreditCustomer ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-5`}>
+            {/* Top Mode Selector: Credit Invoice | Cash Invoice */}
+            <div className="flex items-center justify-between bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => handleModeSwitch('CREDIT')}
+                className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  invoiceMode === 'CREDIT'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Credit Invoice</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeSwitch('CASH')}
+                className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                  invoiceMode === 'CASH'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                <Banknote className="w-4 h-4" />
+                <span>Cash Invoice</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Customer <span className="text-xs font-normal text-slate-400">(Type or Arrow keys)</span>
-                </label>
-                <SearchableCombobox
-                  id="customer-combobox"
-                  value={selectedCustomerId || ''}
-                  onChange={(val) => {
-                    setValue('customer_id', val, { shouldValidate: true });
-                    const cust = customersResponse?.data.find((c: any) => c.id === val);
-                    if (cust?.customer_type === 'CASH') {
-                      setValue('transport', '');
-                    }
-                  }}
-                  options={customerOptions}
-                  placeholder="Type to search customer..."
-                  autoFocus={true}
-                  hasError={!!errors.customer_id}
-                  onSelectNext={() => focusField('item-0-family')}
-                  onTabNext={() => focusField('item-0-family')}
-                />
-                {errors.customer_id && <p className="mt-1 text-xs text-red-600">{errors.customer_id.message}</p>}
+                {invoiceMode === 'CREDIT' ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-sm font-medium text-slate-700">
+                        Credit Customer <span className="text-xs font-normal text-slate-400">(Type or Arrow keys)</span>
+                      </label>
+                      {selectedCustomerId && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs">
+                          <CheckCircle2 className="w-3 h-3 text-blue-600" /> Credit
+                        </span>
+                      )}
+                    </div>
+                    <SearchableCombobox
+                      id="customer-combobox"
+                      value={selectedCustomerId || ''}
+                      onChange={(val) => {
+                        setValue('customer_id', val, { shouldValidate: true });
+                        setValue('walk_in_customer_name', '');
+                        setWalkInName('');
+                      }}
+                      options={customerOptions}
+                      placeholder="Type to search credit customer..."
+                      autoFocus={true}
+                      hasError={!!errors.customer_id}
+                      allowCustom={false}
+                      onSelectNext={() => focusField('item-0-family')}
+                      onTabNext={() => focusField('item-0-family')}
+                    />
+                    {errors.customer_id && <p className="mt-1 text-xs text-red-600">{errors.customer_id.message}</p>}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <label className="block text-sm font-medium text-slate-700">
+                          Cash Customer
+                        </label>
+                        {selectedCustomerId ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Saved
+                          </span>
+                        ) : effectiveWalkIn ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
+                            <User className="w-3 h-3 text-amber-600" /> Walk-In
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <SearchableCombobox
+                      id="customer-combobox"
+                      value={selectedCustomerId || ''}
+                      onChange={(val) => {
+                        setValue('customer_id', val, { shouldValidate: true });
+                        if (val) {
+                          setValue('walk_in_customer_name', '');
+                          setWalkInName('');
+                        }
+                      }}
+                      options={customerOptions}
+                      placeholder="Search cash customer or type walk-in name..."
+                      autoFocus={true}
+                      hasError={!!errors.customer_id && !effectiveWalkIn}
+                      allowCustom={true}
+                      customValue={effectiveWalkIn}
+                      onCustomSelect={(customName) => {
+                        const trimmed = customName.trim();
+                        setValue('walk_in_customer_name', trimmed, { shouldValidate: true });
+                        setWalkInName(trimmed);
+                        setValue('customer_id', '', { shouldValidate: false });
+                      }}
+                      onSelectNext={() => focusField('item-0-family')}
+                      onTabNext={() => focusField('item-0-family')}
+                    />
+                    {effectiveWalkIn && !selectedCustomerId && (
+                      <p className="mt-1 text-xs text-amber-700 font-medium flex items-center gap-1">
+                        <span>Using &ldquo;{effectiveWalkIn}&rdquo; as walk-in customer</span>
+                      </p>
+                    )}
+                    {errors.customer_id && !effectiveWalkIn && (
+                      <p className="mt-1 text-xs text-red-600">{errors.customer_id.message}</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -852,7 +974,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      focusField('invoice-due-date');
+                      focusField('invoice-transport');
                     }
                   }}
                 />
@@ -860,52 +982,24 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-sm font-medium text-slate-700">Due Date</label>
-                  {isCashCustomer && (
-                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                      N/A (Cash Spot Sale)
-                    </span>
-                  )}
-                </div>
-                <DateInput
-                  id="invoice-due-date"
-                  value={isCashCustomer ? '' : watch('due_date')}
-                  disabled={isCashCustomer}
-                  onChange={(val) => setValue('due_date', val, { shouldValidate: true })}
-                  placeholder={isCashCustomer ? 'Immediate Payment' : 'dd/mm/yyyy'}
-                  className={inputCls(!!errors.due_date && !isCashCustomer)}
-                  hasError={!!errors.due_date && !isCashCustomer}
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Transport <span className="text-xs font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  id="invoice-transport"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="e.g. Carrier, Truck No, etc."
+                  {...register('transport')}
+                  className={inputCls(false)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      focusField(isCreditCustomer ? 'invoice-transport' : 'item-0-family');
+                      focusField('item-0-family');
                     }
                   }}
                 />
-                {errors.due_date && !isCashCustomer && <p className="mt-1 text-xs text-red-600">{errors.due_date.message}</p>}
               </div>
-
-              {isCreditCustomer && (
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Transport (optional)
-                  </label>
-                  <input
-                    id="invoice-transport"
-                    type="text"
-                    autoComplete="off"
-                    {...register('transport')}
-                    className={inputCls(false)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        focusField('item-0-family');
-                      }
-                    }}
-                  />
-                </div>
-              )}
             </div>
 
             <div className="border border-slate-200 rounded-xl overflow-visible shadow-sm">
@@ -939,11 +1033,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                       const vBagWeight = Number(p.bag_weight_kg || 25);
                       const vBags = vBagWeight > 0 ? (vStock / vBagWeight).toFixed(1) : '0';
                       const isZero = vStock <= 0;
+                      const sizeLabel = formatSizeOnly(p, group?.name);
                       return {
                         value: p.id,
-                        label: p.size ? `${formatProductTitle(group?.name || p.name, p.size)} (${p.code})` : `${group?.name || p.name} (${p.code})`,
+                        label: sizeLabel,
                         badge: isZero ? 'Out of Stock' : `${vStock.toLocaleString()} KG`,
-                        subLabel: `Stock: ${vStock.toLocaleString()} KG (${vBags} Bags) • Std: ${vBagWeight.toFixed(0)} KG/bag`,
+                        subLabel: `Stock: ${vStock.toLocaleString()} KG (${vBags} Bags) • Std: ${vBagWeight.toFixed(0)} KG/bag${p.code ? ` • ${p.code}` : ''}`,
                       };
                     });
 
@@ -1103,6 +1198,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                             id={`item-${index}-unit-price`}
                             type="number"
                             step="0.01"
+                            min={0}
                             disabled={!selectedProdId}
                             placeholder="0.00"
                             value={items[index]?.unit_price ?? ''}
@@ -1445,11 +1541,32 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          focusField('invoice-notes');
+                          focusField('invoice-slip-charges');
                         }
                       }}
                       className={inputCls(!!errors.delivery_charge)}
                       placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-sm text-slate-600">
+                  <span>Slip Charges (Rs)</span>
+                  <div className="w-24">
+                    <input
+                      id="invoice-slip-charges"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      {...register('slip_charges')}
+                      onFocus={(e) => e.target.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          focusField('invoice-notes');
+                        }
+                      }}
+                      className={inputCls(!!errors.slip_charges)}
+                      placeholder="2"
                     />
                   </div>
                 </div>
@@ -1582,60 +1699,6 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         onDelete={(id) => deleteHeldOrderMutation.mutate(id)}
         isDeleting={deleteHeldOrderMutation.isPending}
       />
-
-      {/* A4 Print Portal */}
-      {printInvoiceData && createPortal(
-        <div className="invoice-print-portal hidden print:block" style={{ backgroundColor: '#ffffff', color: '#000000', colorScheme: 'light' }}>
-          <style dangerouslySetInnerHTML={{
-            __html: `
-            @page {
-              size: A4 portrait !important;
-              margin: 8mm !important;
-            }
-            html, html.dark, body, html.dark body {
-              background-color: #ffffff !important;
-              background: #ffffff !important;
-              color: #000000 !important;
-              color-scheme: light !important;
-            }
-            .invoice-print-portal,
-            .invoice-print-portal * {
-              color-scheme: light !important;
-            }
-            @media print {
-              html, html.dark, body, html.dark body {
-                background-color: #ffffff !important;
-                background: #ffffff !important;
-                color: #000000 !important;
-                color-scheme: light !important;
-              }
-              .page-break-after-always {
-                page-break-after: always !important;
-                break-after: page !important;
-              }
-            }
-          ` }} />
-          {printCopyMode === 'BOTH' ? (
-            <>
-              <div className="page-break-after-always">
-                <A4SalesInvoice data={{ ...printInvoiceData, isDuplicate: false, type: 'sales' }} />
-              </div>
-              <div>
-                <A4SalesInvoice data={{ ...printInvoiceData, isDuplicate: true, type: 'sales' }} />
-              </div>
-            </>
-          ) : (
-            <A4SalesInvoice
-              data={{
-                ...printInvoiceData,
-                isDuplicate: printCopyMode === 'DUPLICATE',
-                type: 'sales'
-              }}
-            />
-          )}
-        </div>,
-        document.body
-      )}
     </div>
   );
 };

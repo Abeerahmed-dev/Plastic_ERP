@@ -1,4 +1,4 @@
-import { NotFoundError, ConflictError } from '../../shared/errors';
+import { NotFoundError, ConflictError, ValidationError } from '../../shared/errors';
 import { CreateCustomerInput, UpdateCustomerInput, CustomerQuery } from './customers.schemas';
 import {
   findAllCustomers,
@@ -53,14 +53,24 @@ export async function editCustomer(
   id: string,
   data: UpdateCustomerInput,
 ): Promise<CustomerWithBalance> {
-  await getCustomer(id); // throws 404 if not found
+  const customer = await getCustomer(id); // throws 404 if not found
+  if (
+    customer.name === 'Walk-in Cash Customer' &&
+    data.customer_type !== undefined &&
+    data.customer_type !== 'CASH'
+  ) {
+    throw new ValidationError("Cannot change customer type of 'Walk-in Cash Customer'");
+  }
   const updated = await updateCustomer(id, data);
   if (!updated) throw new NotFoundError('Customer');
   return updated;
 }
 
 export async function deactivateCustomer(id: string): Promise<void> {
-  await getCustomer(id);
+  const customer = await getCustomer(id);
+  if (customer.name === 'Walk-in Cash Customer') {
+    throw new ValidationError("Cannot delete or deactivate 'Walk-in Cash Customer'");
+  }
   await softDeleteCustomer(id);
 }
 

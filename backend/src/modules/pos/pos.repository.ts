@@ -6,7 +6,6 @@ import { restoreInventoryBucketsLifo } from '../invoices/invoices.repository';
 export { restoreInventoryBucketsLifo };
 
 import { NotFoundError } from '../../shared/errors';
-import { logger } from '../../config/logger';
 import { estimateOverdraftCogs, getLatestMarketBatchPrice } from '../../shared/overdraftPricing';
 
 export async function processPOSCheckout(
@@ -20,7 +19,8 @@ export async function processPOSCheckout(
   bankAccountId?: string | null,
   splitCashAmountInput?: number,
   splitBankAmountInput?: number,
-  deliveryChargesInput: number = 0
+  deliveryChargesInput: number = 0,
+  slipChargesInput: number = 2
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
     const effectiveDiscount = Number(discount || 0);
@@ -95,6 +95,9 @@ export async function processPOSCheckout(
 
       // Allow manual price override from payload; do not overwrite custom price with database product.selling_price
       const effectiveUnitPrice = !isNaN(customPriceNum) ? customPriceNum : defaultUnitPrice;
+      if (effectiveUnitPrice < 0) {
+        throw new Error(`Unit price for ${product.name} cannot be negative`);
+      }
       const lineTotal = Number(item.quantity) * effectiveUnitPrice;
       subtotal += lineTotal;
 
@@ -282,18 +285,6 @@ export async function processPOSCheckout(
           ? Math.round((estimated_cogs / sold_kg) * 10000) / 10000
           : (latestBatchPrice || Number(product.rolling_avg_cost_per_kg || product.cost_price || 0));
 
-        // Advisory Price Floor Check against rolling average cost (non-blocking for POS)
-        const minMarkupPercent = Number(product.min_markup_percent ?? 5.00);
-        const floorPricePerKg = appliedCogsPerKg * (1 + (minMarkupPercent / 100));
-        const sellingPricePerKg = sold_kg > 0 ? (lineTotal / sold_kg) : effectiveUnitPrice;
-
-        if (sellingPricePerKg < floorPricePerKg - 0.01) {
-          logger.warn(
-            { productId: product.id, sellingPricePerKg, floorPricePerKg },
-            `POS: Selling price for ${product.name} (Rs. ${sellingPricePerKg.toFixed(2)}/kg) is below floor margin (Floor: Rs. ${floorPricePerKg.toFixed(2)}/kg) - allowed as advisory warning`
-          );
-        }
-
         invoiceItemsToInsert.push({
           product_id: item.product_id,
           variant_id: (item as any).variant_id || null,
@@ -320,7 +311,8 @@ export async function processPOSCheckout(
     }
 
     const deliveryCharges = Math.max(0, Math.round(Number(deliveryChargesInput || 0) * 100) / 100);
-    const totalAmount = Math.round((subtotal - effectiveDiscount + deliveryCharges) * 100) / 100;
+    const slipCharges = Math.max(0, Math.round(Number(slipChargesInput !== undefined ? slipChargesInput : 2) * 100) / 100);
+    const totalAmount = Math.round((subtotal - effectiveDiscount + deliveryCharges + slipCharges) * 100) / 100;
 
     const isSplit = String(paymentMethodInput || '').toUpperCase() === 'SPLIT';
     const isBank = String(paymentMethodInput || '').toUpperCase() === 'BANK';
@@ -378,6 +370,7 @@ export async function processPOSCheckout(
     const invoiceDeferredTotal = invoiceItemsToInsert.reduce((sum, it: any) => sum + Number(it.deferred_qty || 0), 0);
 
     // 2. Determine Next Sequential POS Bill Number
+    await trx.raw('SELECT pg_advisory_xact_lock(90003)');
     const posRows = await trx('sales_invoices')
       .where('invoice_number', 'like', 'POS-%')
       .select('invoice_number');
@@ -405,6 +398,7 @@ export async function processPOSCheckout(
         subtotal,
         discount: effectiveDiscount,
         delivery_charge: deliveryCharges,
+        slip_charges: slipCharges,
         total_amount: totalAmount,
         paid_amount: effectiveAmountPaid,
         cash_tendered: cashTendered,
@@ -431,6 +425,7 @@ export async function processPOSCheckout(
     (invoice as any).split_bank_amount = isSplit ? splitBankNet : (isBank ? effectiveAmountPaid : 0);
     (invoice as any).delivery_charge = deliveryCharges;
     (invoice as any).delivery_charges = deliveryCharges;
+    (invoice as any).slip_charges = slipCharges;
     (invoice as any).requested_qty = invoiceRequestedTotal;
     (invoice as any).fulfilled_qty = invoiceFulfilledTotal;
     (invoice as any).deferred_qty = invoiceDeferredTotal;
@@ -785,6 +780,7 @@ export async function getCashierShiftAudit(userId: string) {
       'si.subtotal',
       'si.discount',
       'si.delivery_charge',
+      'si.slip_charges',
       'si.total_amount',
       'si.paid_amount',
       'si.status',
@@ -971,6 +967,7 @@ export async function getPosInvoicesList(filter?: { created_by?: string }) {
       'si.subtotal',
       'si.discount',
       'si.delivery_charge',
+      'si.slip_charges',
       'si.total_amount',
       'si.paid_amount',
       'si.status',

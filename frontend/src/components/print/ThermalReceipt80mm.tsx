@@ -39,6 +39,7 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
   };
 
   const customerName =
+    data.walk_in_customer_name ||
     data.customer_name ||
     data.customer?.name ||
     (data.type === 'purchase' ? (data.supplier_name || 'Supplier') : 'Walk-In Customer');
@@ -78,10 +79,12 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
 
   const subtotal = Number(data.subtotal ?? (data.total_amount + (data.discount || 0)));
   const discount = Number(data.discount || 0);
+  const deliveryCharge = Number(data.delivery_charge || data.delivery_charges || 0);
+  const slipCharges = Number(data.slip_charges || data.slipCharges || 0);
   const netPayable = Number(data.net_invoice_total ?? data.net_total ?? data.total_amount ?? 0);
   const cashTendered = Number(data.paid_amount ?? data.amount_paid ?? data.cash_tendered ?? netPayable);
   const totalWeight = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
-  const formattedTotalWeight = Number(totalWeight.toFixed(3)).toString();
+  const formattedTotalWeight = Number(totalWeight.toFixed(2)).toString();
   const balanceDue = Number(data.balance_due ?? Math.max(0, netPayable - cashTendered));
   const changeDue = Math.max(0, cashTendered - netPayable);
 
@@ -136,6 +139,12 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
             <span className="font-semibold">Customer:</span>
             <span className="font-bold text-right max-w-[48mm] break-words">{customerName}</span>
           </div>
+          {data.transport && String(data.transport).trim() !== '' && (
+            <div className="flex justify-between items-start">
+              <span className="font-semibold">Transport:</span>
+              <span className="text-right">{data.transport}</span>
+            </div>
+          )}
           <div className="flex justify-between items-start">
             <span className="font-semibold">Cashier:</span>
             <span className="text-right">{cashierName}</span>
@@ -195,6 +204,11 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
 
         {/* Totals Section */}
         <div className="space-y-1 text-[11px] pt-1">
+          <div className="flex justify-between font-bold">
+            <span>Total Weight:</span>
+            <span>{formattedTotalWeight} KG</span>
+          </div>
+
           <div className="flex justify-between">
             <span>Gross Subtotal:</span>
             <span className="font-semibold">Rs. {formatNumber(subtotal)}</span>
@@ -204,6 +218,20 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
             <div className="flex justify-between text-gray-800">
               <span>Discount:</span>
               <span>-Rs. {formatNumber(discount)}</span>
+            </div>
+          )}
+
+          {deliveryCharge > 0 && (
+            <div className="flex justify-between text-gray-800">
+              <span>Delivery / Freight:</span>
+              <span>+Rs. {formatNumber(deliveryCharge)}</span>
+            </div>
+          )}
+
+          {slipCharges > 0 && (
+            <div className="flex justify-between text-gray-800">
+              <span>Slip Charges:</span>
+              <span>+Rs. {formatNumber(slipCharges)}</span>
             </div>
           )}
 

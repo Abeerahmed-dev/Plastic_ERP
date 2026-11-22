@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChevronDown, X, RotateCcw, Search, Check } from 'lucide-react';
-import { pickCanonicalGroupName } from '../../utils/productSorting';
+import { pickCanonicalGroupName, formatSizeOnly, compareProductSizes } from '../../utils/productSorting';
 
 export interface ProductItem {
   name: string;
@@ -114,17 +114,15 @@ export function ProductSizeFilter({
     for (const p of products) {
       const pName = (p.name || '').trim().toLowerCase();
       if (pName.includes(q)) {
-        const size = (p.size || '').trim();
-        if (!size) continue;
+        const size = formatSizeOnly(p, p.name);
+        if (!size || size.toLowerCase() === pName) continue;
         const key = size.toLowerCase();
         if (!map.has(key)) {
           map.set(key, size);
         }
       }
     }
-    return Array.from(map.values()).sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-    );
+    return Array.from(map.values()).sort(compareProductSizes);
   }, [products, productQuery]);
 
   // Dropdown list for Box 2 filtered by user typing
