@@ -55,7 +55,7 @@ export function formatProductTitle(name: string, size?: string | null): string {
   const cleanName = (name || '').trim();
   const cleanSize = (size || '').trim();
   if (!cleanSize) return cleanName;
-  return `${cleanName}(${cleanSize})`;
+  return `${cleanName} (${cleanSize})`;
 }
 
 /**

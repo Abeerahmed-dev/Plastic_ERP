@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import * as purchasesService from './purchases.service';
 import {
   createPurchaseInvoiceSchema,
+  editPurchaseInvoiceSchema,
   updatePurchaseInvoiceSchema,
   createPurchaseReturnSchema,
   updateStockDcAndPricesSchema,
@@ -123,6 +124,46 @@ export async function createPurchaseInvoice(req: Request, res: Response) {
     } else {
       res.status(500).json({ success: false, error: error.message });
     }
+  }
+}
+
+export async function updatePurchaseInvoice(req: Request, res: Response) {
+  try {
+    const parsed = editPurchaseInvoiceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        error: parsed.error.errors.map((e) => e.message).join(', '),
+      });
+      return;
+    }
+
+    const invoiceId = req.params.id;
+    const userRole = (req.user?.roleName || (req.user as any)?.role || '').trim().toUpperCase();
+    const userId = req.user!.id;
+
+    if (userRole === 'CASHIER') {
+      const existing = await purchasesService.getPurchaseInvoiceById(invoiceId);
+      if (existing.created_by && existing.created_by !== userId) {
+        res.status(403).json({
+          success: false,
+          error: 'You are only authorized to edit invoices you personally created.',
+        });
+        return;
+      }
+    }
+
+    const invoice = await purchasesService.updatePurchaseInvoice(invoiceId, parsed.data, userId);
+    res.json({ success: true, data: invoice });
+  } catch (error: any) {
+    if (error.message?.toLowerCase().includes('not found')) {
+      res.status(404).json({ success: false, error: error.message });
+      return;
+    }
+    res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to update purchase invoice',
+    });
   }
 }
 

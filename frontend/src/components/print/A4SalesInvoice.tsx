@@ -133,6 +133,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
   }
 
   const groupedMap = new Map<string, GroupedProductItem>();
+  let totalBagsRaw = 0;
 
   for (const item of rawItems) {
     const rawEnglishName = String(
@@ -153,6 +154,10 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
 
     const key = baseName.trim().toLowerCase();
     const qty = Number(item.quantity ?? item.qty ?? 0);
+    const bagWeight = Number(item.bag_weight_kg || item.category_bag_weight_kg || item.product?.bag_weight_kg || 25);
+    if (bagWeight > 0) {
+      totalBagsRaw += qty / bagWeight;
+    }
     const unit = item.selected_unit || item.unit || 'KG';
     const unitPrice = Number(item.unit_price ?? item.price ?? 0);
     const totalPrice = Number(item.total_price ?? item.total ?? qty * unitPrice);
@@ -216,6 +221,8 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
 
   const totalWeight = groupedItems.reduce((sum, item) => sum + item.totalQty, 0);
   const formattedTotalWeight = Number(totalWeight.toFixed(3)).toString();
+  const totalBags = Math.round(totalBagsRaw * 100) / 100;
+  const formattedTotalBags = Number(totalBags.toFixed(2)).toLocaleString('en-PK');
 
   const getStatusBadge = () => {
     if (isDebitNote) {
@@ -464,7 +471,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
               Total Weight:
             </td>
             <td className="py-2 px-2 text-left text-slate-500 font-normal text-[11px]">
-              {groupedItems.length} Products ({groupedItems.reduce((acc, g) => acc + g.variants.length, 0)} Items)
+              {groupedItems.length} Products ({groupedItems.reduce((acc, g) => acc + g.variants.length, 0)} Items • {formattedTotalBags} Bags)
             </td>
             <td className="py-2 px-2 text-center font-mono font-black whitespace-nowrap">
               {formattedTotalWeight}
@@ -483,6 +490,10 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
       {/* ── Financial Summary & Returns Block ── */}
       <div className="flex justify-end my-3">
         <div className="w-80 border border-black rounded-lg p-3 text-xs space-y-1.5 bg-white">
+          <div className="flex justify-between text-slate-700">
+            <span className="font-semibold">Total Bags:</span>
+            <span className="font-mono font-bold">{formattedTotalBags}</span>
+          </div>
           <div className="flex justify-between text-slate-700">
             <span className="font-semibold">Gross Subtotal:</span>
             <span className="font-mono font-bold">Rs. {formatDecimal(subtotal)}</span>

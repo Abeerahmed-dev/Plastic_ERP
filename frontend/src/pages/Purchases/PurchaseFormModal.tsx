@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { X, Plus, Trash2, Wallet } from 'lucide-react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { purchasesService } from '../../services/purchases.service';
+import { purchasesService, PurchaseInvoice } from '../../services/purchases.service';
 import { getSuppliers } from '../../services/suppliers.service';
 import { productsService } from '../../services/products.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
@@ -43,17 +43,24 @@ interface Props {
   onClose: () => void;
   onSuccess: () => void;
   initialProductId?: string;
+  editingInvoice?: PurchaseInvoice | null;
 }
 
-export default function PurchaseFormModal({ onClose, onSuccess, initialProductId }: Props) {
+export default function PurchaseFormModal({ onClose, onSuccess, initialProductId, editingInvoice }: Props) {
   const qc = useQueryClient();
+  const isEditMode = Boolean(editingInvoice?.id);
+  const hasLinkedPayments = isEditMode && (
+    Number(editingInvoice?.paid_amount || 0) > 0 ||
+    (Array.isArray(editingInvoice?.payments) && editingInvoice.payments.length > 0)
+  );
+  const hasInitializedEditRef = useRef(false);
   const [applyAdvance, setApplyAdvance] = useState(false);
   const [advanceAppliedAmount, setAdvanceAppliedAmount] = useState('0');
 
   // Fetch dependencies
   const { data: suppliersResponse } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: () => getSuppliers({ limit: 100 })
+    queryKey: ['suppliers', 'all-for-purchases'],
+    queryFn: () => getSuppliers({ limit: 5000 })
   });
   const suppliers = suppliersResponse?.data || [];
 
@@ -63,7 +70,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   });
   const products = productsResponse || [];
 
-  const { register, control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
+  const { register, control, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
       supplier_id: '',
@@ -135,9 +142,52 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
     }
   };
 
+  // Prefill when editingInvoice is passed
+  useEffect(() => {
+    if (!editingInvoice || hasInitializedEditRef.current) return;
+    if (products.length === 0) return;
+
+    const mappedItems = (editingInvoice.items || []).map((item: any) => {
+      const prod = products.find((p) => p.id === item.product_id);
+      const groupKey = (prod?.name || item.product_name || '').trim().toLowerCase();
+      const group = groupedProducts[groupKey];
+      const canonicalName = group ? group.name : (prod?.name || item.product_name || '').trim();
+      const qty = Number(item.quantity || 0);
+      const stdWeight = Number(prod?.bag_weight_kg || item.category_bag_weight_kg || 25);
+      const unitPrice = Number(item.unit_price || 0);
+      const itemTotal = item.total_price !== undefined && item.total_price !== null
+        ? Number(item.total_price)
+        : Math.round(qty * unitPrice * 100) / 100;
+
+      return {
+        product_id: item.product_id,
+        selected_family_name: canonicalName,
+        selected_variant_id: item.product_id,
+        bags_input: stdWeight > 0 ? Number((qty / stdWeight).toFixed(2)) : 1,
+        quantity: qty,
+        unit_price: unitPrice,
+        total: itemTotal,
+        total_price: itemTotal,
+      };
+    });
+
+    reset({
+      supplier_id: editingInvoice.supplier_id || '',
+      date: editingInvoice.date ? String(editingInvoice.date).split('T')[0] : new Date().toISOString().split('T')[0],
+      due_date: editingInvoice.due_date ? String(editingInvoice.due_date).split('T')[0] : '',
+      discount: Number(editingInvoice.discount || 0),
+      delivery_charges: Number(editingInvoice.delivery_charges || 0),
+      notes: editingInvoice.notes || '',
+      items: mappedItems.length > 0
+        ? mappedItems
+        : [{ product_id: '', selected_family_name: '', selected_variant_id: '', bags_input: 1, quantity: 25, unit_price: 0, total: 0 }],
+    });
+    hasInitializedEditRef.current = true;
+  }, [editingInvoice, products, groupedProducts, reset]);
+
   // Prefill when initialProductId is passed (e.g. from Low Stock alert "Order Stock" action)
   useEffect(() => {
-    if (initialProductId && products.length > 0) {
+    if (!editingInvoice && initialProductId && products.length > 0) {
       const p = products.find(prod => prod.id === initialProductId);
       if (p) {
         const stdWeight = Number(p.bag_weight_kg || 25);
@@ -174,6 +224,19 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
 
   const totalKg = Math.round(
     (watchItems || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) * 100
+  ) / 100;
+  const totalBags = Math.round(
+    (watchItems || []).reduce((sum, item) => {
+      if (!item.product_id && !item.selected_variant_id) return sum;
+      const bagsVal = item.bags_input !== undefined && item.bags_input !== '' && !isNaN(Number(item.bags_input))
+        ? Number(item.bags_input)
+        : (() => {
+            const prod = products.find((p) => p.id === (item.product_id || item.selected_variant_id));
+            const stdWeight = Number(prod?.bag_weight_kg || 25);
+            return stdWeight > 0 ? Number(item.quantity || 0) / stdWeight : 0;
+          })();
+      return sum + (Number.isFinite(bagsVal) ? bagsVal : 0);
+    }, 0) * 100
   ) / 100;
   const dcPerKg = totalKg > 0 ? Math.round((deliveryChargesNum / totalKg) * 100) / 100 : 0;
   const grandTotalWithDc = Math.round((total + deliveryChargesNum) * 100) / 100;
@@ -338,11 +401,16 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   };
 
   useEffect(() => {
-    focusField('supplier-combobox');
-  }, []);
+    if (!isEditMode) {
+      focusField('supplier-combobox');
+    }
+  }, [isEditMode]);
 
   const mutation = useMutation({
-    mutationFn: (data: FormData) => purchasesService.createInvoice(data as any),
+    mutationFn: (data: FormData) =>
+      editingInvoice?.id
+        ? purchasesService.updateInvoice(editingInvoice.id, data as any)
+        : purchasesService.createInvoice(data as any),
     onSuccess: () => {
       invalidatePurchaseQueries(qc);
       erpSyncBus.emit('purchase');
@@ -380,7 +448,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
       due_date: data.due_date ? data.due_date : undefined,
       discount: Math.round(Number(data.discount || 0) * 100) / 100,
       delivery_charges: deliveryChargesNum,
-      advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0,
+      ...(isEditMode ? {} : { advance_applied_amount: applyAdvance ? Math.round(Number(advanceAppliedAmount || 0) * 100) / 100 : 0 }),
       items: cleanItems,
     } as any);
   };
@@ -422,8 +490,12 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">New Purchasing</h2>
-            <p className="text-sm text-slate-500 mt-0.5">Record incoming inventory (Strict KG Wholesale Model)</p>
+            <h2 className="text-lg font-bold text-slate-900">
+              {isEditMode ? `Edit Purchase Invoice (${editingInvoice?.invoice_number})` : 'New Purchasing'}
+            </h2>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {isEditMode ? 'Update party, dates, items, rates or charges (Stock & Ledger auto-adjust)' : 'Record incoming inventory (Strict KG Wholesale Model)'}
+            </p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition">
             <X className="h-5 w-5" />
@@ -435,8 +507,8 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
           <form id="purchase-form" onSubmit={handleSubmit(onSubmit, (errs) => console.log('Validation failed:', errs))} className="space-y-6">
 
             {mutation.isError && (
-              <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
-                {mutation.error instanceof Error ? mutation.error.message : 'Failed to create invoice.'}
+              <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700 font-medium">
+                {(mutation.error as any)?.response?.data?.error || (mutation.error instanceof Error ? mutation.error.message : 'Failed to save invoice.')}
               </div>
             )}
 
@@ -453,11 +525,17 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
                   }}
                   options={supplierOptions}
                   placeholder="Type to search party / supplier..."
-                  autoFocus={true}
+                  autoFocus={!isEditMode}
+                  disabled={hasLinkedPayments}
                   hasError={!!errors.supplier_id}
                   onSelectNext={() => focusField('item-0-family')}
                   onTabNext={() => focusField('item-0-family')}
                 />
+                {hasLinkedPayments && (
+                  <p className="mt-1 text-[11px] text-amber-600 font-medium">
+                    Party cannot be changed because payments are already recorded on this invoice.
+                  </p>
+                )}
                 {errors.supplier_id && <p className="mt-1 text-xs text-red-600">{errors.supplier_id.message}</p>}
               </div>
 
@@ -713,7 +791,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
               </div>
             </div>
 
-            {walletBalance > 0 && (
+            {!isEditMode && walletBalance > 0 && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 space-y-3 shadow-2xs mt-4">
                 <div className="flex items-center justify-between text-emerald-900">
                   <span className="text-sm font-bold flex items-center gap-2">
@@ -771,6 +849,12 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
 
             <div className="flex justify-end pt-4 border-t border-slate-100">
               <div className="w-full max-w-sm space-y-3">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500 font-medium">Total Bags</span>
+                  <span className="font-bold font-mono text-slate-900">
+                    {Number(totalBags.toFixed(2)).toLocaleString('en-PK')}
+                  </span>
+                </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-500 font-medium">Subtotal</span>
                   <span className="font-semibold text-slate-700">Rs. {subtotal.toLocaleString('en-PK', { minimumFractionDigits: 2 })}</span>
@@ -879,9 +963,11 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
             form="purchase-form"
             disabled={mutation.isPending || hasAnyEmptySize}
             className="px-5 py-2.5 text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center cursor-pointer"
-            title={hasAnyEmptySize ? "All line items must have a size/variant selected" : "Save Purchase"}
+            title={hasAnyEmptySize ? "All line items must have a size/variant selected" : (isEditMode ? "Update Purchase" : "Save Purchase")}
           >
-            {mutation.isPending ? 'Saving...' : 'Save Purchase'}
+            {mutation.isPending
+              ? (isEditMode ? 'Updating...' : 'Saving...')
+              : (isEditMode ? 'Update Purchase' : 'Save Purchase')}
           </button>
         </div>
 

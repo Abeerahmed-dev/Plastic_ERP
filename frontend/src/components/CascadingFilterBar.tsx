@@ -182,6 +182,8 @@ export function CascadingFilterBar({
                 : namePlaceholder
             }
             disabled={isNameDisabled}
+            allowCustom={true}
+            onCustomSelect={(val) => onNameChange(val || null)}
             className="w-full"
           />
         </div>

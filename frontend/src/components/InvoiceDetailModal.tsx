@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2, Ban } from 'lucide-react';
+import { X, Printer, Calendar, User, RotateCcw, AlertCircle, CheckCircle2, Ban, Edit2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
 import { productsService } from '../services/products.service';
@@ -84,9 +84,10 @@ interface InvoiceDetailModalProps {
   invoice: InvoiceDetailData | null;
   type?: 'sales' | 'purchase';
   onProcessReturn?: (invoiceId: string) => void;
+  onEdit?: (invoiceId: string) => void;
 }
 
-export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn }: InvoiceDetailModalProps) {
+export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 'sales', onProcessReturn, onEdit }: InvoiceDetailModalProps) {
   const { user } = useAuthStore();
   const isCashier = (user?.role || '').toUpperCase() === 'CASHIER';
   const [printCopyMode, setPrintCopyMode] = useState<'ORIGINAL' | 'DUPLICATE' | 'BOTH'>('ORIGINAL');
@@ -158,6 +159,23 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
   const balanceDue = invoice.balance_due !== undefined
     ? Number(invoice.balance_due)
     : Math.round((netFinalInvoiceTotal - paidAmount) * 100) / 100;
+
+  const totalBags = Math.round(
+    (invoice.items || []).reduce((acc, item) => {
+      const itemReturnedQty = Number(item.returned_quantity || 0);
+      const childCalculatedReturnedQty = childReturns.reduce((cAcc, cn) => {
+        const matching = (cn.items || []).filter(
+          (i) => (item.id && (i.id === item.id || i.line_item_id === item.id)) || i.product_id === item.product_id
+        );
+        return cAcc + matching.reduce((sum, ci) => sum + Math.abs(Number(ci.quantity || ci.return_quantity || 0)), 0);
+      }, 0);
+      const returnedQty = itemReturnedQty > 0 ? itemReturnedQty : childCalculatedReturnedQty;
+      const netQty = Math.max(0, Number(item.quantity || 0) - returnedQty);
+      const matchingProduct = allProducts.find((p) => p.id === item.product_id);
+      const bagWeight = Number((item as any).bag_weight_kg || (item as any).category_bag_weight_kg || matchingProduct?.bag_weight_kg || 25);
+      return acc + (bagWeight > 0 ? netQty / bagWeight : 0);
+    }, 0) * 100
+  ) / 100;
 
   const getStatusBadge = () => {
     if (statusUpper === 'VOID') {
@@ -521,6 +539,10 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
 
             <div className="w-full md:w-72 space-y-2 text-xs border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-6">
               <div className="flex justify-between text-slate-600">
+                <span>Total Bags:</span>
+                <span className="font-mono font-bold text-slate-800">{formatNumber(totalBags)}</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
                 <span>Subtotal:</span>
                 <span className="font-mono font-semibold">{formatPKR(subtotal)}</span>
               </div>
@@ -641,6 +663,19 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
           </button>
 
           <div className="flex items-center gap-3">
+            {type === 'purchase' && !isReturnNote && !hasReturns && statusUpper !== 'VOID' && statusUpper !== 'CANCELLED' && onEdit && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onEdit(invoice.id);
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-sm font-bold shadow-xs transition active:scale-95 cursor-pointer"
+              >
+                <Edit2 className="w-4 h-4 text-amber-700" />
+                Edit Invoice
+              </button>
+            )}
+
             {!isCashier && !isReturnNote && onProcessReturn && (
               <button
                 onClick={() => {

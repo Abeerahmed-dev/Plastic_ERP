@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, Box } from 'lucide-react';
+import { toast } from 'sonner';
 import { productsService } from '../../services/products.service';
 import { categoriesService } from '../../services/categories.service';
 import { ProductFormModal } from './ProductFormModal';
@@ -16,13 +17,14 @@ export default function ProductsListPage() {
   const userRole = (user?.roleName || user?.role || '').toUpperCase();
   const isCashier = userRole === 'CASHIER';
   const isOwner = userRole === 'OWNER' || userRole === 'ADMIN';
+  const isAccountant = userRole === 'ACCOUNTANT';
 
   const [productQuery, setProductQuery] = useState('');
   const [sizeQuery, setSizeQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const canWrite = isCashier || isOwner || hasPermission('products:write');
+  const canWrite = isOwner || isAccountant || hasPermission('products:write');
 
   const { data: products = [], isLoading, refetch } = useQuery({
     queryKey: ['products'],
@@ -46,6 +48,9 @@ export default function ProductsListPage() {
       erpSyncBus.emit('product');
       setIsModalOpen(false);
     },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || err.message || 'Failed to create product');
+    },
   });
 
   const updateMutation = useMutation({
@@ -56,6 +61,9 @@ export default function ProductsListPage() {
       erpSyncBus.emit('product');
       setIsModalOpen(false);
       setEditingProduct(null);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || err.message || 'Failed to update product');
     },
   });
 

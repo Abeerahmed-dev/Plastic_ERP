@@ -1645,7 +1645,8 @@ export async function findInvoiceById(id: string) {
       'p.name_urdu as product_name_urdu',
       'p.code as product_code',
       'p.size as product_size',
-      'c.name as category'
+      'c.name as category',
+      'c.bag_weight_kg as category_bag_weight_kg'
     );
 
   const pending_deliveries = await db('pending_deliveries as pd')

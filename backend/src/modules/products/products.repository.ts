@@ -224,6 +224,20 @@ export async function findProductById(
 
   const txCount = await getProductTransactionCount(id, client);
 
+  let historicalWac = Number(product.cost_price || 0);
+  const hasBatches = await client.schema.hasTable('inventory_batches');
+  if (hasBatches) {
+    const initBatch = await client('inventory_batches')
+      .where({ product_id: id })
+      .whereNull('purchase_invoice_id')
+      .whereNot('status', 'VOID')
+      .orderBy('created_at', 'asc')
+      .first();
+    if (initBatch) {
+      historicalWac = Number(initBatch.batch_buy_price_per_kg ?? initBatch.buy_price_per_kg ?? historicalWac);
+    }
+  }
+
   return {
     ...product,
     total_stock_kg: Number(product.total_stock_kg || 0),
@@ -234,7 +248,7 @@ export async function findProductById(
     current_stock: Number(product.total_stock_kg || 0),
     has_transactions: txCount > 0,
     transaction_count: txCount,
-    historical_wac: Number(product.cost_price || 0),
+    historical_wac: historicalWac,
     opening_stock: Number(product.opening_stock || 0),
   };
 }
@@ -369,57 +383,118 @@ export async function updateProduct(
     const currentProduct = await trx('products').where({ id }).forUpdate().first();
     if (!currentProduct) return undefined;
 
+    const hasBatches = await trx.schema.hasTable('inventory_batches');
+    const hasBatchBuyPriceCol = hasBatches
+      ? await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg')
+      : true;
+
+    const initBatch = hasBatches
+      ? await trx('inventory_batches')
+          .where({ product_id: id })
+          .whereNull('purchase_invoice_id')
+          .whereNot('status', 'VOID')
+          .orderBy('created_at', 'asc')
+          .forUpdate()
+          .first()
+      : null;
+
+    const hasPurchaseBatches = hasBatches
+      ? Boolean(
+          await trx('inventory_batches')
+            .where({ product_id: id })
+            .whereNotNull('purchase_invoice_id')
+            .whereNot('status', 'VOID')
+            .first()
+        )
+      : false;
+
     const rawOpeningStock = data.opening_stock_kg !== undefined ? data.opening_stock_kg : data.opening_stock;
     const rawHistoricalWac = data.historical_wac;
     const isAttemptingDayZeroUpdate = rawOpeningStock !== undefined || rawHistoricalWac !== undefined;
 
-    const targetStock = rawOpeningStock !== undefined ? Number(rawOpeningStock) : Number(currentProduct.opening_stock || 0);
-    const targetWac = rawHistoricalWac !== undefined ? Number(rawHistoricalWac) : Number(currentProduct.cost_price || 0);
+    const oldOpeningStock = Number(currentProduct.opening_stock || 0);
+    const oldInitWac = Number(
+      (initBatch ? (initBatch.batch_buy_price_per_kg ?? initBatch.buy_price_per_kg) : undefined) ??
+      currentProduct.cost_price ??
+      0
+    );
 
-    const stockChanged = rawOpeningStock !== undefined && targetStock !== Number(currentProduct.opening_stock || 0);
-    const wacChanged = rawHistoricalWac !== undefined && targetWac !== Number(currentProduct.cost_price || 0);
+    const targetStock = rawOpeningStock !== undefined ? Number(rawOpeningStock) : oldOpeningStock;
+    const targetWac = rawHistoricalWac !== undefined ? Number(rawHistoricalWac) : oldInitWac;
+
+    const stockChanged = rawOpeningStock !== undefined && Math.abs(targetStock - oldOpeningStock) > 0.0001;
+    const wacChanged = rawHistoricalWac !== undefined && Math.abs(targetWac - oldInitWac) > 0.0001;
+
+    let stockDelta = 0;
 
     if (isAttemptingDayZeroUpdate && (stockChanged || wacChanged)) {
-      const txCount = await getProductTransactionCount(id, trx);
-      if (txCount > 0) {
-        throw new ValidationError('Cannot modify Day Zero stock after transactions have been recorded');
-      }
-
-      // If transaction_count === 0, allow the update: overwrite the initial FIFO bucket and recalculate total_stock_kg
-      const hasBatches = await trx.schema.hasTable('inventory_batches');
       if (hasBatches) {
-        const initBatch = await trx('inventory_batches')
-          .where({ product_id: id })
-          .whereNull('purchase_invoice_id')
-          .first();
+        if (initBatch) {
+          const oldBatchOrig = Number(initBatch.original_qty || 0);
+          const oldBatchRem = Number(initBatch.remaining_qty || 0);
+          const usedFromInitBatch = Math.max(0, Math.round((oldBatchOrig - oldBatchRem) * 10000) / 10000);
 
-        if (targetStock > 0) {
-          if (initBatch) {
-            await trx('inventory_batches')
-              .where({ id: initBatch.id })
-              .update({
-                original_qty: targetStock,
-                remaining_qty: targetStock,
-                batch_buy_price_per_kg: targetWac,
-                status: 'ACTIVE',
-                updated_at: new Date(),
-              });
+          if (targetStock < usedFromInitBatch - 0.0001) {
+            throw new ValidationError(
+              `Cannot reduce opening stock below ${usedFromInitBatch} KG because ${usedFromInitBatch} KG from the opening batch has already been sold.`
+            );
+          }
+
+          const newBatchRem = Math.max(0, Math.round((targetStock - usedFromInitBatch) * 10000) / 10000);
+          stockDelta = Math.round((newBatchRem - oldBatchRem) * 10000) / 10000;
+
+          let hasSalesRefs = false;
+          if (targetStock <= 0 && (await trx.schema.hasTable('sales_invoice_item_batches'))) {
+            const ref = await trx('sales_invoice_item_batches')
+              .where('inventory_batch_id', initBatch.id)
+              .first();
+            hasSalesRefs = Boolean(ref);
+          }
+
+          if (targetStock > 0 || hasSalesRefs) {
+            const batchUpdate: Record<string, any> = {
+              original_qty: targetStock,
+              remaining_qty: newBatchRem,
+              status: newBatchRem > 0 ? 'ACTIVE' : 'DEPLETED',
+              size: (data as any).size || currentProduct.size || 'Standard',
+              updated_at: new Date(),
+            };
+            if (hasBatchBuyPriceCol) {
+              batchUpdate.batch_buy_price_per_kg = targetWac;
+            } else {
+              batchUpdate.buy_price_per_kg = targetWac;
+            }
+            await trx('inventory_batches').where({ id: initBatch.id }).update(batchUpdate);
           } else {
+            await trx('inventory_batches').where({ id: initBatch.id }).delete();
+          }
+        } else {
+          stockDelta = Math.round((targetStock - oldOpeningStock) * 10000) / 10000;
+          if (Number(currentProduct.total_stock_kg || 0) + stockDelta < -0.0001) {
+            throw new ValidationError('Cannot reduce opening stock below already sold stock.');
+          }
+
+          if (targetStock > 0) {
             const batchNum = `PB-INIT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            await trx('inventory_batches').insert({
+            const batchInsert: Record<string, any> = {
               product_id: id,
               purchase_invoice_id: null,
               batch_number: batchNum,
-              batch_buy_price_per_kg: targetWac,
               original_qty: targetStock,
               remaining_qty: targetStock,
               status: 'ACTIVE',
               size: (data as any).size || currentProduct.size || 'Standard',
-            });
+            };
+            if (hasBatchBuyPriceCol) {
+              batchInsert.batch_buy_price_per_kg = targetWac;
+            } else {
+              batchInsert.buy_price_per_kg = targetWac;
+            }
+            await trx('inventory_batches').insert(batchInsert);
           }
-        } else if (initBatch) {
-          await trx('inventory_batches').where({ id: initBatch.id }).delete();
         }
+      } else {
+        stockDelta = Math.round((targetStock - oldOpeningStock) * 10000) / 10000;
       }
 
       const hasTx = await trx.schema.hasTable('inventory_transactions');
@@ -462,10 +537,44 @@ export async function updateProduct(
     delete updatePayload.historical_wac;
 
     if (stockChanged || wacChanged) {
+      const newTotalStock = Math.max(
+        0,
+        Math.round((Number(currentProduct.total_stock_kg || 0) + stockDelta) * 10000) / 10000
+      );
+
+      let newRollingAvg = hasPurchaseBatches
+        ? Number(currentProduct.rolling_avg_cost_per_kg || currentProduct.cost_price || 0)
+        : targetWac;
+
+      if (hasBatches) {
+        const activeBatches = await trx('inventory_batches')
+          .where({ product_id: id })
+          .where('status', 'ACTIVE')
+          .select('remaining_qty', hasBatchBuyPriceCol ? 'batch_buy_price_per_kg' : 'buy_price_per_kg');
+
+        let totalRem = 0;
+        let totalVal = 0;
+        for (const b of activeBatches) {
+          const rem = Number(b.remaining_qty || 0);
+          const cost = Number(b.batch_buy_price_per_kg ?? b.buy_price_per_kg ?? 0);
+          totalRem += rem;
+          totalVal += rem * cost;
+        }
+
+        if (totalRem > 0) {
+          newRollingAvg = Math.round((totalVal / totalRem) * 10000) / 10000;
+        }
+      }
+
       updatePayload.opening_stock = targetStock;
-      updatePayload.total_stock_kg = targetStock;
-      updatePayload.cost_price = targetWac;
-      updatePayload.rolling_avg_cost_per_kg = targetWac;
+      updatePayload.total_stock_kg = newTotalStock;
+      updatePayload.rolling_avg_cost_per_kg = newRollingAvg;
+
+      if (!hasPurchaseBatches) {
+        updatePayload.cost_price = targetWac;
+      } else {
+        delete updatePayload.cost_price;
+      }
     } else {
       delete updatePayload.opening_stock;
       delete updatePayload.total_stock_kg;

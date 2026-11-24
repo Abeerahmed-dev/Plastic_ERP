@@ -55,21 +55,40 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
   // Normalize items array
   const rawItems: any[] = data.items || data.order_details || [];
   const items = rawItems.map((item) => {
-    const name = item.product_name || item.productName || item.product?.name || 'Item';
-    const size = item.size || item.product_size || item.variant_size || null;
+    const rawName = item.product_name || item.productName || item.product?.name || 'Item';
+    const rawSize = item.size || item.product_size || item.variant_size || null;
+    let baseName = rawName;
+    let sizePart = (rawSize || '').trim();
+
+    const parenMatch = rawName.match(/^(.*?)\s*\(([^)]+)\)$/);
+    if (parenMatch) {
+      baseName = parenMatch[1].trim();
+      if (!sizePart) sizePart = parenMatch[2].trim();
+    } else if (!sizePart && rawName.includes(' - ')) {
+      const idx = rawName.lastIndexOf(' - ');
+      baseName = rawName.substring(0, idx).trim();
+      sizePart = rawName.substring(idx + 3).trim();
+    } else if (sizePart && rawName.endsWith(` - ${sizePart}`)) {
+      baseName = rawName.slice(0, -(` - ${sizePart}`.length)).trim();
+    }
+
+    baseName = baseName.replace(/\s*\([^)]*\)$/, '').trim();
+
+    let fullName = rawName.replace(/([^\s])\(([^)]+)\)$/, '$1 ($2)');
+    if (sizePart && !fullName.includes(sizePart)) {
+      fullName = `${fullName} (${sizePart})`;
+    }
+
     const qty = Number(item.quantity ?? item.qty ?? 1);
     const unit = item.selected_unit || item.unit || 'KG';
     const rate = Number(item.unit_price ?? item.price ?? 0);
     const total = Number(item.total_price ?? item.total ?? qty * rate);
 
-    const fullName = size ? `${name} - ${size}` : name;
-    const urduBase = getUrduProductName(name, item.name_urdu || item.product_name_urdu, item.category);
-    const urduSize = size ? (getUrduProductName(size) || size) : '';
+    const urduBase = getUrduProductName(baseName, item.name_urdu || item.product_name_urdu, item.category);
 
     return {
       fullName,
       urduBase,
-      urduSize,
       qty,
       unit,
       rate,
@@ -126,10 +145,10 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
         <div className="border-b border-dashed border-black my-2"></div>
 
         {/* Metadata Section */}
-        <div className="space-y-1 text-[11px]">
+        <div className="space-y-1 text-[12px]">
           <div className="flex justify-between items-start">
             <span className="font-semibold">Invoice #:</span>
-            <span className="font-bold font-mono text-right">{invoiceNumber}</span>
+            <span className="font-bold font-sans text-right text-[13px]">{invoiceNumber}</span>
           </div>
           <div className="flex justify-between items-start">
             <span className="font-semibold">Date:</span>
@@ -155,7 +174,7 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
         <div className="border-b border-dashed border-black my-2"></div>
 
         {/* Items Table */}
-        <table className="w-full text-[11px] mb-1">
+        <table className="w-full text-[12px] mb-1 font-sans">
           <thead>
             <tr className="border-b border-black text-left">
               <th className="py-1 font-bold text-left">Item</th>
@@ -167,33 +186,28 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
           <tbody className="divide-y divide-dashed divide-gray-200">
             {items.map((item, idx) => (
               <tr key={idx} className="align-top">
-                <td className="py-1 pr-1 font-medium break-words leading-tight">
+                <td className="py-1.5 pr-1 font-bold break-words leading-snug text-[13px]">
                   <div>{item.fullName}</div>
                   {item.urduBase && (
-                    <div className="text-[10px] font-bold text-black mt-0.5 text-left" style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>
+                    <div className="text-[12px] font-bold text-black mt-0.5 text-left" style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>
                       <span dir="rtl">{item.urduBase}</span>
-                      {item.urduSize && (
-                        <span dir="ltr" className="ml-1 text-[9.5px]">
-                          &lrm;- {item.urduSize}&lrm;
-                        </span>
-                      )}
                     </div>
                   )}
                 </td>
-                <td className="py-1 text-center whitespace-nowrap">
+                <td className="py-1.5 text-center whitespace-nowrap font-bold text-[12px]">
                   {item.qty}
                 </td>
-                <td className="py-1 text-right whitespace-nowrap">
+                <td className="py-1.5 text-right whitespace-nowrap font-bold text-[12px]">
                   {formatNumber(item.rate)}
                 </td>
-                <td className="py-1 text-right whitespace-nowrap font-bold">
+                <td className="py-1.5 text-right whitespace-nowrap font-extrabold text-[12px]">
                   {formatNumber(item.total)}
                 </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
-            <tr className="border-t border-dashed border-black font-bold text-[11px]">
+            <tr className="border-t border-dashed border-black font-bold text-[12px]">
               <td className="py-1 text-left">Total Weight:</td>
               <td className="py-1 text-center whitespace-nowrap">{formattedTotalWeight} KG</td>
               <td></td>
@@ -203,12 +217,7 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
         </table>
 
         {/* Totals Section */}
-        <div className="space-y-1 text-[11px] pt-1">
-          <div className="flex justify-between font-bold">
-            <span>Total Weight:</span>
-            <span>{formattedTotalWeight} KG</span>
-          </div>
-
+        <div className="space-y-1 text-[12px] pt-1 font-sans">
           <div className="flex justify-between">
             <span>Gross Subtotal:</span>
             <span className="font-semibold">Rs. {formatNumber(subtotal)}</span>

@@ -154,6 +154,19 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const slipChargesNum = Math.round(Number(slip_charges !== undefined ? slip_charges : 2) * 100) / 100;
   const discountNum = Math.round(Number(discount || 0) * 100) / 100;
   const total = Math.max(0, Math.round((subtotal - discountNum) * 100) / 100) + deliveryChargeNum + slipChargesNum;
+  const totalBags = Math.round(
+    (items || []).reduce((sum, item) => {
+      if (!item.product_id && !item.selected_variant_id) return sum;
+      const bagsVal = item.bags_input !== undefined && item.bags_input !== '' && !isNaN(Number(item.bags_input))
+        ? Number(item.bags_input)
+        : (() => {
+            const prod = products.find((p) => p.id === (item.product_id || item.selected_variant_id));
+            const stdWeight = Number(prod?.bag_weight_kg || 25);
+            return stdWeight > 0 ? Number(item.quantity || 0) / stdWeight : 0;
+          })();
+      return sum + (Number.isFinite(bagsVal) ? bagsVal : 0);
+    }, 0) * 100
+  ) / 100;
 
   const splitTotalAllocated = Math.round(
     splitRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0) * 100
@@ -1505,6 +1518,12 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
 
             <div className="flex justify-end">
               <div className="w-64 space-y-3">
+                <div className="flex justify-between text-sm text-slate-600">
+                  <span>Total Bags</span>
+                  <span className="font-bold font-mono text-slate-800">
+                    {Number(totalBags.toFixed(2)).toLocaleString('en-PK')}
+                  </span>
+                </div>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Subtotal</span>
                   <span className="font-semibold text-slate-800">{formatCurrency(subtotal)}</span>

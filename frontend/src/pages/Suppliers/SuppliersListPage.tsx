@@ -34,29 +34,24 @@ export default function SuppliersListPage() {
   const [refundModalOpen, setRefundModalOpen] = useState(false);
   const [refundTargetSupplier, setRefundTargetSupplier] = useState<Supplier | null>(null);
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['suppliers', page],
-    queryFn: () => getSuppliers({ page, limit: LIMIT }),
+  // 1. Fetch all suppliers for filter dropdowns (names & cities across ALL pages)
+  const { data: allSuppliersData } = useQuery({
+    queryKey: ['suppliers', 'filterOptions'],
+    queryFn: () => getSuppliers({ limit: 1000 }),
+    staleTime: 30000,
   });
+  const allSuppliers = allSuppliersData?.data ?? [];
 
-  const deactivateMutation = useMutation({
-    mutationFn: deactivateSupplier,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
-  });
-
-  const suppliers = data?.data ?? [];
-  const meta = data?.meta;
-
-  const normalizedSuppliers = useMemo(() => {
-    return suppliers.map((s) => ({
+  const normalizedAllSuppliers = useMemo(() => {
+    return allSuppliers.map((s) => ({
       ...s,
       city: s.city || null,
       name: s.name || '',
       invoice_number: null,
     }));
-  }, [suppliers]);
+  }, [allSuppliers]);
 
-  // Phase 1: Cascading filters hook
+  // Phase 1: Cascading filters hook populated from ALL suppliers
   const {
     selectedCity,
     selectedName,
@@ -67,17 +62,43 @@ export default function SuppliersListPage() {
     availableCities,
     availableNames,
     resetFilters,
-  } = useCascadingFilters(normalizedSuppliers);
+  } = useCascadingFilters(normalizedAllSuppliers);
 
-  // Phase 3: Strict multi-condition filter before rendering
-  const filteredTableRows = useMemo(() => {
-    return normalizedSuppliers.filter((row: any) => {
-      const matchesCity = selectedCity ? row.city === selectedCity : true;
-      const matchesName = selectedName ? row.name === selectedName : true;
-      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
-      return matchesCity && matchesName && matchesInvoice;
-    });
-  }, [normalizedSuppliers, selectedCity, selectedName, selectedInvoice]);
+  const handleCityChange = (city: string | null) => {
+    setSelectedCity(city);
+    setPage(1);
+  };
+
+  const handleNameChange = (name: string | null) => {
+    setSelectedName(name);
+    setPage(1);
+  };
+
+  const handleResetFilters = () => {
+    resetFilters();
+    setPage(1);
+  };
+
+  // 2. Query paginated suppliers passing search and city to backend
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['suppliers', page, selectedName, selectedCity],
+    queryFn: () => getSuppliers({
+      page,
+      limit: LIMIT,
+      search: selectedName || undefined,
+      city: selectedCity || undefined,
+    }),
+  });
+
+  const deactivateMutation = useMutation({
+    mutationFn: deactivateSupplier,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
+  });
+
+  const suppliers = data?.data ?? [];
+  const meta = data?.meta;
+
+  const filteredTableRows = suppliers;
 
   const openCreate = () => { setEditTarget(undefined); setModalOpen(true); };
   const openEdit = (s: Supplier) => { setEditTarget(s); setModalOpen(true); };
@@ -113,11 +134,11 @@ export default function SuppliersListPage() {
           <CascadingFilterBar
             selectedCity={selectedCity}
             selectedName={selectedName}
-            onCityChange={setSelectedCity}
-            onNameChange={setSelectedName}
+            onCityChange={handleCityChange}
+            onNameChange={handleNameChange}
             availableCities={availableCities}
             availableNames={availableNames}
-            onReset={resetFilters}
+            onReset={handleResetFilters}
             showInvoice={false}
             nameLabel="Party Name"
             namePlaceholder="Filter by party name…"

@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck, RotateCcw } from 'lucide-react';
-import { purchasesService } from '../../services/purchases.service';
+import { Plus, FileText, ChevronLeft, ChevronRight, RefreshCw, Truck, RotateCcw, Edit2 } from 'lucide-react';
+import { purchasesService, PurchaseInvoice } from '../../services/purchases.service';
 import { useAuthStore } from '../../store/auth.store';
 import PurchaseFormModal from './PurchaseFormModal';
 import InvoiceDetailModal, { InvoiceDetailData } from '../../components/InvoiceDetailModal';
@@ -32,6 +32,8 @@ export default function PurchasesListPage() {
 
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
+  const [loadingEditId, setLoadingEditId] = useState<string | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [detailModalInvoice, setDetailModalInvoice] = useState<InvoiceDetailData | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -83,8 +85,8 @@ export default function PurchasesListPage() {
   });
 
   const { data: suppliersResponse } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: () => getSuppliers({ limit: 100 }),
+    queryKey: ['suppliers', 'all-for-purchases'],
+    queryFn: () => getSuppliers({ limit: 5000 }),
     staleTime: 30000,
   });
   const suppliersList = suppliersResponse?.data || [];
@@ -150,6 +152,20 @@ export default function PurchasesListPage() {
     }
   };
 
+  const handleOpenEdit = async (id: string) => {
+    try {
+      setLoadingEditId(id);
+      const detail = await purchasesService.getInvoice(id);
+      setEditingInvoice(detail);
+      setModalOpen(true);
+    } catch (err: any) {
+      console.error('Failed to fetch purchase invoice for editing:', err);
+      alert(err?.response?.data?.error || 'Failed to load purchase invoice for editing.');
+    } finally {
+      setLoadingEditId(null);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header section */}
@@ -174,7 +190,10 @@ export default function PurchasesListPage() {
           </button>
           {canWrite && (
             <button
-              onClick={() => setModalOpen(true)}
+              onClick={() => {
+                setEditingInvoice(null);
+                setModalOpen(true);
+              }}
               className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-500/20 active:scale-95 transition-all gap-2 cursor-pointer"
             >
               <Plus className="h-5 w-5 text-slate-950" />
@@ -366,6 +385,18 @@ export default function PurchasesListPage() {
                             <span>Details</span>
                           </button>
 
+                          {!isDebitNote && !hasReturns && inv.status !== 'VOID' && inv.status !== 'CANCELLED' && canWrite && (
+                            <button
+                              onClick={() => handleOpenEdit(inv.id)}
+                              disabled={loadingEditId === inv.id}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg border border-amber-200 transition-all active:scale-95 shadow-2xs cursor-pointer disabled:opacity-50"
+                              title="Edit Purchase Invoice"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-amber-700" />
+                              <span>{loadingEditId === inv.id ? 'Loading…' : 'Edit'}</span>
+                            </button>
+                          )}
+
                           {!isDebitNote && canWrite && (
                             <button
                               onClick={() => handleProcessReturn(inv.id)}
@@ -401,8 +432,10 @@ export default function PurchasesListPage() {
       {modalOpen && (
         <PurchaseFormModal
           initialProductId={prefillProductId}
+          editingInvoice={editingInvoice}
           onClose={() => {
             setModalOpen(false);
+            setEditingInvoice(null);
             setPrefillProductId(undefined);
             if (searchParams.has('orderProduct')) {
               searchParams.delete('orderProduct');
@@ -411,6 +444,7 @@ export default function PurchasesListPage() {
           }}
           onSuccess={() => {
             refetch();
+            setEditingInvoice(null);
             setPrefillProductId(undefined);
             if (searchParams.has('orderProduct')) {
               searchParams.delete('orderProduct');
@@ -426,6 +460,7 @@ export default function PurchasesListPage() {
         invoice={detailModalInvoice}
         type="purchase"
         onProcessReturn={canWrite ? handleProcessReturn : undefined}
+        onEdit={canWrite ? handleOpenEdit : undefined}
       />
 
       {returnModalOpen && returnInvoiceId && (

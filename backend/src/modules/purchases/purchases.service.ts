@@ -15,6 +15,10 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
   return await repo.createPurchaseInvoice(data, createdBy);
 }
 
+export async function updatePurchaseInvoice(id: string, data: any, updatedBy: string) {
+  return await repo.updatePurchaseInvoice(id, data, updatedBy);
+}
+
 export async function updatePurchaseInvoiceStatus(id: string, updateData: { status?: string; paid_amount?: number }) {
   return await repo.updatePurchaseInvoiceStatus(id, updateData);
 }

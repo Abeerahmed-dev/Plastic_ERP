@@ -12,6 +12,7 @@ export const purchaseItemSchema = z.object({
   actual_kanta_wt: z.number().min(0).optional().nullable(),
   actual_weight_kg: z.number().min(0).optional().nullable(),
   actualWeightOverride: z.number().min(0).optional().nullable(),
+  size: z.string().optional().nullable(),
   total: z.number().min(0).optional(),
   total_price: z.number().min(0).optional(),
 }).refine(data => data.quantity !== undefined || data.quantity_kg !== undefined, {
@@ -21,11 +22,21 @@ export const purchaseItemSchema = z.object({
 export const createPurchaseInvoiceSchema = z.object({
   supplier_id: z.string().uuid('Invalid supplier ID'),
   date: z.string(), // ISO date string
-  due_date: z.string().optional(),
+  due_date: z.string().optional().nullable(),
   discount: z.number().min(0).default(0),
   delivery_charges: z.number().min(0).optional().default(0),
   advance_applied_amount: z.number().min(0).optional().default(0),
-  notes: z.string().optional(),
+  notes: z.string().optional().nullable(),
+  items: z.array(purchaseItemSchema).min(1, 'At least one item is required'),
+});
+
+export const editPurchaseInvoiceSchema = z.object({
+  supplier_id: z.string().uuid('Invalid supplier ID'),
+  date: z.string(),
+  due_date: z.string().optional().nullable(),
+  discount: z.number().min(0).default(0),
+  delivery_charges: z.number().min(0).optional().default(0),
+  notes: z.string().optional().nullable(),
   items: z.array(purchaseItemSchema).min(1, 'At least one item is required'),
 });
 

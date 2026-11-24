@@ -40,7 +40,7 @@ export const SupplierPaymentFormModal = ({
 }: Props) => {
   const qc = useQueryClient();
 
-  const { data: suppliersResponse } = useQuery({ queryKey: ['suppliers'], queryFn: () => getSuppliers({ limit: 100 }) });
+  const { data: suppliersResponse } = useQuery({ queryKey: ['suppliers', 'all-for-payment'], queryFn: () => getSuppliers({ limit: 5000 }) });
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),

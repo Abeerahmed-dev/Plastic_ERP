@@ -20,6 +20,7 @@ export function prepareInvoiceForPrint(invoice: any, allProducts: any[] = []): a
       product_code: item.product_code || item.code || prod?.code,
       size: item.size || item.product_size || prod?.size || '',
       category: item.category || prod?.category_name || prod?.category,
+      bag_weight_kg: Number(item.bag_weight_kg || item.category_bag_weight_kg || prod?.bag_weight_kg || 25),
     };
   });
 

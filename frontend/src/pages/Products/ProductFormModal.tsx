@@ -282,14 +282,9 @@ export const ProductFormModal = ({
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                     Day Zero Stock (Optional)
-                    {initialData && hasTransactions && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                        Locked (Transactions Recorded)
-                      </span>
-                    )}
-                    {initialData && !hasTransactions && (
+                    {initialData && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                        Unlocked (0 Transactions)
+                        Editable
                       </span>
                     )}
                   </h3>
@@ -300,9 +295,9 @@ export const ProductFormModal = ({
               </div>
 
               {initialData && hasTransactions && (
-                <p className="text-xs font-semibold text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200 flex items-center gap-2">
-                  <Info className="h-4 w-4 shrink-0 text-amber-600" />
-                  Cannot modify Day Zero stock after transactions have been recorded. Inputs are read-only to preserve inventory ledger integrity.
+                <p className="text-xs font-medium text-blue-800 bg-blue-50 p-2.5 rounded-xl border border-blue-200 flex items-center gap-2">
+                  <Info className="h-4 w-4 shrink-0 text-blue-600" />
+                  Transactions exist for this product. Updating Opening Stock will automatically adjust current total stock by the difference.
                 </p>
               )}
 
@@ -316,15 +311,9 @@ export const ProductFormModal = ({
                     type="number"
                     step="0.01"
                     min="0"
-                    disabled={hasTransactions}
-                    readOnly={hasTransactions}
                     autoComplete="off"
                     placeholder="0"
-                    className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
-                      hasTransactions
-                        ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
-                        : inputCls(!!errors.opening_stock)
-                    }`}
+                    className={inputCls(!!errors.opening_stock)}
                   />
                   {errors.opening_stock && (
                     <p className="mt-1 text-xs text-red-600">{errors.opening_stock.message}</p>
@@ -340,19 +329,16 @@ export const ProductFormModal = ({
                     type="number"
                     step="0.01"
                     min="0"
-                    disabled={hasTransactions || isZeroStock}
-                    readOnly={hasTransactions}
+                    disabled={isZeroStock}
                     autoComplete="off"
                     placeholder="0"
                     className={`block w-full rounded-xl border px-4 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2 ${
-                      hasTransactions || isZeroStock
+                      isZeroStock
                         ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
                         : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-blue-500/20'
                     }`}
                   />
-                  {hasTransactions ? (
-                    <p className="mt-1 text-[11px] text-slate-400">Locked to protect financial inventory ledger.</p>
-                  ) : isZeroStock ? (
+                  {isZeroStock ? (
                     <p className="mt-1 text-[11px] text-slate-400">Disabled when Opening Stock is 0.</p>
                   ) : (
                     <p className="mt-1 text-[11px] text-blue-600 font-medium">Used as initial FIFO buy price per KG.</p>

@@ -49,7 +49,7 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
   // Fetch suppliers if entityType is supplier and none preselected
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers', 'all-for-advance'],
-    queryFn: () => getSuppliers({ page: 1, limit: 100 }),
+    queryFn: () => getSuppliers({ page: 1, limit: 5000 }),
     enabled: isOpen && entityType === 'supplier' && !supplier,
   });
 

@@ -98,6 +98,11 @@ export const purchasesService = {
     return response.data.data;
   },
 
+  updateInvoice: async (id: string, data: Omit<PurchaseInvoice, 'id' | 'invoice_number' | 'status' | 'paid_amount' | 'created_at'>): Promise<PurchaseInvoice> => {
+    const response = await api.put<ApiSuccess<PurchaseInvoice>>(`/purchases/${id}`, data);
+    return response.data.data;
+  },
+
   updateInvoiceStatus: async (id: string, data: { status?: string; paid_amount?: number }): Promise<PurchaseInvoice> => {
     const response = await api.patch<ApiSuccess<PurchaseInvoice>>(`/purchases/${id}/status`, data);
     return response.data.data;

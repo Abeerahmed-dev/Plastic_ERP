@@ -93,10 +93,10 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     enabled: isOpen && !isSupplier && !customersProp,
   });
 
-  // Query Suppliers (limit 100 max per backend schema)
+  // Query Suppliers (load all active suppliers for dropdown)
   const { data: fetchedSuppliersResponse, isLoading: isLoadingSuppliers } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: () => getSuppliers({ limit: 100 }),
+    queryKey: ['suppliers', 'all-for-payment'],
+    queryFn: () => getSuppliers({ limit: 5000 }),
     enabled: isOpen && (isSupplier || !suppliersProp),
   });
 

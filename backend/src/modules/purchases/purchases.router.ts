@@ -18,6 +18,7 @@ router.post('/:id/update-stock-dc-and-prices', verifyRole(['OWNER', 'ADMIN']), p
 router.post('/:id/void', verifyRole(['OWNER', 'ADMIN']), purchasesController.voidPurchaseInvoice);
 router.get('/:id', purchasesController.getPurchaseInvoiceById);
 router.post('/', purchasesController.createPurchaseInvoice);
+router.put('/:id', purchasesController.updatePurchaseInvoice);
 router.patch('/:id/status', verifyRole(['OWNER', 'ADMIN']), purchasesController.updatePurchaseInvoiceStatus);
 
 export { router as purchasesRouter };

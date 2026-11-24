@@ -16,6 +16,7 @@ export interface ProductSizeFilterProps {
   onSizeChange: (value: string) => void;
   onClear: () => void;
   onEnterSingleMatch?: () => void;
+  onSelectAndAddToCart?: (productName: string, size?: string) => void;
   className?: string;
   productInputId?: string;
   sizeInputId?: string;
@@ -34,6 +35,7 @@ export function ProductSizeFilter({
   onSizeChange,
   onClear,
   onEnterSingleMatch,
+  onSelectAndAddToCart,
   className = '',
   productInputId = 'filter-product-combobox',
   sizeInputId = 'filter-size-combobox',
@@ -45,6 +47,8 @@ export function ProductSizeFilter({
 }: ProductSizeFilterProps) {
   const [isProductOpen, setIsProductOpen] = useState(false);
   const [isSizeOpen, setIsSizeOpen] = useState(false);
+  const [highlightedProductIndex, setHighlightedProductIndex] = useState(0);
+  const [highlightedSizeIndex, setHighlightedSizeIndex] = useState(0);
 
   const productBoxRef = useRef<HTMLDivElement>(null);
   const sizeBoxRef = useRef<HTMLDivElement>(null);
@@ -132,11 +136,57 @@ export function ProductSizeFilter({
     return allMatchingSizes.filter((s) => s.toLowerCase().includes(sq));
   }, [allMatchingSizes, sizeQuery]);
 
+  // Reset highlight indices when queries change
+  useEffect(() => {
+    setHighlightedProductIndex(0);
+  }, [productQuery]);
+
+  useEffect(() => {
+    setHighlightedSizeIndex(0);
+  }, [sizeQuery]);
+
   // Handlers for Box 1
   const handleSelectProduct = (name: string) => {
     onProductChange(name);
     onSizeChange(''); // Reset Box 2 whenever an option is selected in Box 1
     setIsProductOpen(false);
+
+    // Compute sizes for this product to decide whether to focus Size input
+    const q = name.trim().toLowerCase();
+    const map = new Map<string, string>();
+    for (const p of products) {
+      const pName = (p.name || '').trim().toLowerCase();
+      if (pName === q || pName.includes(q) || q.includes(pName)) {
+        const size = formatSizeOnly(p, p.name);
+        if (!size || size.toLowerCase() === pName) continue;
+        const key = size.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, size);
+        }
+      }
+    }
+    const matchingSizes = Array.from(map.values()).sort(compareProductSizes);
+
+    if (matchingSizes.length > 0) {
+      // Product has sizes: jump to size combobox and open dropdown
+      requestAnimationFrame(() => {
+        const sizeEl = document.getElementById(sizeInputId) as HTMLInputElement | null;
+        if (sizeEl) {
+          sizeEl.focus();
+          sizeEl.select();
+        }
+        setIsSizeOpen(true);
+        setHighlightedSizeIndex(0);
+      });
+    } else {
+      // Product has no sizes: if add-to-cart handler provided, add immediately!
+      if (onSelectAndAddToCart) {
+        onSelectAndAddToCart(name, '');
+        setIsSizeOpen(false);
+      } else if (onEnterSingleMatch) {
+        onEnterSingleMatch();
+      }
+    }
   };
 
   const handleClearProduct = () => {
@@ -149,6 +199,17 @@ export function ProductSizeFilter({
   const handleSelectSize = (size: string) => {
     onSizeChange(size);
     setIsSizeOpen(false);
+
+    if (onSelectAndAddToCart) {
+      onSelectAndAddToCart(productQuery, size);
+      // Immediately refocus product search for fast sequential scanning/entry
+      requestAnimationFrame(() => {
+        const prodEl = document.getElementById(productInputId) as HTMLInputElement | null;
+        if (prodEl) {
+          prodEl.focus();
+        }
+      });
+    }
   };
 
   const handleClearSize = () => {
@@ -156,26 +217,100 @@ export function ProductSizeFilter({
     setIsSizeOpen(false);
   };
 
-  // Key navigation & POS fast-add
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, isSizeBox = false) => {
+  // Key navigation for Product Box
+  const handleProductKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (isSizeBox) setIsSizeOpen(false);
-      else setIsProductOpen(false);
-    } else if (e.key === 'Enter') {
-      if (onEnterSingleMatch) {
-        e.preventDefault();
-        onEnterSingleMatch();
-        setIsProductOpen(false);
-        setIsSizeOpen(false);
-      }
+      setIsProductOpen(false);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (isSizeBox) {
-        if (!isSizeDisabled) setIsSizeOpen(true);
-      } else {
+      if (!isProductOpen) {
         setIsProductOpen(true);
+        setHighlightedProductIndex(0);
+      } else {
+        setHighlightedProductIndex((prev) => {
+          const next = Math.min(prev + 1, Math.max(0, filteredProductOptions.length - 1));
+          const el = document.getElementById(`${productInputId}-opt-${next}`);
+          el?.scrollIntoView({ block: 'nearest' });
+          return next;
+        });
       }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isProductOpen) {
+        setIsProductOpen(true);
+        setHighlightedProductIndex(Math.max(0, filteredProductOptions.length - 1));
+      } else {
+        setHighlightedProductIndex((prev) => {
+          const next = Math.max(prev - 1, 0);
+          const el = document.getElementById(`${productInputId}-opt-${next}`);
+          el?.scrollIntoView({ block: 'nearest' });
+          return next;
+        });
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredProductOptions.length > 0) {
+        const chosen = filteredProductOptions[highlightedProductIndex] || filteredProductOptions[0];
+        handleSelectProduct(chosen);
+      } else if (productQuery.trim()) {
+        handleSelectProduct(productQuery.trim());
+      } else if (onEnterSingleMatch) {
+        onEnterSingleMatch();
+      }
+    }
+  };
+
+  // Key navigation for Size Box
+  const handleSizeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsSizeOpen(false);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isSizeOpen) {
+        setIsSizeOpen(true);
+        setHighlightedSizeIndex(0);
+      } else {
+        setHighlightedSizeIndex((prev) => {
+          const next = Math.min(prev + 1, Math.max(0, filteredSizeOptions.length - 1));
+          const el = document.getElementById(`${sizeInputId}-opt-${next}`);
+          el?.scrollIntoView({ block: 'nearest' });
+          return next;
+        });
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isSizeOpen) {
+        setIsSizeOpen(true);
+        setHighlightedSizeIndex(Math.max(0, filteredSizeOptions.length - 1));
+      } else {
+        setHighlightedSizeIndex((prev) => {
+          const next = Math.max(prev - 1, 0);
+          const el = document.getElementById(`${sizeInputId}-opt-${next}`);
+          el?.scrollIntoView({ block: 'nearest' });
+          return next;
+        });
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredSizeOptions.length > 0) {
+        const chosen = filteredSizeOptions[highlightedSizeIndex] || filteredSizeOptions[0];
+        handleSelectSize(chosen);
+      } else if (sizeQuery.trim()) {
+        handleSelectSize(sizeQuery.trim());
+      } else if (onEnterSingleMatch) {
+        onEnterSingleMatch();
+      }
+    } else if (e.key === 'Backspace' && !sizeQuery) {
+      e.preventDefault();
+      setIsSizeOpen(false);
+      const prodEl = document.getElementById(productInputId) as HTMLInputElement | null;
+      if (prodEl) {
+        prodEl.focus();
+        prodEl.select();
+      }
+      setIsProductOpen(true);
     }
   };
 
@@ -210,7 +345,7 @@ export function ProductSizeFilter({
               onProductChange(e.target.value);
               setIsProductOpen(true);
             }}
-            onKeyDown={(e) => handleKeyDown(e, false)}
+            onKeyDown={handleProductKeyDown}
             className="w-full pl-8 pr-14 py-2 rounded-xl border border-slate-300 bg-white text-xs font-medium text-slate-900 placeholder-slate-400 shadow-2xs focus:border-transparent focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors dark:bg-[#161925] dark:border-[#23283B] dark:text-white dark:placeholder-slate-500"
           />
           <div className="absolute inset-y-0 right-0 flex items-center pr-2 gap-0.5">
@@ -248,19 +383,24 @@ export function ProductSizeFilter({
                 No matching products
               </div>
             ) : (
-              filteredProductOptions.map((name) => {
+              filteredProductOptions.map((name, idx) => {
                 const isSelected =
                   name.toLowerCase() === productQuery.trim().toLowerCase();
+                const isHighlighted = idx === highlightedProductIndex;
                 return (
                   <button
+                    id={`${productInputId}-opt-${idx}`}
                     key={name}
                     type="button"
+                    onMouseEnter={() => setHighlightedProductIndex(idx)}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       handleSelectProduct(name);
                     }}
                     className={`w-full px-3 py-2 text-left text-xs font-medium transition cursor-pointer flex items-center justify-between ${
-                      isSelected
+                      isHighlighted
+                        ? 'bg-amber-100 text-amber-950 font-bold dark:bg-amber-900/60 dark:text-amber-100 ring-1 ring-inset ring-amber-400'
+                        : isSelected
                         ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-bold'
                         : 'hover:bg-slate-50 dark:hover:bg-[#1f2438] text-slate-800 dark:text-slate-200'
                     }`}
@@ -313,7 +453,7 @@ export function ProductSizeFilter({
               onSizeChange(e.target.value);
               setIsSizeOpen(true);
             }}
-            onKeyDown={(e) => handleKeyDown(e, true)}
+            onKeyDown={handleSizeKeyDown}
             className={`w-full pl-8 pr-14 py-2 rounded-xl border text-xs font-medium shadow-2xs transition-colors focus:border-transparent focus:outline-none focus:ring-2 focus:ring-amber-500 ${
               isSizeDisabled
                 ? 'border-slate-200 bg-slate-100 text-slate-400 placeholder-slate-400 cursor-not-allowed dark:bg-[#121520] dark:border-[#1a1f2f] dark:text-slate-600 dark:placeholder-slate-600'
@@ -362,19 +502,24 @@ export function ProductSizeFilter({
                 No matching sizes
               </div>
             ) : (
-              filteredSizeOptions.map((size) => {
+              filteredSizeOptions.map((size, idx) => {
                 const isSelected =
                   size.toLowerCase() === sizeQuery.trim().toLowerCase();
+                const isHighlighted = idx === highlightedSizeIndex;
                 return (
                   <button
+                    id={`${sizeInputId}-opt-${idx}`}
                     key={size}
                     type="button"
+                    onMouseEnter={() => setHighlightedSizeIndex(idx)}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       handleSelectSize(size);
                     }}
                     className={`w-full px-3 py-2 text-left text-xs font-medium transition cursor-pointer flex items-center justify-between ${
-                      isSelected
+                      isHighlighted
+                        ? 'bg-amber-100 text-amber-950 font-bold dark:bg-amber-900/60 dark:text-amber-100 ring-1 ring-inset ring-amber-400'
+                        : isSelected
                         ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-bold'
                         : 'hover:bg-slate-50 dark:hover:bg-[#1f2438] text-slate-800 dark:text-slate-200'
                     }`}

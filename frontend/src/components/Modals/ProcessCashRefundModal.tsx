@@ -51,7 +51,7 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
   // Fetch suppliers with positive advance wallet balance
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers', 'with-advances'],
-    queryFn: () => getSuppliers({ page: 1, limit: 100 }),
+    queryFn: () => getSuppliers({ page: 1, limit: 5000 }),
     enabled: isOpen && entityType === 'supplier' && !supplier,
   });
 

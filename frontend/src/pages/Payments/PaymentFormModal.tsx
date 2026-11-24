@@ -94,8 +94,8 @@ export const PaymentFormModal = ({
   });
 
   const { data: suppliersResponse } = useQuery({
-    queryKey: ['suppliers', { page: 1, limit: 100 }],
-    queryFn: () => getSuppliers({ page: 1, limit: 100 }),
+    queryKey: ['suppliers', { page: 1, limit: 5000 }],
+    queryFn: () => getSuppliers({ page: 1, limit: 5000 }),
     enabled: isOpen,
   });
 

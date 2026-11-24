@@ -99,47 +99,57 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
     const displayQty = isItemReturn ? -Math.abs(item.quantity) : item.quantity;
     const unit = item.selected_unit || 'KG';
     const lineTotal = displayQty * item.unit_price;
-    const englishName = item.productName || item.product_name || 'Item';
+    const rawEnglishName = item.productName || item.product_name || 'Item';
 
     // Parse base product name and size/variant to prevent BiDi inversion
-    let baseName = englishName;
+    let baseName = rawEnglishName;
     let sizePart = (item.size || item.product_size || item.variant_size || '').trim();
 
-    if (!sizePart && englishName.includes(' - ')) {
-      const idx = englishName.lastIndexOf(' - ');
-      baseName = englishName.substring(0, idx).trim();
-      sizePart = englishName.substring(idx + 3).trim();
-    } else if (sizePart && englishName.endsWith(` - ${sizePart}`)) {
-      baseName = englishName.slice(0, -(` - ${sizePart}`.length)).trim();
+    // Check if English name has parentheses like "abid gold (9x15)" or "abid gold(9x15)"
+    const parenMatch = rawEnglishName.match(/^(.*?)\s*\(([^)]+)\)$/);
+    if (parenMatch) {
+      baseName = parenMatch[1].trim();
+      if (!sizePart) {
+        sizePart = parenMatch[2].trim();
+      }
+    } else if (!sizePart && rawEnglishName.includes(' - ')) {
+      const idx = rawEnglishName.lastIndexOf(' - ');
+      baseName = rawEnglishName.substring(0, idx).trim();
+      sizePart = rawEnglishName.substring(idx + 3).trim();
+    } else if (sizePart && rawEnglishName.endsWith(` - ${sizePart}`)) {
+      baseName = rawEnglishName.slice(0, -(` - ${sizePart}`.length)).trim();
+    }
+
+    // Clean any remaining parentheses size from baseName so Urdu only has pure name
+    baseName = baseName.replace(/\s*\([^)]*\)$/, '').trim();
+
+    // Ensure English name always has a space before size e.g. "abid gold (9x15)"
+    let englishName = rawEnglishName.replace(/([^\s])\(([^)]+)\)$/, '$1 ($2)');
+    if (sizePart && !englishName.includes(sizePart)) {
+      englishName = `${englishName} (${sizePart})`;
     }
 
     const urduBase = getUrduProductName(baseName, item.name_urdu || item.product_name_urdu, item.category);
-    const urduSize = sizePart ? (getUrduProductName(sizePart) || sizePart) : '';
 
     return `
       <tr style="vertical-align: top; border-bottom: 1px dotted #bbb;">
-        <td style="padding: 2.5px 1px; width: 52%; text-align: left; vertical-align: top;">
-          <div style="font-weight: bold; font-size: 10px; line-height: 1.2; text-align: left; color: #000;">
+        <td style="padding: 3px 1px; width: 50%; text-align: left; vertical-align: top;">
+          <div style="font-family: Tahoma, Verdana, Arial, sans-serif; font-weight: 800; font-size: 12.5px; line-height: 1.25; letter-spacing: 0.2px; text-align: left; color: #000;">
             ${isItemReturn ? '[REFUND] ' : ''}${englishName}
           </div>
           ${urduBase ? `
-            <div style="font-size: 10px; font-weight: bold; color: #000; text-align: left; line-height: 1.25; margin-top: 1px; direction: ltr; unicode-bidi: isolate;">
+            <div style="font-size: 12px; font-weight: bold; color: #000; text-align: left; line-height: 1.3; margin-top: 1px; direction: ltr; unicode-bidi: isolate;">
               <span dir="rtl" style="font-family: 'Segoe UI', Tahoma, Arial, sans-serif;">${urduBase}</span>
-              ${urduSize ? `
-                <span dir="ltr" style="font-family: Arial, sans-serif; font-size: 9.5px; margin-left: 2px;">
-                  &lrm;- ${urduSize}&lrm;
-                </span>
-              ` : ''}
             </div>
           ` : ''}
         </td>
-        <td style="padding: 2.5px 1px; width: 14%; text-align: center; vertical-align: top; font-size: 9.5px; font-weight: 600;">
+        <td style="padding: 3px 1px; width: 14%; text-align: center; vertical-align: top; font-family: Tahoma, Arial, sans-serif; font-size: 11.5px; font-weight: 700;">
           ${displayQty}
         </td>
-        <td style="padding: 2.5px 1px; width: 17%; text-align: right; vertical-align: top; font-size: 9.5px;">
+        <td style="padding: 3px 1px; width: 18%; text-align: right; vertical-align: top; font-family: Tahoma, Arial, sans-serif; font-size: 11.5px; font-weight: 700;">
           ${Number(item.unit_price).toLocaleString()}
         </td>
-        <td style="padding: 2.5px 3px 2.5px 1px; width: 17%; text-align: right; vertical-align: top; font-weight: bold; font-size: 9.5px;">
+        <td style="padding: 3px 3px 3px 1px; width: 18%; text-align: right; vertical-align: top; font-family: Tahoma, Arial, sans-serif; font-weight: 800; font-size: 11.5px;">
           ${lineTotal.toLocaleString()}
         </td>
       </tr>
@@ -151,12 +161,12 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
       <!-- Logo & Header -->
       <div class="text-center" style="margin-bottom: 3px;">
         <img src="${sabirLogoThermal}" alt="Logo" style="height: 38px; max-width: 140px; object-fit: contain; margin-bottom: 2px;" />
-        <h1 style="font-size: 13.5px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 3px; font-family: 'Arial Black', Arial, sans-serif;">SABIR PLASTIC STORE</h1>
+        <h1 style="font-size: 15px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 3px; font-family: 'Arial Black', Arial, sans-serif;">SABIR PLASTIC STORE</h1>
         
         <!-- Address & Phones Box -->
-        <div style="border: 1.5px solid #000; border-radius: 4px; padding: 2.5px 2px; margin-bottom: 4px; text-align: center; box-sizing: border-box;">
-          <div style="font-size: 9px; font-weight: bold; color: #000; line-height: 1.2;">Tower Market, Hyderabad</div>
-          <div style="font-size: 7.8px; font-weight: bold; color: #000; line-height: 1.25; margin-top: 1.5px; letter-spacing: -0.2px;">
+        <div style="border: 1.5px solid #000; border-radius: 4px; padding: 3px 2px; margin-bottom: 4px; text-align: center; box-sizing: border-box;">
+          <div style="font-size: 10.5px; font-weight: bold; color: #000; line-height: 1.2;">Tower Market, Hyderabad</div>
+          <div style="font-size: 9.2px; font-weight: bold; color: #000; line-height: 1.25; margin-top: 1.5px; letter-spacing: -0.1px;">
             022-2612107 | 0333-2396918 | 0333-2696653
           </div>
         </div>
@@ -168,27 +178,27 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
           <!-- Solid Black Left Half -->
           <rect x="0" y="0" width="105" height="22" fill="#000000" />
           <!-- White SALE BILL Text -->
-          <text x="52.5" y="15" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="10.5" text-anchor="middle" letter-spacing="0.5">
+          <text x="52.5" y="15" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="11" text-anchor="middle" letter-spacing="0.5">
             ${isRefund ? 'REFUND BILL' : 'SALE BILL'}
           </text>
           <!-- Center Divider -->
           <line x1="105" y1="0" x2="105" y2="22" stroke="#000000" stroke-width="1.5" />
           <!-- Black Original / Duplicate Text -->
-          <text x="152.5" y="15" fill="#000000" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="${asDuplicate ? '9' : '9.5'}" text-anchor="middle">
+          <text x="152.5" y="15" fill="#000000" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="${asDuplicate ? '9.5' : '10'}" text-anchor="middle">
             ${asDuplicate ? 'Duplicate' : 'Original'}
           </text>
         </svg>
       </div>
 
       <!-- Invoice Details -->
-      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin-bottom: 4px; font-size: 9px; line-height: 1.35;">
+      <div style="border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3.5px 0; margin-bottom: 4px; font-size: 11px; line-height: 1.4;">
         <div class="flex">
           <span style="font-weight: bold;">Bill No:</span>
-          <span style="font-weight: 900; font-size: 11px; font-family: monospace;">${billNumber}</span>
+          <span style="font-weight: 900; font-size: 13px; font-family: Tahoma, Arial, sans-serif;">${billNumber}</span>
         </div>
         <div class="flex">
           <span>Date:</span>
-          <span>${invoiceDate}</span>
+          <span style="font-weight: 600;">${invoiceDate}</span>
         </div>
         <div class="flex">
           <span>Customer:</span>
@@ -202,39 +212,35 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
         ` : ''}
         <div class="flex">
           <span>Cashier:</span>
-          <span>${cashierName}</span>
+          <span style="font-weight: 600;">${cashierName}</span>
         </div>
       </div>
 
       <!-- Items Table (66mm width with safety right margin) -->
-      <table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 4px; font-size: 9px;">
+      <table style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 4px; font-size: 11px;">
         <thead>
-          <tr style="border-bottom: 1px solid #000; font-weight: bold;">
-            <th style="padding: 2px 1px; width: 52%; text-align: left;">Item</th>
-            <th style="padding: 2px 1px; width: 14%; text-align: center;">KG</th>
-            <th style="padding: 2px 1px; width: 17%; text-align: right;">Rate</th>
-            <th style="padding: 2px 3px 2px 1px; width: 17%; text-align: right;">Total</th>
+          <tr style="border-bottom: 1.5px solid #000; font-weight: bold;">
+            <th style="padding: 2.5px 1px; width: 50%; text-align: left;">Item</th>
+            <th style="padding: 2.5px 1px; width: 14%; text-align: center;">KG</th>
+            <th style="padding: 2.5px 1px; width: 18%; text-align: right;">Rate</th>
+            <th style="padding: 2.5px 3px 2.5px 1px; width: 18%; text-align: right;">Total</th>
           </tr>
         </thead>
         <tbody>
           ${itemsHtml}
         </tbody>
         <tfoot>
-          <tr style="border-top: 1px dashed #000; font-weight: bold; font-size: 9.5px;">
-            <td style="padding: 2.5px 1px; width: 52%; text-align: left;">Total Weight:</td>
-            <td style="padding: 2.5px 1px; width: 14%; text-align: center; white-space: nowrap;">${formattedTotalWeight} KG</td>
-            <td style="padding: 2.5px 1px; width: 17%;"></td>
-            <td style="padding: 2.5px 3px 2.5px 1px; width: 17%;"></td>
+          <tr style="border-top: 1px dashed #000; font-weight: bold; font-size: 11.5px;">
+            <td style="padding: 3px 1px; width: 50%; text-align: left;">Total Weight:</td>
+            <td style="padding: 3px 1px; width: 14%; text-align: center; white-space: nowrap;">${formattedTotalWeight} KG</td>
+            <td style="padding: 3px 1px; width: 18%;"></td>
+            <td style="padding: 3px 3px 3px 1px; width: 18%;"></td>
           </tr>
         </tfoot>
       </table>
 
       <!-- Financial Summary -->
-      <div style="padding-top: 1px; margin-bottom: 4px; font-size: 9.5px;">
-        <div class="flex" style="margin-bottom: 2px; padding-right: 2px; font-weight: bold;">
-          <span>Total Weight:</span>
-          <span>${formattedTotalWeight} KG</span>
-        </div>
+      <div style="padding-top: 2px; margin-bottom: 4px; font-size: 11.5px; font-family: Tahoma, Arial, sans-serif;">
         ${asDuplicate ? `
           ${slipCharges > 0 ? `
             <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
@@ -242,14 +248,14 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
               <span>+ Rs. ${slipCharges.toLocaleString()}</span>
             </div>
           ` : ''}
-          <div class="flex" style="font-weight: 900; font-size: 11px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 2px 0; padding-right: 2px;">
+          <div class="flex" style="font-weight: 900; font-size: 13px; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 3px 0; margin: 2px 0; padding-right: 2px;">
             <span>TOTAL:</span>
             <span>Rs. ${Math.abs(totalAmount).toLocaleString()}</span>
           </div>
         ` : `
           <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
             <span>Gross Subtotal:</span>
-            <span style="font-weight: 600;">Rs. ${subtotal.toLocaleString()}</span>
+            <span style="font-weight: 700;">Rs. ${subtotal.toLocaleString()}</span>
           </div>
           ${discount > 0 ? `
             <div class="flex" style="margin-bottom: 2px; padding-right: 2px;">
@@ -269,48 +275,48 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
               <span>+ Rs. ${slipCharges.toLocaleString()}</span>
             </div>
           ` : ''}
-          <div class="flex" style="font-weight: 900; font-size: 11px; border-top: 1px solid #000; border-bottom: 1px solid #000; padding: 2.5px 0; margin: 2px 0; padding-right: 2px;">
+          <div class="flex" style="font-weight: 900; font-size: 13px; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 3px 0; margin: 2.5px 0; padding-right: 2px;">
             <span>${isRefund ? 'REFUND DUE:' : 'NET PAYABLE:'}</span>
             <span>Rs. ${Math.abs(totalAmount).toLocaleString()}</span>
           </div>
           ${!isRefund ? `
             ${isSplit ? `
-              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+              <div class="flex" style="font-weight: 700; margin-bottom: 2px; padding-right: 2px;">
                 <span>Payment Mode:</span>
                 <span style="font-weight: bold;">Split (Cash + Bank)</span>
               </div>
-              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+              <div class="flex" style="font-weight: 700; margin-bottom: 2px; padding-right: 2px;">
                 <span>Cash Paid / نقد:</span>
                 <span style="font-weight: bold;">Rs. ${splitCash.toLocaleString()}</span>
               </div>
-              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+              <div class="flex" style="font-weight: 700; margin-bottom: 2px; padding-right: 2px;">
                 <span>Bank Transfer${bankNameStr} / بینک:</span>
                 <span style="font-weight: bold;">Rs. ${splitBank.toLocaleString()}</span>
               </div>
             ` : isBank ? `
-              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+              <div class="flex" style="font-weight: 700; margin-bottom: 2px; padding-right: 2px;">
                 <span>Bank Transfer${bankNameStr}:</span>
                 <span>Rs. ${paidAmount.toLocaleString()}</span>
               </div>
             ` : isCheque ? `
-              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+              <div class="flex" style="font-weight: 700; margin-bottom: 2px; padding-right: 2px;">
                 <span>Cheque Payment${bankNameStr}:</span>
                 <span>Rs. ${paidAmount.toLocaleString()}</span>
               </div>
             ` : `
-              <div class="flex" style="font-weight: 600; margin-bottom: 2px; padding-right: 2px;">
+              <div class="flex" style="font-weight: 700; margin-bottom: 2px; padding-right: 2px;">
                 <span>Cash Tendered:</span>
                 <span>Rs. ${cashTendered.toLocaleString()}</span>
               </div>
             `}
             ${changeReturn > 0 ? `
-              <div class="flex" style="font-weight: bold; font-size: 10px; background: #eee; padding: 1.5px 3px; border: 1px dashed #000; margin-top: 2px;">
+              <div class="flex" style="font-weight: bold; font-size: 12px; background: #eee; padding: 2px 3px; border: 1px dashed #000; margin-top: 2px;">
                 <span>Change Due:</span>
                 <span>Rs. ${changeReturn.toLocaleString()}</span>
               </div>
             ` : ''}
             ${balanceDue > 0 ? `
-              <div class="flex" style="font-weight: bold; font-size: 10.5px; border-top: 1px dashed #000; padding: 2px 0; margin-top: 2px;">
+              <div class="flex" style="font-weight: bold; font-size: 12px; border-top: 1px dashed #000; padding: 2.5px 0; margin-top: 2px;">
                 <span>Balance Due / باقی:</span>
                 <span>Rs. ${balanceDue.toLocaleString()}</span>
               </div>
@@ -320,14 +326,14 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
       </div>
 
       <!-- Footer Notes -->
-      <div style="text-align: center; font-size: 8px; margin-top: 2px; padding-top: 2px; border-top: 1px dashed #000; line-height: 1.2;">
+      <div style="text-align: center; font-size: 10px; margin-top: 2px; padding-top: 2.5px; border-top: 1px dashed #000; line-height: 1.25;">
         <p style="font-weight: bold;">Thank You For Your Business!</p>
         <div style="border: 1.5px solid #000; border-radius: 4px; padding: 3px 4px; margin: 3px auto 2px auto; text-align: center; box-sizing: border-box;">
-          <p style="font-size: 9.5px; font-weight: bold; color: #000; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; text-align: center; line-height: 1.35; margin: 0;" dir="rtl">
+          <p style="font-size: 11px; font-weight: bold; color: #000; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; text-align: center; line-height: 1.35; margin: 0;" dir="rtl">
             نوٹ: مال نہ ملنے کی صورت میں 15 دن میں رابطہ کریں اس کے بعد کمپنی ذمہ دار نہیں ہوگی۔ شکریہ
           </p>
         </div>
-        <p style="font-size: 9.5px; color: #111; margin-top: 4px;">*software manufactured by PENTACORE SOLUTION </br> ph no 0335-3392443 / 0333-8200344*</p>
+        <p style="font-size: 10px; color: #111; margin-top: 4px;">*software manufactured by PENTACORE SOLUTION </br> ph no 0335-3392443 / 0333-8200344*</p>
       </div>
     </div>
   `;
@@ -379,9 +385,9 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
             min-height: 0 !important;
             background: #ffffff !important;
             color: #000000 !important;
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 10px;
-            line-height: 1.25;
+            font-family: Tahoma, Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            line-height: 1.3;
           }
           .receipt-container {
             width: 76mm;

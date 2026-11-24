@@ -16,7 +16,7 @@ import { AddCustomerModal } from './AddCustomerModal';
 import { ShiftAuditModal } from './ShiftAuditModal';
 import { HeldOrdersModal } from './HeldOrdersModal';
 import { HoldConfirmModal } from './HoldConfirmModal';
-import { compareProducts, formatProductTitle } from '../../utils/productSorting';
+import { compareProducts, formatProductTitle, formatSizeOnly } from '../../utils/productSorting';
 import { invalidateSalesInvoiceQueries, invalidateAllDomains } from '../../utils/querySync';
 import { erpSyncBus, useErpSync } from '../../utils/erpSyncBus';
 
@@ -231,6 +231,42 @@ export default function POSPage() {
       setProductQuery('');
       setSizeQuery('');
       focusField('pos-product-search', true);
+    }
+  };
+
+  const handleSelectAndAddToCart = (productName: string, size?: string) => {
+    const cleanName = (productName || '').trim().toLowerCase();
+    const cleanSize = (size || '').trim().toLowerCase();
+
+    // 1. Exact match by name & size
+    let matchedProduct = sortedProducts.find((p) => {
+      const pName = (p.name || '').trim().toLowerCase();
+      const pSize = (p.size || '').trim().toLowerCase();
+      const pSizeOnly = formatSizeOnly(p, p.name).toLowerCase();
+      return pName === cleanName && (pSize === cleanSize || pSizeOnly === cleanSize);
+    });
+
+    // 2. Substring match by size
+    if (!matchedProduct && cleanSize) {
+      matchedProduct = sortedProducts.find((p) => {
+        const pName = (p.name || '').trim().toLowerCase();
+        const pSize = (p.size || '').trim().toLowerCase();
+        return pName === cleanName && pSize.includes(cleanSize);
+      });
+    }
+
+    // 3. Fallback to product name match
+    if (!matchedProduct) {
+      matchedProduct = sortedProducts.find((p) => {
+        const pName = (p.name || '').trim().toLowerCase();
+        return pName === cleanName;
+      });
+    }
+
+    if (matchedProduct) {
+      addToCart(matchedProduct);
+      setProductQuery('');
+      setSizeQuery('');
     }
   };
 
@@ -639,11 +675,21 @@ export default function POSPage() {
         return;
       }
 
-      // Focus Product Search: Alt + S or F2
+      // Focus Product Search: Alt + S or F2, or Enter key when idle
       if ((e.altKey && (e.key === 's' || e.key === 'S')) || e.key === 'F2') {
         e.preventDefault();
         focusField('pos-product-search', true);
         return;
+      }
+
+      if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        const active = document.activeElement;
+        const isEditingInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
+        if (!isEditingInput) {
+          e.preventDefault();
+          focusField('pos-product-search', true);
+          return;
+        }
       }
 
       // Focus Amount Paid: Alt + A or F10
@@ -849,7 +895,9 @@ return (
                 focusField('pos-product-search', true);
               }}
               onEnterSingleMatch={handleEnterSingleMatch}
+              onSelectAndAddToCart={handleSelectAndAddToCart}
               productInputId="pos-product-search"
+              sizeInputId="pos-size-search"
               productInputRef={searchInputRef}
               showLabels={false}
               className="w-full"

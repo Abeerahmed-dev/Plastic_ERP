@@ -396,6 +396,293 @@ export async function findPurchaseInvoiceById(id: string) {
   return { ...invoice, items, linked_debit_notes };
 }
 
+function sanitizePurchaseItems(items: any[]) {
+  return (items || []).map((item: any) => {
+    const quantity_kg = Number((item.quantity_kg ?? item.quantity) || 0);
+    const rawUnitPrice = item.price_per_kg ?? item.unit_price ?? item.price ?? 0;
+    const unit_price = Math.round(Number(rawUnitPrice) * 100) / 100;
+    const total_price = item.total_price !== undefined || item.total !== undefined
+      ? Math.round(Number(item.total_price ?? item.total) * 100) / 100
+      : Math.round((quantity_kg * unit_price) * 100) / 100;
+
+    return {
+      ...item,
+      quantity_kg,
+      unit_price,
+      price_per_kg: unit_price,
+      total_price,
+      total: total_price,
+    };
+  });
+}
+
+async function applyNewPurchaseItemInventory(
+  trx: Knex.Transaction,
+  params: {
+    invoice: { id: string; invoice_number: string };
+    item: any;
+    index: number;
+    freightPerKg: number;
+    createdBy?: string | null;
+    hasBatchBuyPriceCol: boolean;
+  }
+) {
+  const { invoice, item, index, freightPerKg, createdBy, hasBatchBuyPriceCol } = params;
+  const quantity_kg = item.quantity_kg;
+  const base_price_per_kg = item.unit_price;
+  const itemTotal = item.total_price;
+
+  const item_dc_per_kg = Math.round(freightPerKg * 10000) / 10000;
+  // Landed cost includes delivery charges allocated per kg
+  const price_per_kg = Math.round((base_price_per_kg + item_dc_per_kg) * 100) / 100;
+
+  // Fetch Product with write lock for concurrency safety
+  const productWithCat = await trx('products as p')
+    .where('p.id', item.product_id)
+    .forUpdate()
+    .select('p.id', 'p.name', 'p.size', 'p.total_stock_kg', 'p.rolling_avg_cost_per_kg')
+    .first();
+
+  if (!productWithCat) {
+    throw new Error(`Product not found for product ID ${item.product_id}`);
+  }
+
+  const incoming_kg = quantity_kg;
+  const purchase_cost_per_kg = price_per_kg;
+
+  // ── Rolling Auto-Reconciliation (The Interceptor) ──
+  // Scan pending_deliveries queue FIFO and instantly fulfill waiting orders before stock hits general warehouse shelves
+  const pendingQueue = await trx('pending_deliveries')
+    .where('product_id', item.product_id)
+    .whereIn('status', ['PENDING', 'PARTIAL'])
+    .orderBy('created_at', 'asc') // Oldest first (FIFO fulfillment)
+    .forUpdate();
+
+  let availableIncomingKg = incoming_kg;
+
+  for (const delivery of pendingQueue) {
+    if (availableIncomingKg <= 0) break;
+
+    const currentPending = Number(delivery.pending_qty || 0);
+    if (currentPending <= 0) continue;
+
+    let qtyToDeliver = 0;
+    let newPendingQty = 0;
+    let newFulfilledQty = Number(delivery.fulfilled_qty || 0);
+    let newStatus: 'PARTIAL' | 'FULFILLED' = 'FULFILLED';
+
+    if (availableIncomingKg >= currentPending) {
+      qtyToDeliver = currentPending;
+      availableIncomingKg -= currentPending;
+      newPendingQty = 0;
+      newFulfilledQty += qtyToDeliver;
+      newStatus = 'FULFILLED';
+    } else {
+      qtyToDeliver = availableIncomingKg;
+      newPendingQty = currentPending - qtyToDeliver;
+      newFulfilledQty += qtyToDeliver;
+      availableIncomingKg = 0;
+      newStatus = 'PARTIAL';
+    }
+
+    await trx('pending_deliveries')
+      .where('id', delivery.id)
+      .update({
+        pending_qty: newPendingQty,
+        fulfilled_qty: newFulfilledQty,
+        status: newStatus,
+        updated_at: new Date(),
+      });
+
+    const deliveryActualCost = Math.round(qtyToDeliver * purchase_cost_per_kg * 100) / 100;
+
+    let targetItemId = delivery.sales_invoice_item_id;
+    if (!targetItemId) {
+      const fallbackItem = await trx('sales_invoice_items')
+        .where({ invoice_id: delivery.sales_invoice_id, product_id: delivery.product_id })
+        .first();
+      targetItemId = fallbackItem?.id;
+    }
+
+    if (targetItemId) {
+      const invoiceItem = await trx('sales_invoice_items')
+        .where('id', targetItemId)
+        .first();
+
+      if (invoiceItem) {
+        const currentActualCogs = Number(invoiceItem.actual_cogs || 0);
+        const updatedActualCogs = Math.round((currentActualCogs + deliveryActualCost) * 100) / 100;
+
+        const updatePayload: any = {
+          actual_cogs: updatedActualCogs,
+          updated_at: new Date(),
+        };
+
+        if (newStatus === 'FULFILLED') {
+          const remainingForThisItem = await trx('pending_deliveries')
+            .where('sales_invoice_item_id', targetItemId)
+            .whereIn('status', ['PENDING', 'PARTIAL'])
+            .first();
+
+          if (!remainingForThisItem) {
+            updatePayload.estimated_cogs = updatedActualCogs;
+            const soldKg = Number(invoiceItem.net_kg_processed || invoiceItem.quantity || 1);
+            if (soldKg > 0) {
+              updatePayload.applied_cogs_per_kg = Math.round((updatedActualCogs / soldKg) * 10000) / 10000;
+            }
+          }
+        } else {
+          const currentEstimated = Number(invoiceItem.estimated_cogs || 0);
+          const placeholderRate = currentPending > 0
+            ? Math.max(0, (currentEstimated - currentActualCogs) / currentPending)
+            : purchase_cost_per_kg;
+          const newEstimatedCogs = Math.round((updatedActualCogs + (newPendingQty * placeholderRate)) * 100) / 100;
+          updatePayload.estimated_cogs = newEstimatedCogs;
+          const soldKg = Number(invoiceItem.net_kg_processed || invoiceItem.quantity || 1);
+          if (soldKg > 0) {
+            updatePayload.applied_cogs_per_kg = Math.round((newEstimatedCogs / soldKg) * 10000) / 10000;
+          }
+        }
+
+        await trx('sales_invoice_items')
+          .where('id', targetItemId)
+          .update(updatePayload);
+      }
+    }
+
+    const parentSalesInvoice = await trx('sales_invoices')
+      .where('id', delivery.sales_invoice_id)
+      .select('invoice_number')
+      .first();
+
+    await trx('inventory_transactions').insert({
+      product_id: item.product_id,
+      transaction_type: 'SALE',
+      quantity_kg: qtyToDeliver,
+      unit_cost: purchase_cost_per_kg,
+      total_asset_value: deliveryActualCost,
+      capital_equity_value: 0,
+      notes: `Rolling Fulfillment: Direct Dispatch ${qtyToDeliver} KG from Purchase ${invoice.invoice_number} to Sales Invoice ${parentSalesInvoice?.invoice_number || delivery.sales_invoice_id}`,
+      created_by: createdBy || null,
+    });
+  }
+
+  // Remainder of incoming batch (if any) to standard available warehouse inventory
+  const remainder_kg = availableIncomingKg;
+
+  // ── Weighted Average Costing (WAC) Formula for remainder ──
+  const currentStock = Number(productWithCat.total_stock_kg || 0);
+  const currentAvgCost = Number(productWithCat.rolling_avg_cost_per_kg || 0);
+
+  const currentTotalVal = currentStock * currentAvgCost;
+  const remainderVal = remainder_kg * purchase_cost_per_kg;
+  const newTotalStock = currentStock + remainder_kg;
+
+  const newRollingAvg = newTotalStock > 0
+    ? Math.round(((currentTotalVal + remainderVal) / newTotalStock) * 10000) / 10000
+    : (currentAvgCost > 0 ? currentAvgCost : purchase_cost_per_kg);
+
+  await trx('products')
+    .where('id', item.product_id)
+    .update({
+      total_stock_kg: newTotalStock,
+      rolling_avg_cost_per_kg: newRollingAvg,
+      cost_price: purchase_cost_per_kg,
+      updated_at: new Date(),
+    });
+
+  // ── Dedicated Batch Creation Tied to Parent Purchase Invoice ──
+  const landedCostPerKg = Math.round((item.unit_price + freightPerKg) * 100) / 100;
+  const roundedCostPerKg = landedCostPerKg;
+  const itemSize = (item.size && String(item.size).trim().length > 0)
+    ? String(item.size).trim()
+    : (productWithCat.size && String(productWithCat.size).trim().length > 0 ? String(productWithCat.size).trim() : 'Standard');
+  const batchNum = `PB-${invoice.invoice_number || invoice.id.slice(0, 8)}-${item.product_id.slice(0, 4)}-${Date.now()}-${index + 1}`;
+
+  const batchData: Record<string, any> = {
+    product_id: item.product_id,
+    purchase_invoice_id: invoice.id,
+    batch_number: batchNum,
+    batch_buy_price_per_kg: roundedCostPerKg,
+    original_qty: incoming_kg,
+    remaining_qty: remainder_kg,
+    status: remainder_kg > 0 ? 'ACTIVE' : 'DEPLETED',
+    size: itemSize,
+  };
+
+  if (!hasBatchBuyPriceCol) {
+    batchData.buy_price_per_kg = roundedCostPerKg;
+    delete batchData.batch_buy_price_per_kg;
+  }
+
+  await trx('inventory_batches').insert(batchData);
+
+  return {
+    purchase_invoice_id: invoice.id,
+    product_id: item.product_id,
+    size: itemSize,
+    quantity: quantity_kg,
+    selected_unit: item.selected_unit || 'KG',
+    actual_weight_per_unit: 1.0,
+    net_kg_processed: incoming_kg,
+    net_kg_added: remainder_kg,
+    actual_weight_kg: incoming_kg,
+    unit_price: base_price_per_kg,
+    total_price: itemTotal,
+    delivery_charge_per_kg: item_dc_per_kg,
+    landed_cost_per_kg: price_per_kg,
+  };
+}
+
+async function recomputeProductsWac(
+  trx: Knex.Transaction,
+  productIds: Iterable<string>,
+  hasBatchBuyPriceCol: boolean,
+  productLatestCostOverride?: Map<string, number>
+) {
+  for (const productId of productIds) {
+    const activeBatches = await trx('inventory_batches')
+      .where('product_id', productId)
+      .where('status', 'ACTIVE')
+      .select('remaining_qty', hasBatchBuyPriceCol ? 'batch_buy_price_per_kg' : 'buy_price_per_kg');
+
+    let totalRem = 0;
+    let totalVal = 0;
+    for (const b of activeBatches) {
+      const rem = Number(b.remaining_qty || 0);
+      const cost = Number(b.batch_buy_price_per_kg ?? b.buy_price_per_kg ?? 0);
+      totalRem += rem;
+      totalVal += rem * cost;
+    }
+
+    const updateFields: Record<string, any> = {
+      updated_at: new Date(),
+    };
+
+    if (totalRem > 0) {
+      updateFields.rolling_avg_cost_per_kg = Math.round((totalVal / totalRem) * 10000) / 10000;
+    }
+
+    if (productLatestCostOverride && productLatestCostOverride.has(productId)) {
+      updateFields.cost_price = productLatestCostOverride.get(productId);
+    } else if (productLatestCostOverride) {
+      const latestBatch = await trx('inventory_batches')
+        .where('product_id', productId)
+        .whereNot('status', 'VOID')
+        .orderBy('created_at', 'desc')
+        .select(hasBatchBuyPriceCol ? 'batch_buy_price_per_kg' : 'buy_price_per_kg')
+        .first();
+      if (latestBatch) {
+        updateFields.cost_price = Number(latestBatch.batch_buy_price_per_kg ?? latestBatch.buy_price_per_kg ?? 0);
+      }
+    }
+
+    if (Object.keys(updateFields).length > 1) {
+      await trx('products').where('id', productId).update(updateFields);
+    }
+  }
+}
+
 /**
  * Weighted Average Costing (WAC) Purchase Execution
  * Creates dedicated inventory batches with purchase_invoice_id foreign key.
@@ -404,24 +691,7 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
   return await db.transaction(async (trx: Knex.Transaction) => {
     const invoice_number = await generatePurchaseInvoiceNumber();
 
-    // Map through the incoming array and force truncation to 2 decimal places
-    const sanitizedItems = (data.items || []).map((item: any) => {
-      const quantity_kg = Number((item.quantity_kg ?? item.quantity) || 0);
-      const rawUnitPrice = item.price_per_kg ?? item.unit_price ?? item.price ?? 0;
-      const unit_price = Math.round(Number(rawUnitPrice) * 100) / 100;
-      const total_price = item.total_price !== undefined || item.total !== undefined
-        ? Math.round(Number(item.total_price ?? item.total) * 100) / 100
-        : Math.round((quantity_kg * unit_price) * 100) / 100;
-
-      return {
-        ...item,
-        quantity_kg,
-        unit_price,
-        price_per_kg: unit_price,
-        total_price,
-        total: total_price,
-      };
-    });
+    const sanitizedItems = sanitizePurchaseItems(data.items);
 
     let subtotal = 0;
     for (const item of sanitizedItems) {
@@ -442,10 +712,6 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     const freightPerKg = totalInvoiceKg > 0 ? (delivery_charges / totalInvoiceKg) : 0;
 
     // Phase 2: Severing the OPEX Double-Dip
-    // Inbound freight is capitalized into inventory asset value (buy_price_per_kg of inventory_batches).
-    // Inbound freight is a direct component of COGS, NOT an immediate below-the-line OPEX.
-    // It sits on the Balance Sheet as "Unsold Stock" and only hits the Income Statement as COGS when sold via FIFO.
-    // Automatic OPEX record creation in expenses is removed.
     const initialBalanceDue = Math.round((total_amount - initialPaidAmount) * 100) / 100;
     const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
     const hasReturnsCol = await trx.schema.hasColumn('purchase_invoices', 'has_returns');
@@ -477,234 +743,22 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
       .insert(invoicePayload)
       .returning('*');
 
+    const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
     const itemsToInsert = [];
 
     for (let i = 0; i < sanitizedItems.length; i++) {
-      const item = sanitizedItems[i];
-      const quantity_kg = item.quantity_kg;
-      const base_price_per_kg = item.unit_price;
-      const itemTotal = item.total_price;
-
-      const item_dc_per_kg = Math.round(freightPerKg * 10000) / 10000;
-      // Landed cost includes delivery charges allocated per kg
-      const price_per_kg = Math.round((base_price_per_kg + item_dc_per_kg) * 100) / 100;
-
-      // Fetch Product with write lock for concurrency safety
-      const productWithCat = await trx('products as p')
-        .where('p.id', item.product_id)
-        .forUpdate()
-        .select('p.id', 'p.name', 'p.size', 'p.total_stock_kg', 'p.rolling_avg_cost_per_kg')
-        .first();
-
-      if (!productWithCat) {
-        throw new Error(`Product not found for product ID ${item.product_id}`);
-      }
-
-
-      const incoming_kg = quantity_kg;
-      const purchase_cost_per_kg = price_per_kg;
-
-      // ── Rolling Auto-Reconciliation (The Interceptor) ──
-      // Scan pending_deliveries queue FIFO and instantly fulfill waiting orders before stock hits general warehouse shelves
-      const pendingQueue = await trx('pending_deliveries')
-        .where('product_id', item.product_id)
-        .whereIn('status', ['PENDING', 'PARTIAL'])
-        .orderBy('created_at', 'asc') // Oldest first (FIFO fulfillment)
-        .forUpdate();
-
-      let availableIncomingKg = incoming_kg;
-
-      for (const delivery of pendingQueue) {
-        if (availableIncomingKg <= 0) break;
-
-        const currentPending = Number(delivery.pending_qty || 0);
-        if (currentPending <= 0) continue;
-
-        let qtyToDeliver = 0;
-        let newPendingQty = 0;
-        let newFulfilledQty = Number(delivery.fulfilled_qty || 0);
-        let newStatus: 'PARTIAL' | 'FULFILLED' = 'FULFILLED';
-
-        if (availableIncomingKg >= currentPending) {
-          // If incoming_qty >= pending_qty:
-          // Deduct pending_qty from the incoming batch, mark the queue row as FULFILLED,
-          // and update the original sales invoice actual_cogs with this new purchase price.
-          qtyToDeliver = currentPending;
-          availableIncomingKg -= currentPending;
-          newPendingQty = 0;
-          newFulfilledQty += qtyToDeliver;
-          newStatus = 'FULFILLED';
-        } else {
-          // If incoming_qty < pending_qty:
-          // Fulfill only the incoming_qty, update the queue row to PARTIAL,
-          // deduct incoming_qty from the pending_qty, and update a proportional amount of the actual_cogs on the sales invoice.
-          // The incoming batch is now 0.
-          qtyToDeliver = availableIncomingKg;
-          newPendingQty = currentPending - qtyToDeliver;
-          newFulfilledQty += qtyToDeliver;
-          availableIncomingKg = 0;
-          newStatus = 'PARTIAL';
-        }
-
-        // Update pending_deliveries row
-        await trx('pending_deliveries')
-          .where('id', delivery.id)
-          .update({
-            pending_qty: newPendingQty,
-            fulfilled_qty: newFulfilledQty,
-            status: newStatus,
-            updated_at: new Date(),
-          });
-
-        const deliveryActualCost = Math.round(qtyToDeliver * purchase_cost_per_kg * 100) / 100;
-
-        // True Cost Correction: Update actual_cogs on original sales invoice item
-        let targetItemId = delivery.sales_invoice_item_id;
-        if (!targetItemId) {
-          const fallbackItem = await trx('sales_invoice_items')
-            .where({ invoice_id: delivery.sales_invoice_id, product_id: delivery.product_id })
-            .first();
-          targetItemId = fallbackItem?.id;
-        }
-
-        if (targetItemId) {
-          const invoiceItem = await trx('sales_invoice_items')
-            .where('id', targetItemId)
-            .first();
-
-          if (invoiceItem) {
-            const currentActualCogs = Number(invoiceItem.actual_cogs || 0);
-            const updatedActualCogs = Math.round((currentActualCogs + deliveryActualCost) * 100) / 100;
-
-            const updatePayload: any = {
-              actual_cogs: updatedActualCogs,
-              updated_at: new Date(),
-            };
-
-            if (newStatus === 'FULFILLED') {
-              const remainingForThisItem = await trx('pending_deliveries')
-                .where('sales_invoice_item_id', targetItemId)
-                .whereIn('status', ['PENDING', 'PARTIAL'])
-                .first();
-
-              if (!remainingForThisItem) {
-                // True Cost Correction: Overwrite estimated_cogs with actual_cogs to perfectly reconcile profit reports
-                updatePayload.estimated_cogs = updatedActualCogs;
-                const soldKg = Number(invoiceItem.net_kg_processed || invoiceItem.quantity || 1);
-                if (soldKg > 0) {
-                  updatePayload.applied_cogs_per_kg = Math.round((updatedActualCogs / soldKg) * 10000) / 10000;
-                }
-              }
-            } else {
-              // Proportional partial fulfillment update
-              const currentEstimated = Number(invoiceItem.estimated_cogs || 0);
-              const placeholderRate = currentPending > 0
-                ? Math.max(0, (currentEstimated - currentActualCogs) / currentPending)
-                : purchase_cost_per_kg;
-              const newEstimatedCogs = Math.round((updatedActualCogs + (newPendingQty * placeholderRate)) * 100) / 100;
-              updatePayload.estimated_cogs = newEstimatedCogs;
-              const soldKg = Number(invoiceItem.net_kg_processed || invoiceItem.quantity || 1);
-              if (soldKg > 0) {
-                updatePayload.applied_cogs_per_kg = Math.round((newEstimatedCogs / soldKg) * 10000) / 10000;
-              }
-            }
-
-            await trx('sales_invoice_items')
-              .where('id', targetItemId)
-              .update(updatePayload);
-          }
-        }
-
-        // Audit transaction for stock intercepted & delivered directly
-        const parentSalesInvoice = await trx('sales_invoices')
-          .where('id', delivery.sales_invoice_id)
-          .select('invoice_number')
-          .first();
-
-        await trx('inventory_transactions').insert({
-          product_id: item.product_id,
-          transaction_type: 'SALE',
-          quantity_kg: qtyToDeliver,
-          unit_cost: purchase_cost_per_kg,
-          total_asset_value: deliveryActualCost,
-          capital_equity_value: 0,
-          notes: `Rolling Fulfillment: Direct Dispatch ${qtyToDeliver} KG from Purchase ${invoice.invoice_number} to Sales Invoice ${parentSalesInvoice?.invoice_number || delivery.sales_invoice_id}`,
-          created_by: createdBy,
-        });
-      }
-
-      // Remainder of incoming batch (if any) to standard available warehouse inventory
-      const remainder_kg = availableIncomingKg;
-
-      // ── Weighted Average Costing (WAC) Formula for remainder ──
-      const currentStock = Number(productWithCat.total_stock_kg || 0);
-      const currentAvgCost = Number(productWithCat.rolling_avg_cost_per_kg || 0);
-
-      const currentTotalVal = currentStock * currentAvgCost;
-      const remainderVal = remainder_kg * purchase_cost_per_kg;
-      const newTotalStock = currentStock + remainder_kg;
-
-      const newRollingAvg = newTotalStock > 0
-        ? Math.round(((currentTotalVal + remainderVal) / newTotalStock) * 10000) / 10000
-        : (currentAvgCost > 0 ? currentAvgCost : purchase_cost_per_kg);
-
-      // UPDATE products rolling stock and average cost
-      await trx('products')
-        .where('id', item.product_id)
-        .update({
-          total_stock_kg: newTotalStock,
-          rolling_avg_cost_per_kg: newRollingAvg,
-          cost_price: purchase_cost_per_kg,
-          updated_at: new Date(),
-        });
-
-      // ── Dedicated Batch Creation Tied to Parent Purchase Invoice ──
-      // Assign landed cost: item.unit_price + freightPerKg
-      const landedCostPerKg = Math.round((item.unit_price + freightPerKg) * 100) / 100;
-      const roundedCostPerKg = landedCostPerKg;
-      const itemSize = (item.size && String(item.size).trim().length > 0)
-        ? String(item.size).trim()
-        : (productWithCat.size && String(productWithCat.size).trim().length > 0 ? String(productWithCat.size).trim() : 'Standard');
-      const batchNum = `PB-${invoice.invoice_number || invoice.id.slice(0, 8)}-${item.product_id.slice(0, 4)}-${Date.now()}-${i + 1}`;
-
-      const batchData: Record<string, any> = {
-        product_id: item.product_id,
-        purchase_invoice_id: invoice.id,
-        batch_number: batchNum,
-        batch_buy_price_per_kg: roundedCostPerKg,
-        original_qty: incoming_kg,
-        remaining_qty: remainder_kg,
-        status: remainder_kg > 0 ? 'ACTIVE' : 'DEPLETED',
-        size: itemSize,
-      };
-
-      const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
-      if (!hasBatchBuyPriceCol) {
-        batchData.buy_price_per_kg = roundedCostPerKg;
-        delete batchData.batch_buy_price_per_kg;
-      }
-
-      await trx('inventory_batches').insert(batchData);
-
-      itemsToInsert.push({
-        purchase_invoice_id: invoice.id,
-        product_id: item.product_id,
-        size: itemSize,
-        quantity: quantity_kg,
-        selected_unit: item.selected_unit || 'KG',
-        actual_weight_per_unit: 1.0,
-        net_kg_processed: incoming_kg,
-        net_kg_added: remainder_kg,
-        actual_weight_kg: incoming_kg,
-        unit_price: base_price_per_kg,
-        total_price: itemTotal,
-        delivery_charge_per_kg: item_dc_per_kg,
-        landed_cost_per_kg: price_per_kg,
+      const row = await applyNewPurchaseItemInventory(trx, {
+        invoice,
+        item: sanitizedItems[i],
+        index: i,
+        freightPerKg,
+        createdBy,
+        hasBatchBuyPriceCol,
       });
+      itemsToInsert.push(row);
     }
 
     const insertedItems = await trx('purchase_invoice_items').insert(itemsToInsert).returning('*');
-
 
     // Record inventory transactions for audit log
     for (let i = 0; i < insertedItems.length; i++) {
@@ -762,6 +816,344 @@ export async function createPurchaseInvoice(data: any, createdBy: string) {
     }
 
     return invoice;
+  });
+}
+
+/**
+ * Updates an existing purchase invoice and reconciles inventory, batches, WAC, and supplier payable balance atomically.
+ */
+export async function updatePurchaseInvoice(invoiceId: string, data: any, updatedBy: string) {
+  return await db.transaction(async (trx: Knex.Transaction) => {
+    const invoice = await trx('purchase_invoices')
+      .where('id', invoiceId)
+      .forUpdate()
+      .first();
+
+    if (!invoice) {
+      throw new Error('Purchase invoice not found');
+    }
+    if (invoice.status === 'VOID' || invoice.status === 'CANCELLED') {
+      throw new Error('Cannot edit a voided or cancelled purchase invoice.');
+    }
+    if (
+      invoice.invoice_type === 'DEBIT_NOTE' ||
+      invoice.invoice_type === 'RETURN' ||
+      invoice.parent_invoice_id
+    ) {
+      throw new Error('Cannot edit a Debit Note / Return invoice.');
+    }
+
+    const activeDebitNotes = await trx('purchase_invoices')
+      .where('parent_invoice_id', invoiceId)
+      .where(function () {
+        this.whereIn('invoice_type', ['DEBIT_NOTE', 'RETURN'])
+          .orWhere('invoice_number', 'like', 'DN-%');
+      })
+      .whereNotIn('status', ['VOID', 'CANCELLED']);
+
+    if (activeDebitNotes.length > 0) {
+      throw new Error('Cannot edit purchase invoice: it has active return/debit note(s) attached.');
+    }
+
+    // Prevent changing supplier when payments are already linked to this invoice
+    if (data.supplier_id !== invoice.supplier_id) {
+      let hasPayments = Number(invoice.paid_amount || 0) > 0;
+      if (!hasPayments && (await trx.schema.hasTable('supplier_payment_allocations'))) {
+        const alloc = await trx('supplier_payment_allocations')
+          .where('purchase_invoice_id', invoiceId)
+          .first();
+        if (alloc) hasPayments = true;
+      }
+      if (!hasPayments && (await trx.schema.hasTable('supplier_payments'))) {
+        const pmt = await trx('supplier_payments')
+          .where('purchase_invoice_id', invoiceId)
+          .first();
+        if (pmt) hasPayments = true;
+      }
+      if (hasPayments) {
+        throw new Error('Cannot change supplier because payments are already recorded against this invoice.');
+      }
+    }
+
+    const sanitizedItems = sanitizePurchaseItems(data.items);
+    let subtotal = 0;
+    for (const item of sanitizedItems) {
+      subtotal += item.total_price;
+    }
+    subtotal = Math.round(subtotal * 100) / 100;
+
+    const discount = Math.round(Number(data.discount || 0) * 100) / 100;
+    const delivery_charges = Math.round(Number(data.delivery_charges || 0) * 100) / 100;
+    const total_amount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+
+    const totalInvoiceKg = sanitizedItems.reduce((sum: number, item: any) => sum + Number(item.quantity_kg || 0), 0);
+    const freightPerKg = totalInvoiceKg > 0 ? (delivery_charges / totalInvoiceKg) : 0;
+
+    const hasBatchBuyPriceCol = await trx.schema.hasColumn('inventory_batches', 'batch_buy_price_per_kg');
+    const hasInvTx = await trx.schema.hasTable('inventory_transactions');
+    const hasJunctionTable = await trx.schema.hasTable('sales_invoice_item_batches');
+
+    const oldBatches = await trx('inventory_batches')
+      .where('purchase_invoice_id', invoiceId)
+      .orderBy('created_at', 'asc')
+      .forUpdate();
+
+    const batchIdsWithSalesLineage = new Set<string>();
+    if (hasJunctionTable && oldBatches.length > 0) {
+      const refs = await trx('sales_invoice_item_batches')
+        .whereIn('inventory_batch_id', oldBatches.map((b: any) => b.id))
+        .select('inventory_batch_id');
+      refs.forEach((r: any) => {
+        if (r.inventory_batch_id) batchIdsWithSalesLineage.add(r.inventory_batch_id);
+      });
+    }
+
+    // Partition old batches into used (cannot be deleted) and untouched (can be safely reversed & deleted)
+    const usedBatchToItemIdx = new Map<string, number>();
+    const matchedItemIndices = new Set<number>();
+
+    for (const batch of oldBatches) {
+      const orig = Number(batch.original_qty || 0);
+      const rem = Number(batch.remaining_qty || 0);
+      const usedQty = Math.max(0, orig - rem);
+      const isUsed = usedQty > 0.0001 || batchIdsWithSalesLineage.has(batch.id);
+
+      if (!isUsed) continue;
+
+      // Prefer an unmatched incoming item for the same product whose quantity satisfies usedQty
+      let matchIdx = sanitizedItems.findIndex(
+        (it: any, idx: number) =>
+          !matchedItemIndices.has(idx) &&
+          it.product_id === batch.product_id &&
+          it.quantity_kg >= usedQty - 0.0001
+      );
+
+      if (matchIdx === -1) {
+        matchIdx = sanitizedItems.findIndex(
+          (it: any, idx: number) => !matchedItemIndices.has(idx) && it.product_id === batch.product_id
+        );
+      }
+
+      const prod = await trx('products').where('id', batch.product_id).select('name').first();
+      const prodName = prod?.name || batch.product_id;
+
+      if (matchIdx === -1) {
+        throw new Error(
+          `Cannot remove "${prodName}" because ${usedQty.toFixed(2)} KG from this purchase has already been sold or dispatched.`
+        );
+      }
+
+      const matchedItem = sanitizedItems[matchIdx];
+      if (matchedItem.quantity_kg < usedQty - 0.0001) {
+        throw new Error(
+          `Cannot reduce quantity of "${prodName}" below ${usedQty.toFixed(2)} KG because ${usedQty.toFixed(2)} KG from this purchase has already been sold or dispatched.`
+        );
+      }
+
+      matchedItemIndices.add(matchIdx);
+      usedBatchToItemIdx.set(batch.id, matchIdx);
+    }
+
+    const touchedProductIds = new Set<string>();
+    const productLatestCostOverride = new Map<string, number>();
+    const itemsToInsert: any[] = [];
+
+    // 1. Reverse & delete untouched batches; adjust used batches in place
+    for (const batch of oldBatches) {
+      const matchedIdx = usedBatchToItemIdx.get(batch.id);
+
+      if (matchedIdx === undefined) {
+        const oldRem = Number(batch.remaining_qty || 0);
+        const buyPrice = Number(batch.batch_buy_price_per_kg ?? batch.buy_price_per_kg ?? 0);
+
+        if (batch.product_id) {
+          await trx('products').where('id', batch.product_id).forUpdate().first();
+          touchedProductIds.add(batch.product_id);
+
+          if (oldRem > 0) {
+            await trx('products')
+              .where('id', batch.product_id)
+              .update({
+                total_stock_kg: trx.raw('GREATEST(0, COALESCE(total_stock_kg, 0) - ?)', [oldRem]),
+                updated_at: new Date(),
+              });
+
+            if (hasInvTx) {
+              await trx('inventory_transactions').insert({
+                product_id: batch.product_id,
+                transaction_type: 'ADJUSTMENT',
+                quantity_kg: -oldRem,
+                unit_cost: buyPrice,
+                total_asset_value: -(oldRem * buyPrice),
+                capital_equity_value: 0,
+                notes: `Purchase Edit Reversal: ${invoice.invoice_number}`,
+                created_by: updatedBy || null,
+              });
+            }
+          }
+        }
+
+        await trx('inventory_batches').where('id', batch.id).del();
+      } else {
+        const item = sanitizedItems[matchedIdx];
+        const productRow = await trx('products')
+          .where('id', item.product_id)
+          .forUpdate()
+          .select('id', 'name', 'size')
+          .first();
+
+        if (!productRow) {
+          throw new Error(`Product not found for product ID ${item.product_id}`);
+        }
+
+        const oldOrig = Number(batch.original_qty || 0);
+        const oldRem = Number(batch.remaining_qty || 0);
+        const usedQty = Math.max(0, oldOrig - oldRem);
+        const newOrig = item.quantity_kg;
+        const newRem = Math.max(0, Math.round((newOrig - usedQty) * 10000) / 10000);
+        const stockDelta = Math.round((newRem - oldRem) * 10000) / 10000;
+
+        const item_dc_per_kg = Math.round(freightPerKg * 10000) / 10000;
+        const landedCostPerKg = Math.round((item.unit_price + item_dc_per_kg) * 100) / 100;
+        const itemSize = (item.size && String(item.size).trim().length > 0)
+          ? String(item.size).trim()
+          : (productRow.size && String(productRow.size).trim().length > 0 ? String(productRow.size).trim() : 'Standard');
+
+        if (Math.abs(stockDelta) > 0.0001) {
+          await trx('products')
+            .where('id', item.product_id)
+            .update({
+              total_stock_kg: trx.raw('GREATEST(0, COALESCE(total_stock_kg, 0) + ?)', [stockDelta]),
+              updated_at: new Date(),
+            });
+
+          if (hasInvTx) {
+            await trx('inventory_transactions').insert({
+              product_id: item.product_id,
+              transaction_type: 'ADJUSTMENT',
+              quantity_kg: stockDelta,
+              unit_cost: landedCostPerKg,
+              total_asset_value: Math.round(stockDelta * landedCostPerKg * 100) / 100,
+              capital_equity_value: 0,
+              notes: `Purchase Edit Qty Adjustment: ${invoice.invoice_number}`,
+              created_by: updatedBy || null,
+            });
+          }
+        }
+
+        const batchUpdate: Record<string, any> = {
+          original_qty: newOrig,
+          remaining_qty: newRem,
+          status: newRem > 0 ? 'ACTIVE' : 'DEPLETED',
+          size: itemSize,
+          updated_at: new Date(),
+        };
+        if (hasBatchBuyPriceCol) {
+          batchUpdate.batch_buy_price_per_kg = landedCostPerKg;
+        } else {
+          batchUpdate.buy_price_per_kg = landedCostPerKg;
+        }
+
+        await trx('inventory_batches').where('id', batch.id).update(batchUpdate);
+
+        touchedProductIds.add(item.product_id);
+        productLatestCostOverride.set(item.product_id, landedCostPerKg);
+
+        itemsToInsert.push({
+          purchase_invoice_id: invoiceId,
+          product_id: item.product_id,
+          size: itemSize,
+          quantity: newOrig,
+          selected_unit: item.selected_unit || 'KG',
+          actual_weight_per_unit: 1.0,
+          net_kg_processed: newOrig,
+          net_kg_added: newRem,
+          actual_weight_kg: newOrig,
+          unit_price: item.unit_price,
+          total_price: item.total_price,
+          delivery_charge_per_kg: item_dc_per_kg,
+          landed_cost_per_kg: landedCostPerKg,
+        });
+      }
+    }
+
+    // 2. Apply newly added or replaced incoming items
+    const newlyAppliedRows: any[] = [];
+    for (let i = 0; i < sanitizedItems.length; i++) {
+      if (matchedItemIndices.has(i)) continue;
+      const item = sanitizedItems[i];
+      const row = await applyNewPurchaseItemInventory(trx, {
+        invoice,
+        item,
+        index: i,
+        freightPerKg,
+        createdBy: updatedBy,
+        hasBatchBuyPriceCol,
+      });
+      itemsToInsert.push(row);
+      newlyAppliedRows.push(row);
+      touchedProductIds.add(item.product_id);
+      productLatestCostOverride.set(item.product_id, row.landed_cost_per_kg);
+    }
+
+    // 3. Recompute rolling WAC & cost_price for all touched products
+    await recomputeProductsWac(trx, touchedProductIds, hasBatchBuyPriceCol, productLatestCostOverride);
+
+    // 4. Replace purchase_invoice_items
+    await trx('purchase_invoice_items').where('purchase_invoice_id', invoiceId).del();
+    const insertedNewItems = await trx('purchase_invoice_items').insert(itemsToInsert).returning('*');
+
+    if (hasInvTx && newlyAppliedRows.length > 0) {
+      for (const pii of newlyAppliedRows) {
+        const product = await trx('products').where('id', pii.product_id).select('rolling_avg_cost_per_kg').first();
+        const avgCost = Number(product?.rolling_avg_cost_per_kg || 0);
+        await trx('inventory_transactions').insert({
+          product_id: pii.product_id,
+          transaction_type: 'PURCHASE',
+          quantity_kg: pii.net_kg_processed,
+          unit_cost: avgCost,
+          total_asset_value: Number(pii.total_price),
+          capital_equity_value: 0,
+          notes: `Purchase Invoice ${invoice.invoice_number} (Edited: ${pii.quantity} KG @ ${pii.unit_price}/KG)`,
+          created_by: updatedBy || null,
+        });
+      }
+    }
+
+    // 5. Clear any legacy OPEX bridge if present
+    if (invoice.expense_id) {
+      await trx('expenses').where('id', invoice.expense_id).del();
+    }
+
+    // 6. Update purchase_invoices header preserving existing paid_amount
+    const paidAmount = Number(invoice.paid_amount || 0);
+    const newBalanceDue = Math.round((total_amount - paidAmount) * 100) / 100;
+    const newStatus = newBalanceDue <= 0 ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID');
+
+    const updatePayload: Record<string, any> = {
+      supplier_id: data.supplier_id,
+      date: data.date,
+      due_date: data.due_date || null,
+      subtotal,
+      discount,
+      delivery_charges,
+      total_amount,
+      status: newStatus,
+      notes: data.notes || null,
+      expense_id: null,
+      updated_at: new Date(),
+    };
+    const hasBalanceDue = await trx.schema.hasColumn('purchase_invoices', 'balance_due');
+    if (hasBalanceDue) {
+      updatePayload.balance_due = newBalanceDue;
+    }
+
+    const [updatedInvoice] = await trx('purchase_invoices')
+      .where('id', invoiceId)
+      .update(updatePayload)
+      .returning('*');
+
+    return { ...updatedInvoice, items: insertedNewItems };
   });
 }
 

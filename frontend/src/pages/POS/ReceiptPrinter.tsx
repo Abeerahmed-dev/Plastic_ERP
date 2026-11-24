@@ -138,10 +138,10 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
         </div>
 
         {/* Invoice Metadata */}
-        <div className="mb-2 border-y border-dashed border-black py-1.5 text-[11px] space-y-0.5">
+        <div className="mb-2 border-y border-dashed border-black py-1.5 text-[12px] space-y-0.5 font-sans">
           <div className="flex justify-between">
             <span className="font-semibold">Bill No:</span>
-            <span className="font-black font-mono text-xs">{billNumber}</span>
+            <span className="font-black text-sm">{billNumber}</span>
           </div>
           <div className="flex justify-between">
             <span>Date:</span>
@@ -164,7 +164,7 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
         </div>
 
         {/* Line Items Table */}
-        <table className="w-full mb-2 text-[11px]">
+        <table className="w-full mb-2 text-[12px] font-sans">
           <thead>
             <tr className="border-b border-black text-left font-bold">
               <th className="py-1 text-left">Item / نام</th>
@@ -179,44 +179,51 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
               const displayQty = isItemReturn ? -Math.abs(item.quantity) : item.quantity;
               const unit = item.selected_unit || 'KG';
               const lineTotal = displayQty * item.unit_price;
-              const englishName = item.productName || item.product_name || 'Item';
+              const rawEnglishName = item.productName || item.product_name || 'Item';
 
-              let baseName = englishName;
+              let baseName = rawEnglishName;
               let sizePart = (item.size || item.product_size || item.variant_size || '').trim();
 
-              if (!sizePart && englishName.includes(' - ')) {
-                const idx = englishName.lastIndexOf(' - ');
-                baseName = englishName.substring(0, idx).trim();
-                sizePart = englishName.substring(idx + 3).trim();
-              } else if (sizePart && englishName.endsWith(` - ${sizePart}`)) {
-                baseName = englishName.slice(0, -(` - ${sizePart}`.length)).trim();
+              const parenMatch = rawEnglishName.match(/^(.*?)\s*\(([^)]+)\)$/);
+              if (parenMatch) {
+                baseName = parenMatch[1].trim();
+                if (!sizePart) {
+                  sizePart = parenMatch[2].trim();
+                }
+              } else if (!sizePart && rawEnglishName.includes(' - ')) {
+                const idx = rawEnglishName.lastIndexOf(' - ');
+                baseName = rawEnglishName.substring(0, idx).trim();
+                sizePart = rawEnglishName.substring(idx + 3).trim();
+              } else if (sizePart && rawEnglishName.endsWith(` - ${sizePart}`)) {
+                baseName = rawEnglishName.slice(0, -(` - ${sizePart}`.length)).trim();
+              }
+
+              baseName = baseName.replace(/\s*\([^)]*\)$/, '').trim();
+
+              let englishName = rawEnglishName.replace(/([^\s])\(([^)]+)\)$/, '$1 ($2)');
+              if (sizePart && !englishName.includes(sizePart)) {
+                englishName = `${englishName} (${sizePart})`;
               }
 
               const urduBase = getUrduProductName(baseName, item.name_urdu || item.product_name_urdu, item.category);
-              const urduSize = sizePart ? (getUrduProductName(sizePart) || sizePart) : '';
 
               return (
                 <tr key={idx} className="align-top">
-                  <td className="py-1 pr-1 break-words">
-                    <div className="font-bold text-[11px] leading-tight">
+                  <td className="py-1.5 pr-1 break-words">
+                    <div className="font-extrabold text-[13px] leading-snug">
                       {isItemReturn ? `[REFUND] ${englishName}` : englishName}
                     </div>
                     {urduBase && (
-                      <div className="text-[10.5px] font-bold text-black font-sans leading-tight mt-0.5 text-left" style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>
+                      <div className="text-[12px] font-bold text-black font-sans leading-tight mt-0.5 text-left" style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>
                         <span dir="rtl">{urduBase}</span>
-                        {urduSize && (
-                          <span dir="ltr" className="ml-1 text-[9.5px]">
-                            &lrm;- {urduSize}&lrm;
-                          </span>
-                        )}
                       </div>
                     )}
                   </td>
-                  <td className="py-1 text-center whitespace-nowrap">
+                  <td className="py-1.5 text-center whitespace-nowrap font-bold text-[12px]">
                     {displayQty}
                   </td>
-                  <td className="py-1 text-right whitespace-nowrap">{Number(item.unit_price).toLocaleString()}</td>
-                  <td className="py-1 text-right font-semibold whitespace-nowrap">{lineTotal.toLocaleString()}</td>
+                  <td className="py-1.5 text-right whitespace-nowrap font-bold text-[12px]">{Number(item.unit_price).toLocaleString()}</td>
+                  <td className="py-1.5 text-right font-extrabold whitespace-nowrap text-[12px]">{lineTotal.toLocaleString()}</td>
                 </tr>
               );
             })}
@@ -235,10 +242,6 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
         <div className="pt-1 mb-2 text-[11px] space-y-0.5">
           {isDuplicate ? (
             <>
-              <div className="flex justify-between font-bold">
-                <span>Total Weight / کل وزن:</span>
-                <span>{formattedTotalWeight} KG</span>
-              </div>
               {slipCharges > 0 && (
                 <div className="flex justify-between text-gray-800">
                   <span>Slip Charges / پرچی چارجز:</span>
@@ -247,15 +250,11 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
               )}
               <div className="flex justify-between font-extrabold text-sm border-t border-b border-black py-1 my-1">
                 <span>TOTAL / کل رقم:</span>
-                <span>Rs. {Math.abs(totalAmount).toLocaleString()}</span>
+                <span>Rs. ${Math.abs(totalAmount).toLocaleString()}</span>
               </div>
             </>
           ) : (
             <>
-              <div className="flex justify-between font-bold">
-                <span>Total Weight / کل وزن:</span>
-                <span>{formattedTotalWeight} KG</span>
-              </div>
               <div className="flex justify-between">
                 <span>Gross Subtotal / کل رقم:</span>
                 <span>Rs. {subtotal.toLocaleString()}</span>

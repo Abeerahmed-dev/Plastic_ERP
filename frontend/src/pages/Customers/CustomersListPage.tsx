@@ -36,9 +36,61 @@ export default function CustomersListPage() {
   const [refundModalOpen, setRefundModalOpen] = useState(false);
   const [refundTargetCustomer, setRefundTargetCustomer] = useState<Customer | null>(null);
 
+  // 1. Fetch all customers for filter dropdowns (names & cities across ALL pages for active tab)
+  const { data: allCustomersData } = useQuery({
+    queryKey: ['customers', 'filterOptions', activeTab],
+    queryFn: () => getCustomers({ limit: 1000, customer_type: activeTab }),
+    staleTime: 30000,
+  });
+  const allCustomers = allCustomersData?.data ?? [];
+
+  const normalizedAllCustomers = useMemo(() => {
+    return allCustomers.map((c) => ({
+      ...c,
+      city: c.city || null,
+      name: c.name || '',
+      invoice_number: null,
+    }));
+  }, [allCustomers]);
+
+  // Phase 1: Cascading filters hook populated from ALL customers
+  const {
+    selectedCity,
+    selectedName,
+    selectedInvoice,
+    setSelectedCity,
+    setSelectedName,
+    setSelectedInvoice,
+    availableCities,
+    availableNames,
+    resetFilters,
+  } = useCascadingFilters(normalizedAllCustomers);
+
+  const handleCityChange = (city: string | null) => {
+    setSelectedCity(city);
+    setPage(1);
+  };
+
+  const handleNameChange = (name: string | null) => {
+    setSelectedName(name);
+    setPage(1);
+  };
+
+  const handleResetFilters = () => {
+    resetFilters();
+    setPage(1);
+  };
+
+  // 2. Fetch paginated customers with search and city filter applied at backend level
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['customers', page, activeTab],
-    queryFn: () => getCustomers({ page, limit: LIMIT, customer_type: activeTab }),
+    queryKey: ['customers', page, activeTab, selectedName, selectedCity],
+    queryFn: () => getCustomers({
+      page,
+      limit: LIMIT,
+      customer_type: activeTab,
+      search: selectedName || undefined,
+      city: selectedCity || undefined,
+    }),
   });
 
   useErpSync(() => {
@@ -53,37 +105,7 @@ export default function CustomersListPage() {
   const customers = data?.data ?? [];
   const meta = data?.meta;
 
-  const normalizedCustomers = useMemo(() => {
-    return customers.map((c) => ({
-      ...c,
-      city: c.city || null,
-      name: c.name || '',
-      invoice_number: null,
-    }));
-  }, [customers]);
-
-  // Phase 1: Cascading filters hook
-  const {
-    selectedCity,
-    selectedName,
-    selectedInvoice,
-    setSelectedCity,
-    setSelectedName,
-    setSelectedInvoice,
-    availableCities,
-    availableNames,
-    resetFilters,
-  } = useCascadingFilters(normalizedCustomers);
-
-  // Phase 3: Strict multi-condition filter before rendering
-  const filteredTableRows = useMemo(() => {
-    return normalizedCustomers.filter((row: any) => {
-      const matchesCity = selectedCity ? row.city === selectedCity : true;
-      const matchesName = selectedName ? row.name === selectedName : true;
-      const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
-      return matchesCity && matchesName && matchesInvoice;
-    });
-  }, [normalizedCustomers, selectedCity, selectedName, selectedInvoice]);
+  const filteredTableRows = customers;
 
   const openCreate = () => { setEditTarget(undefined); setModalOpen(true); };
   const openEdit = (c: Customer) => { setEditTarget(c); setModalOpen(true); };
@@ -149,11 +171,11 @@ export default function CustomersListPage() {
           <CascadingFilterBar
             selectedCity={selectedCity}
             selectedName={selectedName}
-            onCityChange={setSelectedCity}
-            onNameChange={setSelectedName}
+            onCityChange={handleCityChange}
+            onNameChange={handleNameChange}
             availableCities={availableCities}
             availableNames={availableNames}
-            onReset={resetFilters}
+            onReset={handleResetFilters}
             showInvoice={false}
             nameLabel="Customer Name"
             namePlaceholder="Filter by customer name…"
