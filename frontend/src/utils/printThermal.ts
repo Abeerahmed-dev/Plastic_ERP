@@ -47,7 +47,6 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
 
   const isRefund = Number(invoice.total_amount) < 0;
   const billNumber = getNextSequentialBillNumber(invoice);
-  const invoiceNumber = invoice.invoice_number || invoice.code || `POS-${billNumber}`;
   const invoiceDate = invoice.created_at || invoice.date ? new Date(invoice.created_at || invoice.date).toLocaleString('en-PK', {
     day: '2-digit',
     month: 'short',
@@ -97,7 +96,6 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
   const itemsHtml = items.map((item) => {
     const isItemReturn = item.isReturn || item.quantity < 0;
     const displayQty = isItemReturn ? -Math.abs(item.quantity) : item.quantity;
-    const unit = item.selected_unit || 'KG';
     const lineTotal = displayQty * item.unit_price;
     const rawEnglishName = item.productName || item.product_name || 'Item';
 
@@ -483,7 +481,7 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
           })
     )
   );
-  try { await (doc as any).fonts?.ready; } catch {}
+  try { await (doc as any).fonts?.ready; } catch { /* ignore font readiness errors */ }
 
   // Receipt ki asli height measure karein
   const slipPages = doc.querySelectorAll('.slip-page');

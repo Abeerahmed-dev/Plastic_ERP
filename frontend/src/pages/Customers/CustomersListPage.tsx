@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft, ArrowUpRight, Wallet } from 'lucide-react';
+import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft } from 'lucide-react';
 import { getCustomers, deactivateCustomer } from '../../services/customers.service';
 import { Customer } from '../../types/customer.types';
 import { useAuthStore } from '../../store/auth.store';
@@ -57,10 +57,8 @@ export default function CustomersListPage() {
   const {
     selectedCity,
     selectedName,
-    selectedInvoice,
     setSelectedCity,
     setSelectedName,
-    setSelectedInvoice,
     availableCities,
     availableNames,
     resetFilters,

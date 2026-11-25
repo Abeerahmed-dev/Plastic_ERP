@@ -9,7 +9,7 @@ import { getSuppliers } from '../../services/suppliers.service';
 import { productsService } from '../../services/products.service';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { DateInput } from '../../components/DateInput';
-import { compareProducts, formatProductTitle, groupProductsByFamily, formatSizeOnly } from '../../utils/productSorting';
+import { compareProducts, groupProductsByFamily, formatSizeOnly } from '../../utils/productSorting';
 import { invalidatePurchaseQueries } from '../../utils/querySync';
 import { erpSyncBus } from '../../utils/erpSyncBus';
 
@@ -423,7 +423,7 @@ export default function PurchaseFormModal({ onClose, onSuccess, initialProductId
   });
 
   const onSubmit = (data: FormData) => {
-    const cleanItems = data.items.map(({ bags_input, selected_family_name, selected_variant_id, ...rest }) => {
+    const cleanItems = data.items.map(({ bags_input: _bagsInput, selected_family_name, selected_variant_id: _selectedVariantId, ...rest }) => {
       const qty = Number(rest.quantity || 0);
       const unitPrice = Math.round(Number(rest.unit_price || 0) * 100) / 100;
       const itemTotal = rest.total !== undefined && rest.total !== null && rest.total !== ''

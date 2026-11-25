@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Plus, FileText, RotateCcw, ShoppingCart, Printer, CheckCircle2, ArrowLeft, UserCheck, ShieldCheck, User, Clock } from 'lucide-react';
+import { Plus, FileText, RotateCcw, ShoppingCart, Printer, ArrowLeft, UserCheck, ShieldCheck, User, Clock } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
-import { posService, POSHeldOrder } from '../../services/pos.service';
+import { posService } from '../../services/pos.service';
 import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
@@ -95,28 +95,23 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
   }, [allHeldOrders]);
 
   const { data: customersResponse } = useQuery({
-    queryKey: ['customers', { page: 1, limit: 100 }],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryKey: ['customers', 'all-for-invoices'],
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     staleTime: 30000,
   });
   const customersList = customersResponse?.data || [];
 
   // Summary counts
-  const { erpCount, posCount, allCount, erpTotal, posTotal } = useMemo(() => {
+  const { erpCount, posCount, allCount } = useMemo(() => {
     let erp = 0;
     let pos = 0;
-    let eTotal = 0;
-    let pTotal = 0;
 
     for (const inv of invoices) {
       const isPos = String(inv.invoice_number || '').startsWith('POS-') || (inv.notes && inv.notes.includes('POS'));
-      const amt = Number(inv.total_amount || 0);
       if (isPos) {
         pos++;
-        pTotal += amt;
       } else {
         erp++;
-        eTotal += amt;
       }
     }
 
@@ -124,8 +119,6 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
       erpCount: erp,
       posCount: pos,
       allCount: invoices.length,
-      erpTotal: eTotal,
-      posTotal: pTotal,
     };
   }, [invoices]);
 
@@ -201,23 +194,6 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
     resetFilters();
     setSelectedStatus('All');
     setCurrentPage(1);
-  };
-
-  const handleTabChange = (tab: 'erp' | 'pos' | 'all') => {
-    setActiveTab(tab);
-    setCurrentPage(1);
-    setSelectedRoleFilter('ALL');
-    setSelectedStatus('All');
-    resetFilters();
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (tab === 'erp') {
-        next.delete('type');
-      } else {
-        next.set('type', tab);
-      }
-      return next;
-    });
   };
 
   const handleOpenInvoice = async (id: string) => {
@@ -332,44 +308,6 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
         Admin
       </span>
     );
-  };
-
-  const getStatusBadge = (invoice: any) => {
-    const isCreditNote = (invoice as any).invoice_type === 'CREDIT_NOTE' || invoice.invoice_number?.startsWith('CN-') || Number(invoice.total_amount) < 0;
-    if (isCreditNote) {
-      return <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-black text-red-800 border border-red-300">CREDIT NOTE</span>;
-    }
-
-    if (invoice.balance_due !== undefined && Number(invoice.balance_due) < 0) {
-      return <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 border border-amber-300">OVERPAID</span>;
-    }
-
-    const totalAmt = Number(invoice.total_amount || 0);
-    const paidAmt = Number(invoice.paid_amount || 0);
-    if (totalAmt > 0 && paidAmt >= totalAmt) {
-      return (
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
-          <CheckCircle2 className="w-3 h-3" />
-          Paid
-        </span>
-      );
-    }
-
-    switch (invoice.status) {
-      case 'PAID':
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
-            <CheckCircle2 className="w-3 h-3" />
-            Paid
-          </span>
-        );
-      case 'PARTIAL':
-        return <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">Partial</span>;
-      case 'UNPAID':
-        return <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700 border border-rose-200">Unpaid</span>;
-      default:
-        return <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800 border border-slate-200">{invoice.status}</span>;
-    }
   };
 
   return (

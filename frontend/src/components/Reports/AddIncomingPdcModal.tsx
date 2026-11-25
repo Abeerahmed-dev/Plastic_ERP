@@ -54,8 +54,8 @@ export const AddIncomingPdcModal: React.FC<AddIncomingPdcModalProps> = ({
 
   // Fetch Customers
   const { data: customersData, isLoading: isLoadingCustomers } = useQuery({
-    queryKey: ['customers', { page: 1, limit: 100 }],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryKey: ['customers', { page: 1, limit: 5000 }],
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     enabled: isOpen,
   });
 

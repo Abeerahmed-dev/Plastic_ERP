@@ -13,7 +13,7 @@ import { SearchableCombobox, ComboboxOption } from '../../components/SearchableC
 import { toast, handleApiError } from '../../utils/toast';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
 import { DateInput } from '../../components/DateInput';
-import { compareProducts, formatProductTitle, groupProductsByFamily, formatSizeOnly } from '../../utils/productSorting';
+import { compareProducts, groupProductsByFamily, formatSizeOnly } from '../../utils/productSorting';
 import { invalidateSalesInvoiceQueries } from '../../utils/querySync';
 import { erpSyncBus } from '../../utils/erpSyncBus';
 
@@ -66,7 +66,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     { payment_account_id: '', amount: '' },
   ]);
 
-  const { data: customersResponse } = useQuery({ queryKey: ['customers'], queryFn: () => getCustomers({ limit: 100 }) });
+  const { data: customersResponse } = useQuery({ queryKey: ['customers', 'all-for-invoice-form'], queryFn: () => getCustomers({ limit: 5000 }) });
   const { data: bankAccounts = [] } = useQuery({
     queryKey: ['bank-accounts'],
     queryFn: () => bankAccountsService.getBankAccounts(),
@@ -123,11 +123,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const selectedCustomerId = watch('customer_id');
   const walkInCustomerName = watch('walk_in_customer_name');
   const effectiveWalkIn = (walkInCustomerName || walkInName || '').trim();
-  const isCustomWalkIn = invoiceMode === 'CASH' && !selectedCustomerId && Boolean(effectiveWalkIn);
 
   const selectedCustomer = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
   const isCashCustomer = invoiceMode === 'CASH';
-  const isCreditCustomer = invoiceMode === 'CREDIT';
   const walletBalance = Number(selectedCustomer?.advance_credit || (selectedCustomer as any)?.advance_wallet || 0);
 
   // Check if any row has missing product or empty size/variant
@@ -752,7 +750,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         payment_splits: cleanSplits,
         payment_account_id: isCashCustomer ? (isSplitPayment ? cleanSplits?.[0]?.payment_account_id : paymentAccountId) : undefined,
         payment_method: isCashCustomer ? (isSplitPayment ? 'SPLIT' : (paymentAccountId === 'CASH_DRAWER' ? 'CASH' : 'BANK_TRANSFER')) : undefined,
-        items: data.items.map(({ bags_input, selected_family_name, selected_variant_id, ...i }) => {
+        items: data.items.map(({ bags_input: _bagsInput, selected_family_name, selected_variant_id: _selectedVariantId, ...i }) => {
           const qty = Number(i.quantity || 0);
           const unitPrice = Math.round(Number(i.unit_price || 0) * 100) / 100;
           const totalPrice = i.total !== undefined && i.total !== null && i.total !== ''

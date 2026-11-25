@@ -88,8 +88,8 @@ export const PaymentFormModal = ({
   const [serverError, setServerError] = useState<string | null>(null);
 
   const { data: customersResponse } = useQuery({
-    queryKey: ['customers', { page: 1, limit: 100 }],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryKey: ['customers', { page: 1, limit: 5000 }],
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     enabled: isOpen,
   });
 
@@ -367,7 +367,7 @@ export const PaymentFormModal = ({
                 </select>
                 {selectedCustomerId && availableInvoices.length === 0 && (
                   <p className="mt-1 text-xs text-amber-600 font-medium">
-                    No unpaid invoices found for this customer. For advance payments, use "Log Advance Deposit".
+                    No unpaid invoices found for this customer. For advance payments, use &quot;Log Advance Deposit&quot;.
                   </p>
                 )}
                 {errors.invoice_id && <p className="mt-1 text-xs text-red-600">{errors.invoice_id.message}</p>}

@@ -44,7 +44,7 @@ export const ProcessCashRefundModal: React.FC<ProcessCashRefundModalProps> = ({
   // Fetch customers with positive advance wallet balance
   const { data: customersData } = useQuery({
     queryKey: ['customers', 'with-advances'],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     enabled: isOpen && entityType === 'customer' && !customer,
   });
 

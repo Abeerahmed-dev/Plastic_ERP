@@ -177,7 +177,6 @@ export const ReceiptPrinter = forwardRef<HTMLDivElement, ReceiptProps>(
             {items.map((item, idx) => {
               const isItemReturn = item.isReturn || item.quantity < 0;
               const displayQty = isItemReturn ? -Math.abs(item.quantity) : item.quantity;
-              const unit = item.selected_unit || 'KG';
               const lineTotal = displayQty * item.unit_price;
               const rawEnglishName = item.productName || item.product_name || 'Item';
 

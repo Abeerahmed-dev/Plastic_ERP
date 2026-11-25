@@ -126,7 +126,7 @@ export default function POSPage() {
   // Query Customers for Searchable Dropdown
   const { data: customersData } = useQuery({
     queryKey: ['customersSelect'],
-    queryFn: () => getCustomers({ limit: 100 }),
+    queryFn: () => getCustomers({ limit: 5000 }),
   });
   const customers = customersData?.data || [];
 

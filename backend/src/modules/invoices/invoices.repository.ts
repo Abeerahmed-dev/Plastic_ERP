@@ -345,7 +345,7 @@ export async function createInvoiceWithItems(
     }
     const isCashCustomer = customer.customer_type === 'CASH';
 
-    let resolvedSplits: Array<{
+    const resolvedSplits: Array<{
       payment_account_id: string;
       amount: number;
       isCashDrawer: boolean;

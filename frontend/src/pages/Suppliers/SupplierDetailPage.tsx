@@ -1,22 +1,17 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Plus,
   ArrowUpRight,
   ArrowDownLeft,
   Edit2,
-  RefreshCw,
   Building,
-  Calendar,
-  Wallet,
-  Receipt,
-  CheckCircle2,
   Loader2,
   Phone,
 } from 'lucide-react';
-import { getSupplier, updateSupplier } from '../../services/suppliers.service';
+import { getSupplier } from '../../services/suppliers.service';
 import { useAuthStore } from '../../store/auth.store';
 import { SupplierLedger } from './SupplierLedger';
 import { RecordPaymentModal } from '../../components/Modals/RecordPaymentModal';
@@ -55,7 +50,6 @@ export default function SupplierDetailPage() {
   });
 
   const advancePayable = Number((supplier as any)?.advance_payable || 0);
-  const outstandingPayable = Number(supplier?.outstanding_payable || 0);
 
   if (isLoading) {
     return (

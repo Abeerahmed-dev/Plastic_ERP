@@ -4,18 +4,18 @@ import { ValidationError } from '../../src/shared/errors';
 
 jest.mock('../../src/db/knex');
 
-describe('Update Product Day Zero Stock Ledger Lock Unit Tests', () => {
+describe('Update Product Day Zero Stock Unit Tests', () => {
   afterEach(() => {
     jest.clearAllMocks();
   });
 
-  it('should throw ValidationError if attempting to modify Day Zero stock when transaction_count > 0', async () => {
+  it('should adjust total_stock_kg by delta when modifying opening_stock after transactions, and reject reducing below sold opening batch qty', async () => {
     const mockProduct = {
       id: 'prod-uuid-1',
       code: 'PROD-0001',
       name: 'Polymer Resin',
       opening_stock: '50.0000',
-      total_stock_kg: '50.0000',
+      total_stock_kg: '150.0000',
       cost_price: '100.00',
       rolling_avg_cost_per_kg: '100.00',
       category_id: 'cat-uuid-1',
@@ -24,47 +24,71 @@ describe('Update Product Day Zero Stock Ledger Lock Unit Tests', () => {
       is_active: true,
     };
 
+    const mockInitBatch = {
+      id: 'batch-init-1',
+      product_id: 'prod-uuid-1',
+      purchase_invoice_id: null,
+      batch_buy_price_per_kg: '100.00',
+      original_qty: '50.0000',
+      remaining_qty: '20.0000', // 30 KG already sold from opening batch
+      status: 'ACTIVE',
+    };
+
+    const updatedProducts: any[] = [];
     const mockTrx: any = (tableName: string) => {
       const query: any = {
         where: () => query,
+        whereNull: () => query,
+        whereNotNull: () => query,
+        whereNot: () => query,
+        orderBy: () => query,
         join: () => query,
+        leftJoin: () => query,
         forUpdate: () => query,
         select: () => query,
-        count: async () => {
-          if (tableName === 'sales_invoice_items') return [{ count: '2' }]; // has 2 sales!
-          if (tableName === 'purchase_invoice_items') return [{ count: '0' }];
-          if (tableName === 'inventory_transactions') return [{ count: '0' }];
-          return [{ count: '0' }];
-        },
+        count: async () => [{ count: '1' }],
         first: async () => {
           if (tableName === 'products') return mockProduct;
+          if (tableName === 'inventory_batches') return mockInitBatch;
           return null;
         },
-        update: async () => [1],
+        update: async (payload: any) => {
+          if (tableName === 'products') updatedProducts.push(payload);
+          return [1];
+        },
+        insert: async () => [1],
+        then: (resolve: any) => {
+          if (tableName === 'inventory_batches') return Promise.resolve([mockInitBatch]).then(resolve);
+          return Promise.resolve([]).then(resolve);
+        },
       };
       return query;
     };
     mockTrx.schema = {
       hasTable: async () => true,
+      hasColumn: async () => true,
     };
     mockTrx.raw = (sql: string, bindings: any[]) => ({ sql, bindings });
 
     (db.transaction as jest.Mock).mockImplementation(async (callback: any) => callback(mockTrx));
 
-    // Attempting to change opening_stock from 50 to 80 when transactions exist
+    // Reducing opening stock below 30 KG (already sold from opening batch) should throw ValidationError
     await expect(
       updateProduct('prod-uuid-1', {
         name: 'Polymer Resin Updated',
-        opening_stock: 80,
+        opening_stock: 20,
       } as any)
     ).rejects.toThrow(ValidationError);
 
-    await expect(
-      updateProduct('prod-uuid-1', {
-        name: 'Polymer Resin Updated',
-        opening_stock: 80,
-      } as any)
-    ).rejects.toThrow('Cannot modify Day Zero stock after transactions have been recorded');
+    // Increasing opening stock from 50 to 80 (+30) should adjust total_stock_kg from 150 to 180
+    await updateProduct('prod-uuid-1', {
+      name: 'Polymer Resin Updated',
+      opening_stock: 80,
+    } as any);
+
+    expect(updatedProducts.length).toBeGreaterThan(0);
+    expect(updatedProducts[0].opening_stock).toBe(80);
+    expect(updatedProducts[0].total_stock_kg).toBe(180);
   });
 
   it('should allow modifying Day Zero stock and overwrite initial FIFO bucket when transaction_count === 0', async () => {
@@ -96,16 +120,24 @@ describe('Update Product Day Zero Stock Ledger Lock Unit Tests', () => {
     };
 
     const mockTrx: any = (tableName: string) => {
+      let hasNotNullFilter = false;
       const query: any = {
         where: () => query,
         whereNull: () => query,
+        whereNotNull: () => {
+          hasNotNullFilter = true;
+          return query;
+        },
+        whereNot: () => query,
+        orderBy: () => query,
         join: () => query,
+        leftJoin: () => query,
         forUpdate: () => query,
         select: () => query,
         count: async () => [{ count: '0' }], // 0 transactions!
         first: async () => {
           if (tableName === 'products') return mockProduct;
-          if (tableName === 'inventory_batches') return mockInitBatch;
+          if (tableName === 'inventory_batches') return hasNotNullFilter ? null : mockInitBatch;
           if (tableName === 'categories') return { id: 'cat-uuid-1', name: 'HDPE' };
           return null;
         },
@@ -115,19 +147,22 @@ describe('Update Product Day Zero Stock Ledger Lock Unit Tests', () => {
           return [1];
         },
         insert: async () => [1],
+        then: (resolve: any) => {
+          if (tableName === 'inventory_batches') {
+            return Promise.resolve([{ ...mockInitBatch, remaining_qty: 65, batch_buy_price_per_kg: 125 }]).then(resolve);
+          }
+          return Promise.resolve([]).then(resolve);
+        },
       };
       return query;
     };
     mockTrx.schema = {
       hasTable: async () => true,
+      hasColumn: async () => true,
     };
     mockTrx.raw = (sql: string, bindings: any[]) => ({ sql, bindings });
 
     (db.transaction as jest.Mock).mockImplementation(async (callback: any) => callback(mockTrx));
-    (db as any).mockImplementation ? null : null;
-
-    // Mock findProductById
-    (db as any).mockImplementation = undefined;
 
     await updateProduct('prod-uuid-2', {
       name: 'Virgin HDPE Granules Premium',

@@ -368,7 +368,12 @@ describe('POS Inventory Overdraft Unit Tests', () => {
       'Cashier',
       'cust-walkin-uuid',
       1950,
-      'CASH'
+      'CASH',
+      undefined,
+      undefined,
+      undefined,
+      0,
+      0
     );
 
     expect(result).toBeDefined();

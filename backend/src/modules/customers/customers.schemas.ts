@@ -25,7 +25,7 @@ export const updateCustomerSchema = createCustomerSchema
 
 export const customerQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(1000).default(20),
+  limit: z.coerce.number().int().min(1).max(5000).default(20),
   search: z.string().optional(),
   city: z.string().optional(),
   customer_type: z.enum(['CASH', 'CREDIT']).optional(),

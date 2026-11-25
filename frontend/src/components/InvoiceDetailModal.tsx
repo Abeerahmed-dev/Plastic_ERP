@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store';
 import { productsService } from '../services/products.service';
 import sabirLogo from '../assets/sabirlogo.png';
-import { ThermalReceipt80mm, A4SalesInvoice, A4InvoicePrintPortal, prepareInvoiceForPrint } from './print';
+import { A4InvoicePrintPortal, prepareInvoiceForPrint } from './print';
 import { invoicesService } from '../services/invoices.service';
 import { printThermalReceipt } from '../utils/printThermal';
 import { getUrduProductName } from '../utils/bilingual';

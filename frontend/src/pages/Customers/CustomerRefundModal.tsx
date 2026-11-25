@@ -23,7 +23,7 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
   onClose,
   customer,
   invoiceId,
-  invoiceNumber,
+  invoiceNumber: _invoiceNumber,
   onSuccess,
 }) => {
   const queryClient = useQueryClient();
@@ -39,7 +39,7 @@ export const CustomerRefundModal: React.FC<CustomerRefundModalProps> = ({
 
   const { data: customersData } = useQuery({
     queryKey: ['customers', 'with-advances'],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     enabled: isOpen && !customer,
   });
 

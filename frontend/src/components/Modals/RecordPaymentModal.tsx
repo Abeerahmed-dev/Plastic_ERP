@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { X, Loader2, CreditCard, Building2, User, CheckCircle2, AlertCircle, Split, Wallet } from 'lucide-react';
+import { X, Loader2, CreditCard, Building2, AlertCircle, Split, Wallet } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsService } from '../../services/payments.service';
 import { supplierPaymentsService } from '../../services/supplier-payments.service';
@@ -75,7 +75,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   // Determine effective entity type (handles type="SUPPLIER", entityType="supplier", or id props)
   const resolvedType = (type || initialEntityType || (supplierId ? 'SUPPLIER' : 'CUSTOMER')).toString().toUpperCase();
   const isSupplier = resolvedType === 'SUPPLIER' || !!supplierId;
-  const effectiveEntityType: 'customer' | 'supplier' = isSupplier ? 'supplier' : 'customer';
 
   // Target entity ID passed as prop
   const preselectedEntityId = isSupplier
@@ -86,10 +85,10 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     ? purchaseInvoiceId || invoiceId || ''
     : invoiceId || '';
 
-  // Query Customers (limit 100 max per backend schema)
+  // Query Customers (load all active customers for dropdown)
   const { data: fetchedCustomersResponse, isLoading: isLoadingCustomers } = useQuery({
-    queryKey: ['customers', { page: 1, limit: 100 }],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryKey: ['customers', 'all-for-payment'],
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     enabled: isOpen && !isSupplier && !customersProp,
   });
 
@@ -123,7 +122,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   }, [customersProp, fetchedCustomersResponse]);
 
   // Query Sales Invoices (for Customer payment)
-  const { data: salesInvoices = [], isLoading: isLoadingSalesInvoices } = useQuery({
+  const { data: salesInvoices = [] } = useQuery({
     queryKey: ['invoices'],
     queryFn: () => invoicesService.getInvoices(),
     enabled: isOpen && !isSupplier,
@@ -274,7 +273,6 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   const currentInvoiceId = selectedInvoiceId;
   const activeInvoice = availableInvoices.find((inv) => String(inv.id) === String(currentInvoiceId));
   const selectedInvoice = activeInvoice;
-  const selectedInvoiceBalance = activeInvoice ? activeInvoice.balance_due : 0;
 
   const selectedEntity = useMemo(() => {
     if (!selectedEntityId) return null;

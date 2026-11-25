@@ -55,10 +55,8 @@ export default function SuppliersListPage() {
   const {
     selectedCity,
     selectedName,
-    selectedInvoice,
     setSelectedCity,
     setSelectedName,
-    setSelectedInvoice,
     availableCities,
     availableNames,
     resetFilters,
@@ -101,7 +99,6 @@ export default function SuppliersListPage() {
   const filteredTableRows = suppliers;
 
   const openCreate = () => { setEditTarget(undefined); setModalOpen(true); };
-  const openEdit = (s: Supplier) => { setEditTarget(s); setModalOpen(true); };
   const closeModal = () => { setModalOpen(false); setEditTarget(undefined); };
 
   return (

@@ -32,7 +32,8 @@ export function displayDateToIso(display: string): string | null {
   // Match DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
   const parts = cleaned.split(/[/.-]/);
   if (parts.length === 3) {
-    let [d, m, y] = parts;
+    const [d, m, rawY] = parts;
+    let y = rawY;
     if (d && m && y) {
       if (y.length === 2) {
         y = `20${y}`;

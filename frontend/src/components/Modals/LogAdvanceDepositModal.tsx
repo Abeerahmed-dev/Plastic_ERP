@@ -42,7 +42,7 @@ export const LogAdvanceDepositModal: React.FC<LogAdvanceDepositModalProps> = ({
   // Fetch customers if entityType is customer and none preselected
   const { data: customersData } = useQuery({
     queryKey: ['customers', 'all-for-advance'],
-    queryFn: () => getCustomers({ page: 1, limit: 100 }),
+    queryFn: () => getCustomers({ page: 1, limit: 5000 }),
     enabled: isOpen && entityType === 'customer' && !customer,
   });
 

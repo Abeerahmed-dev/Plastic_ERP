@@ -55,7 +55,7 @@ async function allocateSupplierPaymentToInvoices(
     const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
     const currentAllocated = Number(allocRes?.total_allocated || 0);
     const invTotal = Number(invoice.total_amount || 0);
-    const netInvoiceTotal = Boolean(invoice.has_returns) ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
+    const netInvoiceTotal = invoice.has_returns ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
     const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
 
     if (remainingUnpaid <= 0 || amountToAllocate > remainingUnpaid) {
@@ -135,7 +135,7 @@ async function allocateSupplierPaymentToInvoices(
       const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
       const currentAllocated = Number(allocRes?.total_allocated || 0);
       const invTotal = Number(inv.total_amount || 0);
-      const netInvoiceTotal = Boolean(inv.has_returns) ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
+      const netInvoiceTotal = inv.has_returns ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
       const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
 
       if (remainingUnpaid > 0) {
@@ -250,7 +250,7 @@ export async function createSupplierPayment(data: CreateSupplierPaymentInput, us
         const returnedTotal = Math.abs(Number(retRes?.total_returned || 0));
         const currentAllocated = Number(allocRes?.total_allocated || 0);
         const invTotal = Number(invoice.total_amount || 0);
-        const netInvoiceTotal = Boolean(invoice.has_returns) ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
+        const netInvoiceTotal = invoice.has_returns ? invTotal : Math.round((invTotal - returnedTotal) * 100) / 100;
         const remainingUnpaid = Math.round((netInvoiceTotal - currentAllocated) * 100) / 100;
 
         if (remainingUnpaid <= 0 || totalAmount > remainingUnpaid) {

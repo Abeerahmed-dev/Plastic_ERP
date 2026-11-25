@@ -210,7 +210,7 @@ export const SupplierPaymentFormModal = ({
                 )}
                 {invoices.length === 0 && (
                   <p className="mt-1 text-xs text-slate-500 font-medium">
-                    No unpaid bills found. Payment will be credited directly towards the supplier's closing ledger balance.
+                    No unpaid bills found. Payment will be credited directly towards the supplier&apos;s closing ledger balance.
                   </p>
                 )}
                 {errors.purchase_invoice_id && <p className="mt-1 text-xs text-red-600">{errors.purchase_invoice_id.message}</p>}
