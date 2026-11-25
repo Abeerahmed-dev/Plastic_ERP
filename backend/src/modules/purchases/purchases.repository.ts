@@ -5,6 +5,7 @@ export interface PurchaseInvoiceQuery {
   page: number;
   limit: number;
   search?: string;
+  city?: string;
   status?: string;
   supplier_id?: string;
   startDate?: string;
@@ -46,7 +47,7 @@ export async function generateNextDebitNoteNumber(trx: Knex.Transaction | Knex =
 }
 
 export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
-  const { page, limit, search, status, supplier_id, startDate, endDate, created_by, invoice_type } = query;
+  const { page, limit, search, city, status, supplier_id, startDate, endDate, created_by, invoice_type } = query;
   const offset = (page - 1) * limit;
 
   const baseQuery = db('purchase_invoices')
@@ -70,6 +71,7 @@ export async function findAllPurchaseInvoices(query: PurchaseInvoiceQuery) {
             .orWhereILike('suppliers.name', `%${search}%`);
         });
       }
+      if (city) qb.whereILike('suppliers.city', `%${city}%`);
       if (status) qb.where('purchase_invoices.status', status);
       if (supplier_id) qb.where('purchase_invoices.supplier_id', supplier_id);
       if (startDate) qb.where('purchase_invoices.date', '>=', startDate);

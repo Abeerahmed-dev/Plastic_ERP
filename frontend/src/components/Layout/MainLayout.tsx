@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from '../../store/auth.store';
 import { useThemeStore } from '../../store/theme.store';
 import { authService } from '../../services/auth.service';
+import { OfflineSyncStatus } from '../OfflineSyncStatus';
 import type { AuthUser } from '../../types/auth.types';
 import sabirLogo from '../../assets/sabirlogo.png';
 
@@ -440,6 +441,9 @@ export const MainLayout = () => {
 
                 {/* User Profile & Logout */}
                 <div className="flex items-center gap-3 shrink-0 pl-3 border-l border-slate-800">
+                  {/* Offline Vault / Sync Indicator */}
+                  <OfflineSyncStatus />
+
                   {/* Theme Quick Toggle */}
                   <button
                     type="button"
@@ -617,6 +621,9 @@ export const MainLayout = () => {
                 <span>Go to SPS ERP</span>
               </Link>
             )}
+
+            {/* Offline Vault / Sync Indicator */}
+            <OfflineSyncStatus />
 
             {/* Theme Quick Toggle */}
             <button

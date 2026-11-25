@@ -78,11 +78,23 @@ export default function PurchasesListPage() {
     );
   };
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['purchases', page],
-    queryFn: () => purchasesService.getInvoices({ page, limit: LIMIT }),
-    staleTime: 30000,
-  });
+  // Phase 1: Cascading filters hook populated from ALL suppliers (+ fetched invoices for invoice #)
+  const [selectedStatus, setSelectedStatus] = useState<string>('All');
+  const [nameInput, setNameInput] = useState('');
+  const [debouncedNameInput, setDebouncedNameInput] = useState('');
+
+  useEffect(() => {
+    const trimmed = nameInput.trim();
+    const timer = setTimeout(() => {
+      setDebouncedNameInput((prev) => {
+        if (prev !== trimmed) {
+          setPage(1);
+        }
+        return trimmed;
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [nameInput]);
 
   const { data: suppliersResponse } = useQuery({
     queryKey: ['suppliers', 'all-for-purchases'],
@@ -90,6 +102,32 @@ export default function PurchasesListPage() {
     staleTime: 30000,
   });
   const suppliersList = suppliersResponse?.data || [];
+
+  const normalizedAllSuppliers = useMemo(() => {
+    return suppliersList.map((s) => ({
+      ...s,
+      city: s.city || null,
+      name: s.name || '',
+      invoice_number: null,
+    }));
+  }, [suppliersList]);
+
+  const [pendingCity, setPendingCity] = useState<string | null>(null);
+  const [pendingName, setPendingName] = useState<string | null>(null);
+  const [pendingInvoice, setPendingInvoice] = useState<string | null>(null);
+
+  const activeSearch = pendingInvoice || pendingName || debouncedNameInput || undefined;
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['purchases', page, activeSearch, pendingCity],
+    queryFn: () => purchasesService.getInvoices({
+      page,
+      limit: LIMIT,
+      search: activeSearch,
+      city: pendingCity || undefined,
+    }),
+    staleTime: 30000,
+  });
 
   const invoices = data?.data || [];
   const meta = data?.meta;
@@ -103,9 +141,6 @@ export default function PurchasesListPage() {
     }));
   }, [invoices]);
 
-  // Phase 1: Cascading filters hook
-  const [selectedStatus, setSelectedStatus] = useState<string>('All');
-
   const {
     selectedCity,
     selectedName,
@@ -117,18 +152,68 @@ export default function PurchasesListPage() {
     availableNames,
     availableInvoices,
     resetFilters,
-  } = useCascadingFilters(normalizedInvoices);
+  } = useCascadingFilters(normalizedAllSuppliers, { invoices: normalizedInvoices });
+
+  const handleCityChange = (city: string | null) => {
+    setSelectedCity(city);
+    setPendingCity(city);
+    setPendingName(null);
+    setPendingInvoice(null);
+    setNameInput('');
+    setDebouncedNameInput('');
+    setPage(1);
+  };
+
+  const handleNameChange = (name: string | null) => {
+    setSelectedName(name);
+    setPendingName(name);
+    setPendingInvoice(null);
+    setNameInput('');
+    setDebouncedNameInput('');
+    setPage(1);
+  };
+
+  const handleNameInputChange = (text: string) => {
+    setNameInput(text);
+    if (selectedName) {
+      setSelectedName(null);
+      setPendingName(null);
+      setPendingInvoice(null);
+    }
+  };
+
+  const handleInvoiceChange = (invoice: string | null) => {
+    setSelectedInvoice(invoice);
+    setPendingInvoice(invoice);
+    setPage(1);
+  };
 
   const handleResetFilters = () => {
     resetFilters();
+    setPendingCity(null);
+    setPendingName(null);
+    setPendingInvoice(null);
+    setNameInput('');
+    setDebouncedNameInput('');
     setSelectedStatus('All');
+    setPage(1);
   };
 
   // Phase 3: Strict multi-condition filter before rendering
   const filteredTableRows = useMemo(() => {
+    const isExactSupplierMatch = selectedName
+      ? availableNames.some((n) => n.toLowerCase() === selectedName.toLowerCase())
+      : false;
+
     return normalizedInvoices.filter((row: any) => {
-      const matchesCity = selectedCity ? row.city === selectedCity : true;
-      const matchesName = selectedName ? row.name === selectedName : true;
+      const matchesCity = selectedCity
+        ? String(row.city || '').toLowerCase() === selectedCity.toLowerCase()
+        : true;
+      const matchesName = selectedName
+        ? isExactSupplierMatch
+          ? String(row.name || '').toLowerCase() === selectedName.toLowerCase()
+          : String(row.name || '').toLowerCase().includes(selectedName.toLowerCase())
+        : true;
       const matchesInvoice = selectedInvoice ? row.invoice_number === selectedInvoice : true;
 
       let matchesStatus = true;
@@ -140,7 +225,7 @@ export default function PurchasesListPage() {
 
       return matchesCity && matchesName && matchesInvoice && matchesStatus;
     });
-  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice, selectedStatus]);
+  }, [normalizedInvoices, selectedCity, selectedName, selectedInvoice, selectedStatus, availableNames]);
 
   const handleOpenInvoice = async (id: string) => {
     try {
@@ -210,9 +295,10 @@ export default function PurchasesListPage() {
           selectedName={selectedName}
           selectedInvoice={selectedInvoice}
           selectedStatus={selectedStatus}
-          onCityChange={setSelectedCity}
-          onNameChange={setSelectedName}
-          onInvoiceChange={setSelectedInvoice}
+          onCityChange={handleCityChange}
+          onNameChange={handleNameChange}
+          onNameInputChange={handleNameInputChange}
+          onInvoiceChange={handleInvoiceChange}
           onStatusChange={setSelectedStatus}
           availableCities={availableCities}
           availableNames={availableNames}

@@ -9,6 +9,16 @@ import { getCustomers } from '../../services/customers.service';
 import { productsService } from '../../services/products.service';
 import { bankAccountsService } from '../../services/bank-accounts.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
+import { offlineVaultService } from '../../services/offline-vault.service';
+import { offlineMasterCache } from '../../services/offline-master-cache.service';
+import { useAuthStore } from '../../store/auth.store';
+import {
+  generateUuidV4,
+  getLocalDateString,
+  getNextOfflineReference,
+  isEffectivelyOffline,
+  isOfflineOrNetworkError,
+} from '../../utils/networkError';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { toast, handleApiError } from '../../utils/toast';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
@@ -57,6 +67,7 @@ interface Props {
 
 export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHeldData }: Props) => {
   const qc = useQueryClient();
+  const { user } = useAuthStore();
   const [applyAdvance, setApplyAdvance] = useState(false);
   const [advanceAppliedAmount, setAdvanceAppliedAmount] = useState('0');
   const [paymentAccountId, setPaymentAccountId] = useState<string>('CASH_DRAWER');
@@ -100,7 +111,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     defaultValues: {
       customer_id: '',
       walk_in_customer_name: '',
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateString(),
       due_date: '',
       discount: 0,
       delivery_charge: 0,
@@ -495,7 +506,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     reset({
       customer_id: order.customer_id || '',
       walk_in_customer_name: (order as any).walk_in_customer_name || '',
-      date: (order as any).date || new Date().toISOString().split('T')[0],
+      date: (order as any).date || getLocalDateString(),
       due_date: (order as any).due_date || '',
       discount: Number(order.discount) || 0,
       delivery_charge: Number((order as any).delivery_charge) || 0,
@@ -575,7 +586,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         notes: watch('notes') || '',
         transport: watch('transport')?.trim() || '',
         due_date: '',
-        date: watch('date') || new Date().toISOString().split('T')[0],
+        date: watch('date') || getLocalDateString(),
       };
 
       await posService.createHeldOrder(heldPayload);
@@ -587,6 +598,89 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     } finally {
       setIsHolding(false);
     }
+  };
+
+  const buildOfflinePrintableInvoice = (cleanData: any, offlineId: string, localBillNo: string) => {
+    const selectedCust = customersResponse?.data.find((c: any) => c.id === cleanData.customer_id);
+    const resolvedWalkIn = cleanData.walk_in_customer_name || null;
+    const resolvedCustomerName = resolvedWalkIn || selectedCust?.name || 'Customer';
+    const directAdvance = !isCashCustomer ? Number(cleanData.advance_applied_amount || 0) : 0;
+    const paidAmt = isCashCustomer ? total : directAdvance;
+
+    const printableItems = (cleanData.items || []).map((item: any) => {
+      const prod = products.find((p) => p.id === item.product_id);
+      return {
+        product_id: item.product_id,
+        product_name: prod?.name || 'Product',
+        product_name_urdu: prod?.name_urdu,
+        product_code: prod?.code,
+        size: item.size || prod?.size || 'Standard',
+        category: prod?.category_name || prod?.category,
+        bag_weight_kg: Number(prod?.bag_weight_kg || 25),
+        quantity: Number(item.quantity || 0),
+        selected_unit: item.selected_unit || 'KG',
+        unit_price: Number(item.unit_price || 0),
+        total_price: Number(item.total_price ?? item.total ?? 0),
+      };
+    });
+
+    return {
+      id: offlineId,
+      offline_id: offlineId,
+      is_offline_pending: true,
+      invoice_number: localBillNo,
+      invoice_type: 'SALE',
+      date: cleanData.date,
+      created_at: new Date().toISOString(),
+      customer_id: cleanData.customer_id || 'WALK-IN',
+      customer_name: resolvedCustomerName,
+      walk_in_customer_name: resolvedWalkIn,
+      customer_code: selectedCust?.code || (resolvedWalkIn ? 'WALK-IN' : undefined),
+      customer_phone: selectedCust?.phone,
+      customer_city: selectedCust?.city,
+      transport: cleanData.transport || null,
+      subtotal,
+      discount: discountNum,
+      delivery_charge: deliveryChargeNum,
+      slip_charges: slipChargesNum,
+      total_amount: total,
+      paid_amount: paidAmt,
+      cash_tendered: isCashCustomer ? total : 0,
+      change_returned: 0,
+      balance_due: Math.max(0, total - paidAmt),
+      status: paidAmt >= total ? 'PAID' : (paidAmt > 0 ? 'PARTIAL' : 'UNPAID'),
+      payment_method: cleanData.payment_method,
+      payment_splits: cleanData.payment_splits,
+      notes: cleanData.notes || null,
+      created_by_name: user?.name || 'Staff',
+      created_by_role: user?.roleName || user?.role || 'ADMIN',
+      items: printableItems,
+      type: 'sales',
+    };
+  };
+
+  const saveInvoiceOffline = async (cleanData: any, offlineId: string) => {
+    const localBillNo = getNextOfflineReference('INV');
+    const printableInvoice = buildOfflinePrintableInvoice(cleanData, offlineId, localBillNo);
+
+    await offlineVaultService.saveOfflineSaleInvoice(cleanData, printableInvoice, offlineId);
+    void offlineMasterCache.adjustCachedProductStock(cleanData.items);
+
+    qc.setQueryData(['products'], (oldList: any) => {
+      if (!Array.isArray(oldList)) return oldList;
+      return oldList.map((prod: any) => {
+        const soldItems = (cleanData.items || []).filter((it: any) => it.product_id === prod.id);
+        if (soldItems.length === 0) return prod;
+        const soldKg = soldItems.reduce((s: number, it: any) => s + Number(it.quantity || 0), 0);
+        const curKg = Number(prod.total_stock_kg ?? prod.current_stock ?? 0);
+        const nextKg = Math.max(0, Math.round((curKg - soldKg) * 1000) / 1000);
+        return { ...prod, total_stock_kg: nextKg, current_stock: nextKg };
+      });
+    });
+
+    toast.warning('Offline Sync Pending: Sale invoice saved in local vault!');
+    onSuccess(printableInvoice, printCopyMode);
+    onClose();
   };
 
   const mutation = useMutation({
@@ -617,9 +711,6 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       onSuccess(fullCreatedInvoice, printCopyMode);
       onClose();
     },
-    onError: (error: any) => {
-      handleApiError(error);
-    }
   });
 
   useEffect(() => {
@@ -633,7 +724,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         reset({
           customer_id: '',
           walk_in_customer_name: '',
-          date: new Date().toISOString().split('T')[0],
+          date: getLocalDateString(),
           due_date: '',
           discount: 0,
           delivery_charge: 0,
@@ -735,6 +826,9 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         }))
         : undefined;
 
+      const offlineId = generateUuidV4();
+      const offlineTimestamp = Date.now();
+
       const cleanData = {
         ...data,
         customer_id: isCashCustomer
@@ -750,6 +844,8 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         payment_splits: cleanSplits,
         payment_account_id: isCashCustomer ? (isSplitPayment ? cleanSplits?.[0]?.payment_account_id : paymentAccountId) : undefined,
         payment_method: isCashCustomer ? (isSplitPayment ? 'SPLIT' : (paymentAccountId === 'CASH_DRAWER' ? 'CASH' : 'BANK_TRANSFER')) : undefined,
+        offline_id: offlineId,
+        offline_timestamp: offlineTimestamp,
         items: data.items.map(({ bags_input: _bagsInput, selected_family_name, selected_variant_id: _selectedVariantId, ...i }) => {
           const qty = Number(i.quantity || 0);
           const unitPrice = Math.round(Number(i.unit_price || 0) * 100) / 100;
@@ -771,7 +867,21 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
           };
         }),
       };
-      await mutation.mutateAsync(cleanData as any);
+
+      if (isEffectivelyOffline()) {
+        await saveInvoiceOffline(cleanData, offlineId);
+        return;
+      }
+
+      try {
+        await mutation.mutateAsync(cleanData as any);
+      } catch (err: any) {
+        if (isOfflineOrNetworkError(err)) {
+          await saveInvoiceOffline(cleanData, offlineId);
+          return;
+        }
+        throw err;
+      }
     } catch (err: any) {
       handleApiError(err);
     }

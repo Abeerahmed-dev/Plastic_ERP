@@ -25,6 +25,8 @@ interface SearchableComboboxProps {
   customValue?: string;
   onCustomSelect?: (val: string) => void;
   customOptionLabel?: (typedText: string) => string;
+  hideCustomBadge?: boolean;
+  onInputChange?: (text: string) => void;
 }
 
 export function SearchableCombobox({
@@ -44,6 +46,8 @@ export function SearchableCombobox({
   customValue = '',
   onCustomSelect,
   customOptionLabel,
+  hideCustomBadge = false,
+  onInputChange,
 }: SearchableComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,11 +76,13 @@ export function SearchableCombobox({
         setSearchQuery(selectedOption.label);
       } else if (allowCustom && customValue) {
         setSearchQuery(customValue);
+      } else if (allowCustom && !onCustomSelect && value) {
+        setSearchQuery(value);
       } else if (!value && !customValue) {
         setSearchQuery('');
       }
     }
-  }, [value, customValue, selectedOption, isOpen, allowCustom]);
+  }, [value, customValue, selectedOption, isOpen, allowCustom, onCustomSelect]);
 
   // Filtered options based on search query (trimmed and case-insensitive)
   const filteredOptions = useMemo(() => {
@@ -141,9 +147,12 @@ export function SearchableCombobox({
           if (q) {
             if (value && selectedOption && q.toLowerCase() === selectedOption.label.trim().toLowerCase()) {
               setSearchQuery(selectedOption.label);
-            } else {
+            } else if (onCustomSelect) {
               onChange('');
-              onCustomSelect?.(q);
+              onCustomSelect(q);
+              setSearchQuery(q);
+            } else {
+              onChange(q);
               setSearchQuery(q);
             }
           } else {
@@ -171,7 +180,9 @@ export function SearchableCombobox({
 
   const handleSelectSaved = (optValue: string) => {
     onChange(optValue);
-    onCustomSelect?.('');
+    if (onCustomSelect) {
+      onCustomSelect('');
+    }
     const chosen = options.find((o) => o.value === optValue);
     setSearchQuery(chosen ? chosen.label : '');
     setIsOpen(false);
@@ -180,8 +191,12 @@ export function SearchableCombobox({
   const handleSelectCustom = (customText: string) => {
     const cleanText = customText.trim();
     if (cleanText) {
-      onChange('');
-      onCustomSelect?.(cleanText);
+      if (onCustomSelect) {
+        onChange('');
+        onCustomSelect(cleanText);
+      } else {
+        onChange(cleanText);
+      }
       setSearchQuery(cleanText);
     }
     setIsOpen(false);
@@ -278,6 +293,7 @@ export function SearchableCombobox({
     e.stopPropagation();
     onChange('');
     onCustomSelect?.('');
+    onInputChange?.('');
     setSearchQuery('');
     setIsOpen(false);
     inputRef.current?.focus();
@@ -311,7 +327,9 @@ export function SearchableCombobox({
           autoFocus={autoFocus}
           value={searchQuery}
           onChange={(e) => {
-            setSearchQuery(e.target.value);
+            const nextVal = e.target.value;
+            setSearchQuery(nextVal);
+            onInputChange?.(nextVal);
             if (!isOpen) setIsOpen(true);
             setHighlightedIndex(0);
           }}
@@ -319,14 +337,14 @@ export function SearchableCombobox({
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className={`w-full py-2 pl-3 text-sm outline-none rounded-lg bg-transparent truncate ${
-            allowCustom && (value || customValue) ? 'pr-24' : 'pr-10'
+            allowCustom && !hideCustomBadge && (value || customValue) ? 'pr-24' : 'pr-10'
           } ${
             disabled ? 'text-slate-400 cursor-not-allowed' : 'text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500'
           }`}
         />
 
         <div className="absolute right-2 flex items-center gap-1.5 text-slate-400">
-          {allowCustom && (
+          {allowCustom && !hideCustomBadge && (
             value ? (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300">
                 Saved
@@ -435,13 +453,21 @@ export function SearchableCombobox({
                   className={`w-full text-left px-3 py-2.5 rounded-lg text-sm flex items-center justify-between gap-2 transition cursor-pointer ${
                     filteredOptions.length > 0 ? 'mt-1 border-t border-slate-100 dark:border-slate-800' : ''
                   } ${
-                    highlightedIndex === filteredOptions.length
-                      ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 font-bold ring-1 ring-amber-400'
-                      : 'bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/40 dark:hover:bg-amber-950/70 text-amber-900 dark:text-amber-200 font-semibold'
+                    hideCustomBadge
+                      ? highlightedIndex === filteredOptions.length
+                        ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-900 dark:text-blue-100 font-semibold ring-1 ring-blue-300'
+                        : 'bg-slate-50 hover:bg-blue-50/70 dark:bg-slate-800/40 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium'
+                      : highlightedIndex === filteredOptions.length
+                        ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-950 dark:text-amber-100 font-bold ring-1 ring-amber-400'
+                        : 'bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/40 dark:hover:bg-amber-950/70 text-amber-900 dark:text-amber-200 font-semibold'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 text-xs font-bold shrink-0">
+                    <span className={`flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold shrink-0 ${
+                      hideCustomBadge
+                        ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-100'
+                        : 'bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100'
+                    }`}>
                       +
                     </span>
                     <span className="truncate">
@@ -454,9 +480,11 @@ export function SearchableCombobox({
                         )}
                     </span>
                   </div>
-                  <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100 border border-amber-300 dark:border-amber-700">
-                    Walk-In
-                  </span>
+                  {!hideCustomBadge && (
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100 border border-amber-300 dark:border-amber-700">
+                      Walk-In
+                    </span>
+                  )}
                 </button>
               )}
             </>

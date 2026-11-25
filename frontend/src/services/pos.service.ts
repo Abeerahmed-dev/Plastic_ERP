@@ -23,6 +23,8 @@ export interface POSCheckoutData {
   bank_account_id?: string;
   split_cash_amount?: number;
   split_bank_amount?: number;
+  offline_id?: string;
+  offline_timestamp?: number;
 }
 
 export interface ShiftAuditItem {
@@ -72,7 +74,9 @@ export interface POSHeldOrder {
 
 export const posService = {
   checkout: async (data: POSCheckoutData): Promise<Invoice> => {
-    const response = await api.post<{ data: Invoice }>('/pos/checkout', data);
+    const response = await api.post<{ data: Invoice }>('/pos/checkout', data, {
+      timeout: 6000,
+    });
     return response.data.data;
   },
 

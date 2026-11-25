@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, FileText, RotateCcw, ShoppingCart, Printer, ArrowLeft, UserCheck, ShieldCheck, User, Clock } from 'lucide-react';
 import { invoicesService } from '../../services/invoices.service';
 import { posService } from '../../services/pos.service';
+import { offlineVaultService, OFFLINE_VAULT_CHANGED_EVENT, OfflineInvoiceRecord } from '../../services/offline-vault.service';
 import { useAuthStore } from '../../store/auth.store';
 import { InvoiceFormModal } from './InvoiceFormModal';
 import { HeldInvoicesModal } from './HeldInvoicesModal';
@@ -72,10 +73,63 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
 
   const canWrite = isCashier || isOwner || hasPermission('customers:write') || hasPermission('sales:write');
 
-  const { data: invoices = [], isLoading, refetch } = useQuery({
+  const { data: serverInvoices = [], isLoading, refetch } = useQuery({
     queryKey: ['invoices'],
     queryFn: invoicesService.getInvoices,
   });
+
+  const [offlineRecords, setOfflineRecords] = useState<OfflineInvoiceRecord[]>([]);
+
+  useEffect(() => {
+    const loadOffline = () => {
+      offlineVaultService.getOfflineInvoices()
+        .then((recs) => setOfflineRecords(recs))
+        .catch(() => setOfflineRecords([]));
+    };
+    loadOffline();
+    window.addEventListener(OFFLINE_VAULT_CHANGED_EVENT, loadOffline);
+    return () => window.removeEventListener(OFFLINE_VAULT_CHANGED_EVENT, loadOffline);
+  }, []);
+
+  const invoices = useMemo(() => {
+    const serverOfflineIds = new Set(
+      (serverInvoices || [])
+        .map((inv: any) => inv?.offline_id)
+        .filter((oid: any) => typeof oid === 'string' && oid.length > 0)
+    );
+
+    const offlineDisplayRows = [...offlineRecords]
+      .filter((rec) => !serverOfflineIds.has(rec.id))
+      .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+      .map((rec) => {
+        const preview = rec.printable_preview || {};
+        const fallbackInvNum = rec.record_type === 'POS' ? `POS-OFF-${rec.id.slice(0, 6)}` : `INV-OFF-${rec.id.slice(0, 6)}`;
+        return {
+          ...preview,
+          id: rec.id,
+          is_offline_pending: true,
+          sync_error: rec.sync_error,
+          invoice_number: preview.invoice_number || rec.local_bill_number || fallbackInvNum,
+          customer_id: rec.customer_id || preview.customer_id || 'WALK-IN',
+          customer_name: preview.customer_name || rec.customer_name || rec.walk_in_customer_name || 'Walk-In Customer',
+          walk_in_customer_name: preview.walk_in_customer_name ?? rec.walk_in_customer_name ?? null,
+          subtotal: preview.subtotal ?? rec.subtotal ?? 0,
+          discount: preview.discount ?? rec.discount ?? 0,
+          delivery_charge: preview.delivery_charge ?? rec.delivery_charges ?? 0,
+          slip_charges: preview.slip_charges ?? rec.slip_charges ?? 2,
+          total_amount: preview.total_amount ?? rec.total_amount ?? 0,
+          paid_amount: preview.paid_amount ?? rec.amount_paid ?? 0,
+          date: preview.date || rec.payload?.date || new Date(rec.timestamp).toISOString().split('T')[0],
+          created_at: preview.created_at || new Date(rec.timestamp).toISOString(),
+          notes: rec.record_type === 'POS' ? 'POS Offline Sale' : (preview.notes || rec.payload?.notes || null),
+          created_by_name: preview.created_by_name || rec.created_by_name || user?.name || 'Staff',
+          created_by_role: preview.created_by_role || userRole || 'CASHIER',
+          items: preview.items || rec.items || [],
+        };
+      });
+
+    return [...offlineDisplayRows, ...serverInvoices];
+  }, [offlineRecords, serverInvoices, user?.name, userRole]);
 
   const { data: allHeldOrders = [], isLoading: isLoadingHeldOrders, refetch: refetchHeldOrders } = useQuery({
     queryKey: ['posHeldOrders'],
@@ -196,7 +250,18 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
     setCurrentPage(1);
   };
 
-  const handleOpenInvoice = async (id: string) => {
+  const handleOpenInvoice = async (invoiceOrId: any) => {
+    const localMatch = typeof invoiceOrId === 'object'
+      ? invoiceOrId
+      : invoices.find((inv: any) => inv.id === invoiceOrId);
+
+    if (localMatch?.is_offline_pending) {
+      setDetailModalInvoice(prepareInvoiceForPrint(localMatch, allProducts) as any);
+      setIsDetailModalOpen(true);
+      return;
+    }
+
+    const id = typeof invoiceOrId === 'string' ? invoiceOrId : invoiceOrId?.id;
     try {
       const detail = await invoicesService.getInvoice(id);
       setDetailModalInvoice(detail as any);
@@ -214,7 +279,10 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
   const handlePrintThermal = async (invoice: any) => {
     try {
       setPrintingInvoiceId(invoice.id);
-      const detail = await invoicesService.getInvoice(invoice.id);
+      let detail = invoice;
+      if (!invoice.is_offline_pending) {
+        detail = await invoicesService.getInvoice(invoice.id);
+      }
       const items = (detail as any)?.items || [];
       await printThermalReceipt({
         invoice: detail,
@@ -598,6 +666,14 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                                     POS
                                   </span>
                                 )}
+                                {(invoice as any).is_offline_pending && (
+                                  <span
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300"
+                                    title={(invoice as any).sync_error || 'Saved locally while offline — will sync automatically when connected'}
+                                  >
+                                    Pending Sync
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
                                 View details →
@@ -698,7 +774,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
                             <span>Details</span>
                           </button>
 
-                          {!isCreditNote && canWrite && (
+                          {!isCreditNote && !(invoice as any).is_offline_pending && canWrite && (
                             <button
                               onClick={() => handleInitiateReturn(invoice.id)}
                               className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg border border-red-200 transition-all active:scale-95 shadow-2xs cursor-pointer"

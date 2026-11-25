@@ -1,5 +1,6 @@
 import api from './api';
 import { BankAccount, CreateBankAccountInput, UpdateBankAccountInput } from '../types/bank-account.types';
+import { offlineMasterCache } from './offline-master-cache.service';
 
 export interface BankTransactionItem {
   id: string;
@@ -21,8 +22,10 @@ export interface BankAccountTransactionsData {
 
 export const bankAccountsService = {
   getBankAccounts: async (): Promise<BankAccount[]> => {
-    const response = await api.get('/bank-accounts');
-    return response.data.data || [];
+    return offlineMasterCache.fetchWithCache('bank_accounts', async () => {
+      const response = await api.get('/bank-accounts');
+      return response.data.data || [];
+    });
   },
 
   getCashDrawerBalance: async (): Promise<{ balance: number }> => {

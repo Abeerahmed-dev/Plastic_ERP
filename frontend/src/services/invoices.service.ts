@@ -15,8 +15,12 @@ export const invoicesService = {
     return response.data.data;
   },
 
-  createInvoice: async (data: CreateInvoiceData): Promise<Invoice> => {
-    const response = await api.post<ApiSuccess<Invoice>>('/invoices', data);
+  createInvoice: async (
+    data: CreateInvoiceData & { offline_id?: string; offline_timestamp?: number }
+  ): Promise<Invoice> => {
+    const response = await api.post<ApiSuccess<Invoice>>('/invoices', data, {
+      timeout: 6000,
+    });
     return response.data.data;
   },
 

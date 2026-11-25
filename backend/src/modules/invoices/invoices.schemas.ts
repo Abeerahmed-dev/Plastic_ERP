@@ -38,6 +38,8 @@ export const createInvoiceSchema = z
     payment_account_id: z.string().optional().nullable(),
     payment_method: z.string().optional().nullable(),
     payment_splits: z.array(paymentSplitSchema).optional().nullable(),
+    offline_id: z.string().max(100).optional().nullable(),
+    offline_timestamp: z.number().optional().nullable(),
     items: z.array(invoiceItemSchema).min(1, 'At least one item is required'),
   })
   .refine(

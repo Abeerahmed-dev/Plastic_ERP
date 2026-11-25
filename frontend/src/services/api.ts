@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/auth.store';
+import { isOfflineOrNetworkError } from '../utils/networkError';
 
 /**
  * Axios instance pre-configured for the Sabir Plastic ERP API.
@@ -76,8 +77,12 @@ api.interceptors.response.use(
         // Retry original request with new token
         originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return api(originalRequest);
-      } catch (err) {
+      } catch (err: any) {
         refreshPromise = null;
+        // Preserve session if refresh failed solely because internet is down/slow
+        if (isOfflineOrNetworkError(err) || !err?.response) {
+          return Promise.reject(err);
+        }
         useAuthStore.getState().clearAuth();
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = '/login';

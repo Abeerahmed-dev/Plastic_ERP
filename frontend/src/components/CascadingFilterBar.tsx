@@ -12,6 +12,7 @@ export interface CascadingFilterBarProps {
   // State setters from useCascadingFilters
   onCityChange: (city: string | null) => void;
   onNameChange: (name: string | null) => void;
+  onNameInputChange?: (text: string) => void;
   onInvoiceChange?: (invoice: string | null) => void;
   onStatusChange?: (status: string) => void;
 
@@ -62,6 +63,7 @@ export function CascadingFilterBar({
   selectedStatus = 'All',
   onCityChange,
   onNameChange,
+  onNameInputChange,
   onInvoiceChange,
   onStatusChange,
   availableCities,
@@ -173,6 +175,7 @@ export function CascadingFilterBar({
           <SearchableCombobox
             value={selectedName || ''}
             onChange={(val) => onNameChange(val || null)}
+            onInputChange={onNameInputChange}
             options={nameOptions}
             placeholder={
               isNameDisabled
@@ -183,7 +186,8 @@ export function CascadingFilterBar({
             }
             disabled={isNameDisabled}
             allowCustom={true}
-            onCustomSelect={(val) => onNameChange(val || null)}
+            hideCustomBadge={true}
+            customOptionLabel={(q) => `Search "${q}"`}
             className="w-full"
           />
         </div>

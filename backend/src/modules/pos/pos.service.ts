@@ -25,7 +25,11 @@ export async function checkout(userId: string, data: CheckoutInput, userRole?: s
     data.split_cash_amount,
     data.split_bank_amount,
     deliveryCharges,
-    slipCharges
+    slipCharges,
+    {
+      offline_id: data.offline_id || undefined,
+      offline_timestamp: data.offline_timestamp || undefined,
+    }
   );
   return invoice;
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
@@ -37,7 +37,7 @@ export default function SuppliersListPage() {
   // 1. Fetch all suppliers for filter dropdowns (names & cities across ALL pages)
   const { data: allSuppliersData } = useQuery({
     queryKey: ['suppliers', 'filterOptions'],
-    queryFn: () => getSuppliers({ limit: 1000 }),
+    queryFn: () => getSuppliers({ limit: 5000 }),
     staleTime: 30000,
   });
   const allSuppliers = allSuppliersData?.data ?? [];
@@ -62,28 +62,59 @@ export default function SuppliersListPage() {
     resetFilters,
   } = useCascadingFilters(normalizedAllSuppliers);
 
+  const [nameInput, setNameInput] = useState('');
+  const [debouncedNameInput, setDebouncedNameInput] = useState('');
+
+  useEffect(() => {
+    const trimmed = nameInput.trim();
+    const timer = setTimeout(() => {
+      setDebouncedNameInput((prev) => {
+        if (prev !== trimmed) {
+          setPage(1);
+        }
+        return trimmed;
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [nameInput]);
+
   const handleCityChange = (city: string | null) => {
     setSelectedCity(city);
+    setNameInput('');
+    setDebouncedNameInput('');
     setPage(1);
   };
 
   const handleNameChange = (name: string | null) => {
     setSelectedName(name);
+    setNameInput('');
+    setDebouncedNameInput('');
     setPage(1);
+  };
+
+  const handleNameInputChange = (text: string) => {
+    setNameInput(text);
+    if (selectedName) {
+      setSelectedName(null);
+    }
   };
 
   const handleResetFilters = () => {
     resetFilters();
+    setNameInput('');
+    setDebouncedNameInput('');
     setPage(1);
   };
 
+  const activeSearch = selectedName || debouncedNameInput || undefined;
+
   // 2. Query paginated suppliers passing search and city to backend
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['suppliers', page, selectedName, selectedCity],
+    queryKey: ['suppliers', page, activeSearch, selectedCity],
     queryFn: () => getSuppliers({
       page,
       limit: LIMIT,
-      search: selectedName || undefined,
+      search: activeSearch,
       city: selectedCity || undefined,
     }),
   });
@@ -133,6 +164,7 @@ export default function SuppliersListPage() {
             selectedName={selectedName}
             onCityChange={handleCityChange}
             onNameChange={handleNameChange}
+            onNameInputChange={handleNameInputChange}
             availableCities={availableCities}
             availableNames={availableNames}
             onReset={handleResetFilters}

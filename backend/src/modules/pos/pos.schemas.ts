@@ -27,6 +27,8 @@ export const checkoutSchema = z.object({
   bank_account_id: z.string().uuid().optional().nullable(),
   split_cash_amount: z.number().min(0).optional(),
   split_bank_amount: z.number().min(0).optional(),
+  offline_id: z.string().max(100).optional().nullable(),
+  offline_timestamp: z.number().optional().nullable(),
 });
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>;

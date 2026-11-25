@@ -470,34 +470,48 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
   doc.write(html);
   doc.close();
 
-  // Wait for images and fonts to be ready in the isolated iframe, then print immediately
-  // Logo aur fonts load hone ka intezar
+  // Wait for images and fonts with short safety timeouts so offline mode never blocks win.print()
   await Promise.all(
-    Array.from(doc.images).map((img) =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise<void>((res) => {
-            img.onload = img.onerror = () => res();
-          })
-    )
+    Array.from(doc.images).map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise<void>((res) => {
+        let settled = false;
+        const done = () => {
+          if (!settled) {
+            settled = true;
+            res();
+          }
+        };
+        img.onload = done;
+        img.onerror = done;
+        setTimeout(done, 250);
+      });
+    })
   );
-  try { await (doc as any).fonts?.ready; } catch { /* ignore font readiness errors */ }
+  try {
+    if ((doc as any).fonts?.ready) {
+      await Promise.race([
+        (doc as any).fonts.ready,
+        new Promise<void>((res) => setTimeout(res, 150)),
+      ]);
+    }
+  } catch { /* ignore font readiness errors */ }
 
   // Receipt ki asli height measure karein
   const slipPages = doc.querySelectorAll('.slip-page');
   let heightMm = 0;
   if (slipPages.length > 1) {
-    const heights = Array.from(slipPages).map((el) => Math.ceil((el as HTMLElement).getBoundingClientRect().height));
-    const maxHeightPx = Math.max(...heights);
+    const heights = Array.from(slipPages).map((el) => Math.ceil((el as HTMLElement).getBoundingClientRect().height || 0));
+    const maxHeightPx = Math.max(300, ...heights);
     heightMm = Math.ceil((maxHeightPx * 25.4) / 96) + 4; // 4mm safety
     iframe.style.height = `${maxHeightPx}px`;
   } else {
-    const container = doc.querySelector('.receipt-container') as HTMLElement;
-    const heightPx = Math.ceil(container.getBoundingClientRect().height);
+    const container = doc.querySelector('.receipt-container') as HTMLElement | null;
+    const heightPx = Math.max(300, Math.ceil(container?.getBoundingClientRect().height || 0));
     heightMm = Math.ceil((heightPx * 25.4) / 96) + 4; // 4mm safety
     iframe.style.height = `${heightPx}px`;
   }
- 
+
   // Page ki exact size set karein (size: auto ki jagah)
   const pageStyle = doc.createElement('style');
   pageStyle.textContent = `@page { size: 80mm ${heightMm}mm; margin: 0; }`;
@@ -515,8 +529,19 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
     const win = iframe.contentWindow;
     if (win) {
       win.onafterprint = finish;
-      win.focus();
-      win.print();
+      try {
+        win.focus();
+        win.print();
+      } catch (err) {
+        console.error('Thermal iframe print error:', err);
+        try {
+          window.print();
+        } catch {
+          // ignore
+        }
+      }
+    } else {
+      finish();
     }
     setTimeout(finish, 500);
   });

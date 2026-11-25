@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft } from 'lucide-react';
@@ -39,7 +39,7 @@ export default function CustomersListPage() {
   // 1. Fetch all customers for filter dropdowns (names & cities across ALL pages for active tab)
   const { data: allCustomersData } = useQuery({
     queryKey: ['customers', 'filterOptions', activeTab],
-    queryFn: () => getCustomers({ limit: 1000, customer_type: activeTab }),
+    queryFn: () => getCustomers({ limit: 5000, customer_type: activeTab }),
     staleTime: 30000,
   });
   const allCustomers = allCustomersData?.data ?? [];
@@ -64,29 +64,60 @@ export default function CustomersListPage() {
     resetFilters,
   } = useCascadingFilters(normalizedAllCustomers);
 
+  const [nameInput, setNameInput] = useState('');
+  const [debouncedNameInput, setDebouncedNameInput] = useState('');
+
+  useEffect(() => {
+    const trimmed = nameInput.trim();
+    const timer = setTimeout(() => {
+      setDebouncedNameInput((prev) => {
+        if (prev !== trimmed) {
+          setPage(1);
+        }
+        return trimmed;
+      });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [nameInput]);
+
   const handleCityChange = (city: string | null) => {
     setSelectedCity(city);
+    setNameInput('');
+    setDebouncedNameInput('');
     setPage(1);
   };
 
   const handleNameChange = (name: string | null) => {
     setSelectedName(name);
+    setNameInput('');
+    setDebouncedNameInput('');
     setPage(1);
+  };
+
+  const handleNameInputChange = (text: string) => {
+    setNameInput(text);
+    if (selectedName) {
+      setSelectedName(null);
+    }
   };
 
   const handleResetFilters = () => {
     resetFilters();
+    setNameInput('');
+    setDebouncedNameInput('');
     setPage(1);
   };
 
+  const activeSearch = selectedName || debouncedNameInput || undefined;
+
   // 2. Fetch paginated customers with search and city filter applied at backend level
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['customers', page, activeTab, selectedName, selectedCity],
+    queryKey: ['customers', page, activeTab, activeSearch, selectedCity],
     queryFn: () => getCustomers({
       page,
       limit: LIMIT,
       customer_type: activeTab,
-      search: selectedName || undefined,
+      search: activeSearch,
       city: selectedCity || undefined,
     }),
   });
@@ -143,7 +174,12 @@ export default function CustomersListPage() {
         {/* Master List Segment Tabs */}
         <div className="flex border-b border-gray-200 mt-5 space-x-6">
           <button
-            onClick={() => { setActiveTab('CREDIT'); setPage(1); }}
+            onClick={() => {
+              setActiveTab('CREDIT');
+              setNameInput('');
+              setDebouncedNameInput('');
+              setPage(1);
+            }}
             className={`pb-3 text-sm font-semibold border-b-2 transition ${
               activeTab === 'CREDIT'
                 ? 'border-blue-600 text-blue-600'
@@ -153,7 +189,12 @@ export default function CustomersListPage() {
             Credit Accounts (Udhaar)
           </button>
           <button
-            onClick={() => { setActiveTab('CASH'); setPage(1); }}
+            onClick={() => {
+              setActiveTab('CASH');
+              setNameInput('');
+              setDebouncedNameInput('');
+              setPage(1);
+            }}
             className={`pb-3 text-sm font-semibold border-b-2 transition ${
               activeTab === 'CASH'
                 ? 'border-blue-600 text-blue-600'
@@ -171,6 +212,7 @@ export default function CustomersListPage() {
             selectedName={selectedName}
             onCityChange={handleCityChange}
             onNameChange={handleNameChange}
+            onNameInputChange={handleNameInputChange}
             availableCities={availableCities}
             availableNames={availableNames}
             onReset={handleResetFilters}

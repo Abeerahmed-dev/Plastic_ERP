@@ -4,12 +4,19 @@ import { toast } from 'sonner';
 import { ShoppingCart, Trash2, AlertCircle, UserCheck, Lock, UserPlus, RotateCcw, Printer, FileText, Copy, Clock, PauseCircle, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { productsService } from '../../services/products.service';
 import { posService, POSHeldOrder } from '../../services/pos.service';
-import { offlineVaultService } from '../../services/offline-vault.service';
+import { offlineVaultService, OFFLINE_VAULT_CHANGED_EVENT } from '../../services/offline-vault.service';
+import { offlineMasterCache } from '../../services/offline-master-cache.service';
 import { reportsService } from '../../services/reports.service';
 import { getCustomers } from '../../services/customers.service';
 import { useAuthStore } from '../../store/auth.store';
 import { useReportStore } from '../../store/useReportStore';
 import { printThermalReceipt } from '../../utils/printThermal';
+import {
+  generateUuidV4,
+  getNextOfflineReference,
+  isEffectivelyOffline,
+  isOfflineOrNetworkError,
+} from '../../utils/networkError';
 import { SearchableCombobox, ComboboxOption } from '../../components/SearchableCombobox';
 import { ProductSizeFilter } from '../../components/Common/ProductSizeFilter';
 import { AddCustomerModal } from './AddCustomerModal';
@@ -60,12 +67,42 @@ export default function POSPage() {
 
   const [lastInvoice, setLastInvoice] = useState<any>(null);
   const [offlinePendingCount, setOfflinePendingCount] = useState<number>(0);
+  const [isSyncingNow, setIsSyncingNow] = useState<boolean>(false);
+  const pendingClientOfflineIdRef = useRef<string | null>(null);
 
   const queryClient = useQueryClient();
 
+  const handleManualSync = async () => {
+    if (isSyncingNow) return;
+    try {
+      setIsSyncingNow(true);
+      const count = await offlineVaultService.getPendingCount();
+      if (count === 0) {
+        setOfflinePendingCount(0);
+        return;
+      }
+      toast.info('Syncing offline invoices...');
+      await offlineVaultService.syncOfflineInvoices();
+      const newCount = await offlineVaultService.getPendingCount();
+      setOfflinePendingCount(newCount);
+      toast.success('Offline invoices synchronized successfully!');
+      await invalidateAllDomains(queryClient);
+      erpSyncBus.emit('offline-sync');
+    } catch (err: any) {
+      console.error('Offline sync error:', err);
+      toast.error(err?.response?.data?.error || err?.message || 'Offline sync failed — will retry when connection improves.');
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
   // Track pending offline vault records & register auto-sync listener
   useEffect(() => {
-    offlineVaultService.getPendingCount().then(setOfflinePendingCount);
+    const refreshPendingCount = () => {
+      offlineVaultService.getPendingCount().then(setOfflinePendingCount);
+    };
+
+    refreshPendingCount();
 
     const handleOnline = async () => {
       try {
@@ -85,7 +122,11 @@ export default function POSPage() {
     };
 
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    window.addEventListener(OFFLINE_VAULT_CHANGED_EVENT, refreshPendingCount);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener(OFFLINE_VAULT_CHANGED_EVENT, refreshPendingCount);
+    };
   }, [queryClient]);
 
   // Subscribe to cross-page mutations to keep POS products, cash tally, and metrics synchronized
@@ -349,7 +390,7 @@ export default function POSPage() {
     cart.every((item) => Number(item.quantity) > 0 && Number(item.price !== undefined ? item.price : item.unit_price) >= 0);
 
   const checkoutMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (offlineIdOverride?: string) =>
       posService.checkout({
         customer_id: selectedCustomerId || undefined,
         items: cart.map((i) => {
@@ -370,6 +411,8 @@ export default function POSPage() {
         bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
         split_cash_amount: isSplit ? effectiveSplitCash : undefined,
         split_bank_amount: isSplit ? effectiveSplitBank : undefined,
+        offline_id: offlineIdOverride || pendingClientOfflineIdRef.current || undefined,
+        offline_timestamp: Date.now(),
       }),
     onSuccess: async (invoice: any) => {
       const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
@@ -429,46 +472,109 @@ export default function POSPage() {
       toast.success(`Sale ${invoice.invoice_number || 'POS'} completed successfully!`);
     },
     onError: async (err: any) => {
-      const isNetworkErr =
-        (typeof navigator !== 'undefined' && !navigator.onLine) ||
-        err?.code === 'ERR_NETWORK' ||
-        err?.message?.includes('Network') ||
-        err?.message?.includes('Failed to fetch');
-
-      if (isNetworkErr) {
-        await handleOfflineCheckout();
+      if (isOfflineOrNetworkError(err)) {
+        await handleOfflineCheckout(pendingClientOfflineIdRef.current || undefined);
+        pendingClientOfflineIdRef.current = null;
         return;
       }
+      pendingClientOfflineIdRef.current = null;
       alert(err?.response?.data?.error || err.message || 'Checkout failed');
     },
   });
 
-  const handleOfflineCheckout = async () => {
+  const handleOfflineCheckout = async (clientOfflineId?: string) => {
     try {
+      const selectedCustomerName = customers.find(c => c.id === selectedCustomerId)?.name || 'Walk-In Customer';
+      const selectedBank = bankAccounts.find((b: any) => b.id === selectedBankAccountId);
+      const activeMethod = paymentMethod;
+      const tendered = activeMethod === 'CASH'
+        ? effectiveAmountPaid
+        : (activeMethod === 'SPLIT' ? effectiveSplitCash : 0);
+      const returned = activeMethod === 'BANK'
+        ? 0
+        : Math.max(0, (activeMethod === 'SPLIT' ? (effectiveSplitCash + effectiveSplitBank) : effectiveAmountPaid) - total);
+      const balanceDue = Math.max(0, total - effectiveAmountPaid);
+      const localBillNo = getNextOfflineReference('POS');
+      const nowIso = new Date().toISOString();
+
       const orderData = {
+        record_type: 'POS' as const,
+        local_bill_number: localBillNo,
         customer_id: selectedCustomerId || undefined,
+        customer_name: selectedCustomerName,
         items: cart.map((i) => {
           const itemPrice = Number(i.price !== undefined ? i.price : i.unit_price) || 0;
           return {
             product_id: i.product_id,
+            productName: i.productName,
+            name_urdu: i.name_urdu,
+            category: i.category,
             quantity: Number(i.quantity) || 0,
             selected_unit: i.selected_unit,
             unit_price: itemPrice,
             price: itemPrice,
+            bag_weight_kg: i.bag_weight_kg,
           };
         }),
+        subtotal,
         discount: effectiveDiscount,
         delivery_charges: effectiveDeliveryCharges,
         delivery_charge: effectiveDeliveryCharges,
         slip_charges: effectiveSlipCharges,
+        total_amount: total,
         amount_paid: effectiveAmountPaid,
-        payment_method: paymentMethod,
-        bank_account_id: (paymentMethod === 'BANK' || paymentMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
+        payment_method: activeMethod,
+        bank_account_id: (activeMethod === 'BANK' || activeMethod === 'SPLIT') ? (selectedBankAccountId || undefined) : undefined,
         split_cash_amount: isSplit ? effectiveSplitCash : undefined,
         split_bank_amount: isSplit ? effectiveSplitBank : undefined,
+        created_by_name: user?.name || 'Cashier',
+        date: nowIso,
+        offline_timestamp: Date.now(),
       };
 
-      await offlineVaultService.saveOfflineInvoice(orderData);
+      const savedRecord = await offlineVaultService.saveOfflineInvoice(orderData, clientOfflineId);
+
+      // Persist decremented stock in master cache so page reloads stay accurate offline
+      void offlineMasterCache.adjustCachedProductStock(orderData.items);
+
+      const isDuplicateMode = slipMode === 'DUPLICATE';
+      const receiptData = {
+        invoice: {
+          id: savedRecord.id,
+          invoice_number: localBillNo,
+          bill_number: localBillNo,
+          created_at: nowIso,
+          date: nowIso,
+          subtotal,
+          discount: effectiveDiscount,
+          delivery_charges: effectiveDeliveryCharges,
+          delivery_charge: effectiveDeliveryCharges,
+          slip_charges: effectiveSlipCharges,
+          total_amount: total,
+          payment_method: activeMethod,
+          bank_name: selectedBank ? selectedBank.bank_name : undefined,
+          paid_amount: effectiveAmountPaid,
+          cash_tendered: tendered,
+          change_returned: returned,
+          balance_due: balanceDue,
+          split_cash_amount: activeMethod === 'SPLIT' ? effectiveSplitCash : undefined,
+          split_bank_amount: activeMethod === 'SPLIT' ? effectiveSplitBank : undefined,
+          is_offline_pending: true,
+        },
+        items: [...cart],
+        cashierName: user?.name || 'Cashier',
+        customerName: selectedCustomerName,
+        isDuplicate: false,
+        printBoth: isDuplicateMode,
+      };
+
+      setLastInvoice(receiptData);
+
+      // Trigger print cleanly & surface any async error
+      printThermalReceipt(receiptData).catch((printErr) => {
+        console.error('Offline thermal print error:', printErr);
+        toast.error('Print popup blocked — click "Reprint Original (1 Slip)" above.');
+      });
 
       // State Assertion: Cashier local UI stock quantity decrements immediately to prevent blind overselling
       queryClient.setQueriesData({ queryKey: ['posProducts'] }, (oldData: any) => {
@@ -500,7 +606,7 @@ export default function POSPage() {
       setSelectedCustomerId('');
       setSelectedBankAccountId('');
 
-      toast.warning('Offline Sync Pending: Sale saved in local vault');
+      toast.warning('Offline Sale: Slip printing & bill saved locally for auto-sync!');
     } catch (err: any) {
       console.error('Failed to store offline checkout:', err);
       toast.error('Failed to save offline sale');
@@ -609,12 +715,14 @@ export default function POSPage() {
       }
     }
 
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (isEffectivelyOffline()) {
       handleOfflineCheckout();
       return;
     }
 
-    checkoutMutation.mutate();
+    const offlineId = generateUuidV4();
+    pendingClientOfflineIdRef.current = offlineId;
+    checkoutMutation.mutate(offlineId);
   };
 
   const handleHoldBill = () => {
@@ -837,7 +945,7 @@ return (
           {offlinePendingCount > 0 && (
             <div
               data-testid="offline-sync-banner"
-              className="mb-2 px-3.5 py-2.5 bg-amber-500/15 border border-amber-500/80 rounded-xl text-amber-500 flex items-center justify-between shadow-2xs shrink-0 animate-pulse"
+              className="mb-2 px-3.5 py-2.5 bg-amber-500/15 border border-amber-500/80 rounded-xl text-amber-500 flex items-center justify-between shadow-2xs shrink-0"
             >
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
@@ -846,9 +954,22 @@ return (
                   ({offlinePendingCount} invoice{offlinePendingCount > 1 ? 's' : ''} stored locally in vault)
                 </span>
               </div>
-              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 uppercase">
-                Vault Active
-              </span>
+              <div className="flex items-center gap-2">
+                {typeof navigator === 'undefined' || navigator.onLine ? (
+                  <button
+                    type="button"
+                    onClick={handleManualSync}
+                    disabled={isSyncingNow}
+                    className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 uppercase cursor-pointer disabled:opacity-60"
+                  >
+                    {isSyncingNow ? 'Syncing…' : 'Sync Now'}
+                  </button>
+                ) : (
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 uppercase">
+                    Vault Active
+                  </span>
+                )}
+              </div>
             </div>
           )}
 

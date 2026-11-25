@@ -13,6 +13,7 @@ export async function getPurchaseInvoices(req: Request, res: Response) {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const search = req.query.search as string;
+    const city = req.query.city as string;
     const status = req.query.status as string;
     const supplier_id = req.query.supplier_id as string;
     const startDate = req.query.startDate as string;
@@ -32,6 +33,7 @@ export async function getPurchaseInvoices(req: Request, res: Response) {
       page,
       limit,
       search,
+      city,
       status,
       supplier_id,
       startDate,

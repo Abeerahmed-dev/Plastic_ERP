@@ -54,6 +54,16 @@ export async function createInvoiceWithItems(
   userId?: string
 ): Promise<string> {
   return await db.transaction(async (trx) => {
+    const offlineId = (input as any).offline_id ? String((input as any).offline_id).trim() : '';
+    if (offlineId) {
+      const existing = await trx('sales_invoices')
+        .where({ offline_id: offlineId })
+        .first();
+      if (existing) {
+        return existing.id;
+      }
+    }
+
     if (!invoiceNumber) {
       invoiceNumber = await generateNextInvoiceNumber(trx);
     }
@@ -423,7 +433,7 @@ export async function createInvoiceWithItems(
     }
 
     // ── Credit Limit Check (Only for Credit customers) ──
-    if (!isCashCustomer && customer && Number(customer.credit_limit || 0) > 0) {
+    if (!isCashCustomer && !(input as any).skip_credit_limit_check && customer && Number(customer.credit_limit || 0) > 0) {
       const balanceDue = total_amount - Number((input as any).paid_amount || 0);
       if (balanceDue > 0) {
         const existingSum = await trx('sales_invoices')
@@ -475,6 +485,8 @@ export async function createInvoiceWithItems(
         change_returned: 0,
         status: invoiceStatus,
         notes: input.notes,
+        offline_id: (input as any).offline_id || null,
+        offline_timestamp: (input as any).offline_timestamp ? Number((input as any).offline_timestamp) : null,
         created_by: userId,
         transport: input.transport || null,
       })
@@ -1282,6 +1294,7 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
 
   const hasBalanceDue = await db.schema.hasColumn('sales_invoices', 'balance_due');
   const hasReturnsCol = await db.schema.hasColumn('sales_invoices', 'has_returns');
+  const hasOfflineIdCol = await db.schema.hasColumn('sales_invoices', 'offline_id');
 
   const selectColumns = [
     'si.id',
@@ -1311,6 +1324,7 @@ export async function findAllInvoices(filter?: { created_by?: string; is_pos_onl
   ];
   if (hasBalanceDue) selectColumns.push('si.balance_due');
   if (hasReturnsCol) selectColumns.push('si.has_returns');
+  if (hasOfflineIdCol) selectColumns.push('si.offline_id');
 
   const rows = await query
     .select(selectColumns)
@@ -1712,274 +1726,489 @@ export async function processOfflineSyncInvoices(
   });
 
   const results: any[] = [];
+  let successCount = 0;
 
-  await db.transaction(async (trx) => {
-    for (const invPayload of sortedInvoices) {
-      // Ensure customer
-      let customerId = invPayload.customer_id;
-      if (!customerId) {
-        const defaultCust = await trx('customers').first();
-        customerId = defaultCust?.id;
+  for (const invPayload of sortedInvoices) {
+    const offlineId = invPayload.offline_id || invPayload.id || null;
+    const recordType = String(invPayload.record_type || 'POS').toUpperCase();
+
+    try {
+      if (recordType === 'SALE_INVOICE') {
+        const savedId = await createInvoiceWithItems(
+          {
+            ...invPayload,
+            offline_id: offlineId,
+            offline_timestamp: Number(invPayload.timestamp || invPayload.offline_timestamp || Date.now()),
+            skip_credit_limit_check: true,
+          } as any,
+          undefined,
+          userId
+        );
+        const fullInvoice = await findInvoiceById(savedId);
+        successCount++;
+        results.push({
+          ...fullInvoice,
+          offline_id: offlineId,
+        });
+        continue;
       }
 
-      const invoiceNumber = invPayload.invoice_number || `POS-OFFLINE-${Date.now()}-${Math.floor(Math.random() * 900 + 100)}`;
-      const invoiceDate = invPayload.date || new Date().toISOString().split('T')[0];
+      // POS / Legacy Offline Sync Path (atomic per-record transaction with idempotency)
+      const syncedPosRecord = await db.transaction(async (trx) => {
+        if (offlineId) {
+          const existing = await trx('sales_invoices')
+            .where({ offline_id: offlineId })
+            .first();
 
-      let invoiceTotal = 0;
-      let invoiceSubtotal = 0;
-      let invoiceRequestedTotal = 0;
-      let invoiceFulfilledTotal = 0;
-      let invoiceDeferredTotal = 0;
-
-      const processedItems: any[] = [];
-      const lineageRecords: any[] = [];
-
-      for (const item of (invPayload.items || [])) {
-        // Lock product row to prevent concurrent race conditions
-        const liveProduct = await trx('products')
-          .where({ id: item.product_id })
-          .forUpdate()
-          .first();
-
-        if (!liveProduct) {
-          throw new Error(`Product ${item.product_id} not found during offline sync`);
+          if (existing) {
+            const existingItems = await trx('sales_invoice_items')
+              .where({ invoice_id: existing.id });
+            return {
+              ...existing,
+              offline_id: offlineId,
+              items: existingItems,
+              idempotent_duplicate: true,
+            };
+          }
         }
 
-        const liveStock = Math.max(0, Number(liveProduct.total_stock_kg || 0));
-        const requested_qty = Number(item.quantity ?? item.requested_qty ?? 0);
-        const fulfilled_qty = Math.min(liveStock, requested_qty);
-        const deferred_qty = Math.max(0, requested_qty - fulfilled_qty);
-        const is_deferred = deferred_qty > 0;
+        // Ensure customer (Walk-In fallback for anonymous retail sales)
+        let customerId = invPayload.customer_id;
+        if (!customerId) {
+          const walkIn = await trx('customers').whereILike('name', '%Walk-In%').first();
+          const defaultCust = walkIn || await trx('customers').first();
+          customerId = defaultCust?.id;
+        }
 
-        const previousWAC = Number(liveProduct.rolling_avg_cost_per_kg || liveProduct.cost_price || 0);
+        let invoiceNumber = invPayload.invoice_number;
+        if (!invoiceNumber) {
+          await trx.raw('SELECT pg_advisory_xact_lock(90003)');
+          const posRows = await trx('sales_invoices')
+            .where('invoice_number', 'like', 'POS-%')
+            .select('invoice_number');
 
-        let kgToDeduct = fulfilled_qty;
-        let actual_cogs = 0;
-        let primaryBatchId: string | null = null;
-        const itemDepletions: { batch_id: string; qty: number; cost: number }[] = [];
-
-        // FIFO Depletion for physically available stock
-        if (fulfilled_qty > 0) {
-          const activeBatches = await trx('inventory_batches')
-            .where('product_id', item.product_id)
-            .andWhere('remaining_qty', '>', 0)
-            .orderBy('created_at', 'asc');
-
-          for (const batch of activeBatches) {
-            if (kgToDeduct <= 0) break;
-            if (!primaryBatchId) primaryBatchId = batch.id;
-
-            const remainingInBatch = Number(batch.remaining_qty || 0);
-            const batchCost = Number(batch.batch_buy_price_per_kg ?? batch.buy_price_per_kg ?? previousWAC);
-
-            if (remainingInBatch >= kgToDeduct) {
-              const qtyTaken = kgToDeduct;
-              const newRem = remainingInBatch - qtyTaken;
-              await trx('inventory_batches')
-                .where('id', batch.id)
-                .update({
-                  remaining_qty: newRem,
-                  status: newRem <= 0 ? 'DEPLETED' : 'ACTIVE',
-                  updated_at: new Date(),
-                });
-
-              actual_cogs += qtyTaken * batchCost;
-              itemDepletions.push({ batch_id: batch.id, qty: qtyTaken, cost: batchCost });
-              kgToDeduct = 0;
-              break;
-            } else {
-              const qtyTaken = remainingInBatch;
-              await trx('inventory_batches')
-                .where('id', batch.id)
-                .update({
-                  remaining_qty: 0,
-                  status: 'DEPLETED',
-                  updated_at: new Date(),
-                });
-
-              actual_cogs += qtyTaken * batchCost;
-              itemDepletions.push({ batch_id: batch.id, qty: qtyTaken, cost: batchCost });
-              kgToDeduct -= qtyTaken;
+          let maxBillNum = 0;
+          for (const r of posRows) {
+            if (!r.invoice_number) continue;
+            const numPart = r.invoice_number.replace(/^POS-/i, '');
+            const num = parseInt(numPart, 10);
+            if (!isNaN(num) && num < 1000000000 && num > maxBillNum) {
+              maxBillNum = num;
             }
           }
+          invoiceNumber = `POS-${maxBillNum + 1}`;
+        }
 
-          // Fallback if stock was in product total_stock_kg but no active batch was found
-          if (kgToDeduct > 0) {
-            const { unitPrice: latestFallbackPrice } = await getLatestMarketBatchPrice(
-              trx,
-              item.product_id,
-              liveProduct
-            );
-            actual_cogs += kgToDeduct * latestFallbackPrice;
+        const syncTimestamp = Number(invPayload.timestamp || invPayload.offline_timestamp || Date.now());
+        const invoiceDate = invPayload.date
+          ? new Date(invPayload.date)
+          : (isNaN(syncTimestamp) ? new Date() : new Date(syncTimestamp));
+
+        let invoiceTotal = 0;
+        let invoiceSubtotal = 0;
+        let invoiceRequestedTotal = 0;
+        let invoiceFulfilledTotal = 0;
+        let invoiceDeferredTotal = 0;
+
+        const processedItems: any[] = [];
+        const lineageRecords: any[] = [];
+
+        for (const item of (invPayload.items || [])) {
+          // Lock product row to prevent concurrent race conditions
+          const liveProduct = await trx('products')
+            .where({ id: item.product_id })
+            .forUpdate()
+            .first();
+
+          if (!liveProduct) {
+            throw new Error(`Product ${item.product_id} not found during offline sync`);
           }
 
-          // Decrement physical stock on product
-          await trx('products')
-            .where({ id: item.product_id })
-            .update({
-              total_stock_kg: trx.raw('GREATEST(0, total_stock_kg - ?)', [fulfilled_qty]),
-              updated_at: new Date(),
-            });
+          let bagWeight = 25.0;
+          if (liveProduct.category_id) {
+            const category = await trx('categories')
+              .where({ id: liveProduct.category_id })
+              .select('bag_weight_kg')
+              .first();
+            bagWeight = Number(category?.bag_weight_kg || 25.0);
+          }
 
-          // Log physical inventory dispatch
-          await trx('inventory_transactions').insert({
+          const selectedUnit = item.selected_unit || 'KG';
+          const unitMultiplier = (selectedUnit.toLowerCase() === 'bag' || selectedUnit.toLowerCase() === 'bora')
+            ? bagWeight
+            : 1.0;
+
+          const liveStock = Math.max(0, Number(liveProduct.total_stock_kg || 0));
+          const requested_qty = Number(item.quantity ?? item.requested_qty ?? 0);
+          const requested_kg = requested_qty * unitMultiplier;
+          const fulfilled_kg = Math.min(liveStock, Math.max(0, requested_kg));
+          const deferred_kg = Math.max(0, requested_kg - fulfilled_kg);
+          const fulfilled_qty = unitMultiplier > 0 ? Math.min(Math.max(0, requested_qty), fulfilled_kg / unitMultiplier) : Math.min(liveStock, requested_qty);
+          const deferred_qty = Math.max(0, requested_qty - fulfilled_qty);
+          const is_deferred = deferred_qty > 0;
+
+          const previousWAC = Number(liveProduct.rolling_avg_cost_per_kg || liveProduct.cost_price || 0);
+
+          let kgToDeduct = fulfilled_kg;
+          let actual_cogs = 0;
+          let primaryBatchId: string | null = null;
+          const itemDepletions: { batch_id: string; qty: number; cost: number }[] = [];
+
+          // FIFO Depletion for physically available stock
+          if (fulfilled_kg > 0) {
+            const activeBatches = await trx('inventory_batches')
+              .where('product_id', item.product_id)
+              .andWhere('remaining_qty', '>', 0)
+              .orderBy('created_at', 'asc');
+
+            for (const batch of activeBatches) {
+              if (kgToDeduct <= 0) break;
+              if (!primaryBatchId) primaryBatchId = batch.id;
+
+              const remainingInBatch = Number(batch.remaining_qty || 0);
+              const batchCost = Number(batch.batch_buy_price_per_kg ?? batch.buy_price_per_kg ?? previousWAC);
+
+              if (remainingInBatch >= kgToDeduct) {
+                const qtyTaken = kgToDeduct;
+                const newRem = remainingInBatch - qtyTaken;
+                await trx('inventory_batches')
+                  .where('id', batch.id)
+                  .update({
+                    remaining_qty: newRem,
+                    status: newRem <= 0 ? 'DEPLETED' : 'ACTIVE',
+                    updated_at: new Date(),
+                  });
+
+                actual_cogs += qtyTaken * batchCost;
+                itemDepletions.push({ batch_id: batch.id, qty: qtyTaken, cost: batchCost });
+                kgToDeduct = 0;
+                break;
+              } else {
+                const qtyTaken = remainingInBatch;
+                await trx('inventory_batches')
+                  .where('id', batch.id)
+                  .update({
+                    remaining_qty: 0,
+                    status: 'DEPLETED',
+                    updated_at: new Date(),
+                  });
+
+                actual_cogs += qtyTaken * batchCost;
+                itemDepletions.push({ batch_id: batch.id, qty: qtyTaken, cost: batchCost });
+                kgToDeduct -= qtyTaken;
+              }
+            }
+
+            // Fallback if stock was in product total_stock_kg but no active batch was found
+            if (kgToDeduct > 0) {
+              const { unitPrice: latestFallbackPrice } = await getLatestMarketBatchPrice(
+                trx,
+                item.product_id,
+                liveProduct
+              );
+              actual_cogs += kgToDeduct * latestFallbackPrice;
+            }
+
+            // Decrement physical stock on product
+            await trx('products')
+              .where({ id: item.product_id })
+              .update({
+                total_stock_kg: trx.raw('GREATEST(0, total_stock_kg - ?)', [fulfilled_kg]),
+                updated_at: new Date(),
+              });
+
+            // Log physical inventory dispatch
+            await trx('inventory_transactions').insert({
+              product_id: item.product_id,
+              transaction_type: 'SALE',
+              quantity_kg: fulfilled_kg,
+              unit_cost: fulfilled_kg > 0 ? (actual_cogs / fulfilled_kg) : previousWAC,
+              total_asset_value: Math.round(actual_cogs * 100) / 100,
+              capital_equity_value: 0,
+              notes: `Offline Sync Sale ${invoiceNumber} (Fulfilled ${fulfilled_kg} KG${deferred_kg > 0 ? `, Deferred ${deferred_kg} KG` : ''})`,
+              created_by: userId || null,
+            });
+          }
+
+          // True Financial Costing via Shared Overdraft Split Engine
+          const { unitPrice: latestBatchPrice, estimatedCogs: missingEstimatedCost } =
+            await estimateOverdraftCogs(trx, item.product_id, deferred_kg, liveProduct);
+          const estimated_cogs = Math.round((actual_cogs + missingEstimatedCost) * 100) / 100;
+          const applied_cogs_per_kg = requested_kg > 0
+            ? Math.round((estimated_cogs / requested_kg) * 10000) / 10000
+            : (latestBatchPrice || previousWAC);
+
+          const rawPrice = item.unit_price !== undefined && item.unit_price !== null
+            ? item.unit_price
+            : (item.price !== undefined && item.price !== null ? item.price : (liveProduct.sale_price || 0));
+          const unit_price = Number(rawPrice);
+          if (unit_price < 0) {
+            throw new Error('Unit price cannot be negative');
+          }
+          const lineTotal = Math.round(requested_qty * unit_price * 100) / 100;
+
+          invoiceSubtotal += lineTotal;
+          invoiceRequestedTotal += requested_qty;
+          invoiceFulfilledTotal += fulfilled_qty;
+          invoiceDeferredTotal += deferred_qty;
+
+          processedItems.push({
             product_id: item.product_id,
-            transaction_type: 'SALE',
-            quantity_kg: fulfilled_qty,
-            unit_cost: fulfilled_qty > 0 ? (actual_cogs / fulfilled_qty) : previousWAC,
-            total_asset_value: Math.round(actual_cogs * 100) / 100,
-            capital_equity_value: 0,
-            notes: `Offline Sync Sale ${invoiceNumber} (Fulfilled ${fulfilled_qty} KG${deferred_qty > 0 ? `, Deferred ${deferred_qty} KG` : ''})`,
-            created_by: userId || null,
+            size: item.size || liveProduct.size || 'Standard',
+            batch_id: primaryBatchId,
+            quantity: requested_qty,
+            requested_qty,
+            fulfilled_qty,
+            deferred_qty,
+            selected_unit: selectedUnit,
+            actual_weight_per_unit: unitMultiplier,
+            net_kg_processed: requested_kg,
+            unit_price,
+            total_price: lineTotal,
+            is_deferred,
+            estimated_cogs,
+            actual_cogs: Math.round(actual_cogs * 100) / 100,
+            applied_cogs_per_kg,
+            name_urdu: liveProduct.name_urdu || null,
+            depletions: itemDepletions,
           });
         }
 
-        // True Financial Costing via Shared Overdraft Split Engine:
-        // Estimated COGS = Actual COGS of fulfilled stock + (deferred_qty * latest_batch_price)
-        const { unitPrice: latestBatchPrice, estimatedCogs: missingEstimatedCost } =
-          await estimateOverdraftCogs(trx, item.product_id, deferred_qty, liveProduct);
-        const estimated_cogs = Math.round((actual_cogs + missingEstimatedCost) * 100) / 100;
-        const applied_cogs_per_kg = requested_qty > 0
-          ? Math.round((estimated_cogs / requested_qty) * 10000) / 10000
-          : (latestBatchPrice || previousWAC);
+        const discount = Number(invPayload.discount || 0);
+        const deliveryCharge = Number(invPayload.delivery_charges ?? invPayload.delivery_charge ?? 0);
+        const isOfflineAllReturns = processedItems.length > 0 && processedItems.every((item: any) => Number(item.quantity) < 0);
+        const slipCharges = isOfflineAllReturns && invPayload.slip_charges === undefined
+          ? 0
+          : Number(invPayload.slip_charges ?? 2);
+        invoiceTotal = Math.max(0, invoiceSubtotal - discount) + deliveryCharge + slipCharges;
 
-        const unit_price = Number(item.unit_price !== undefined && item.unit_price !== null ? item.unit_price : (liveProduct.sale_price || 0));
-        if (unit_price < 0) {
-          throw new Error('Unit price cannot be negative');
+        const rawMethod = String(invPayload.payment_method || 'CASH').toUpperCase();
+        const isSplit = rawMethod === 'SPLIT';
+        const isBank = rawMethod === 'BANK' || rawMethod === 'BANK_TRANSFER';
+        const targetBankId: string | null = (isBank || isSplit) ? (invPayload.bank_account_id || null) : null;
+
+        let paidAmount = Number(invPayload.paid_amount ?? invPayload.amount_paid ?? invoiceTotal);
+        if (paidAmount > invoiceTotal && invoiceTotal >= 0) {
+          paidAmount = invoiceTotal;
         }
-        const lineTotal = Math.round(requested_qty * unit_price * 100) / 100;
 
-        invoiceSubtotal += lineTotal;
-        invoiceRequestedTotal += requested_qty;
-        invoiceFulfilledTotal += fulfilled_qty;
-        invoiceDeferredTotal += deferred_qty;
-
-        processedItems.push({
-          product_id: item.product_id,
-          size: item.size || liveProduct.size || 'Standard',
-          batch_id: primaryBatchId,
-          quantity: requested_qty,
-          requested_qty,
-          fulfilled_qty,
-          deferred_qty,
-          selected_unit: item.selected_unit || 'KG',
-          unit_price,
-          total_price: lineTotal,
-          is_deferred,
-          estimated_cogs,
-          actual_cogs: Math.round(actual_cogs * 100) / 100,
-          applied_cogs_per_kg,
-          depletions: itemDepletions,
-        });
-      }
-
-      const discount = Number(invPayload.discount || 0);
-      const deliveryCharge = Number(invPayload.delivery_charges ?? invPayload.delivery_charge ?? 0);
-      const isOfflineAllReturns = processedItems.length > 0 && processedItems.every((item: any) => Number(item.quantity) < 0);
-      const slipCharges = isOfflineAllReturns && invPayload.slip_charges === undefined
-        ? 0
-        : Number(invPayload.slip_charges ?? 2);
-      invoiceTotal = Math.max(0, invoiceSubtotal - discount) + deliveryCharge + slipCharges;
-      const paidAmount = Number(invPayload.paid_amount ?? invPayload.amount_paid ?? invoiceTotal);
-
-      // Save Invoice Header
-      const [savedInvoice] = await trx('sales_invoices')
-        .insert({
-          customer_id: customerId,
-          invoice_number: invoiceNumber,
-          invoice_type: 'SALE',
-          date: invoiceDate,
-          subtotal: invoiceSubtotal,
-          discount,
-          delivery_charge: deliveryCharge,
-          slip_charges: slipCharges,
-          total_amount: invoiceTotal,
-          paid_amount: paidAmount,
-          requested_qty: invoiceRequestedTotal,
-          fulfilled_qty: invoiceFulfilledTotal,
-          deferred_qty: invoiceDeferredTotal,
-          status: paidAmount >= invoiceTotal ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID'),
-          offline_id: invPayload.id || invPayload.offline_id || null,
-          offline_timestamp: Number(invPayload.timestamp || invPayload.offline_timestamp || Date.now()),
-          created_by: userId || null,
-          transport: invPayload.transport || null,
-        })
-        .returning('*');
-
-      const savedItems: any[] = [];
-
-      for (const itemData of processedItems) {
-        const [savedItem] = await trx('sales_invoice_items')
+        // Save Invoice Header
+        const [savedInvoice] = await trx('sales_invoices')
           .insert({
-            invoice_id: savedInvoice.id,
-            product_id: itemData.product_id,
-            size: itemData.size,
-            batch_id: itemData.batch_id,
-            quantity: itemData.requested_qty,
-            requested_qty: itemData.requested_qty,
-            fulfilled_qty: itemData.fulfilled_qty,
-            deferred_qty: itemData.deferred_qty,
-            selected_unit: itemData.selected_unit,
-            unit_price: itemData.unit_price,
-            total_price: itemData.total_price,
-            is_deferred: itemData.is_deferred,
-            estimated_cogs: itemData.estimated_cogs,
-            actual_cogs: itemData.actual_cogs,
-            applied_cogs_per_kg: itemData.applied_cogs_per_kg,
+            customer_id: customerId,
+            walk_in_customer_name: invPayload.walk_in_customer_name || null,
+            invoice_number: invoiceNumber,
+            invoice_type: 'SALE',
+            date: invoiceDate,
+            due_date: invoiceDate,
+            subtotal: invoiceSubtotal,
+            discount,
+            delivery_charge: deliveryCharge,
+            slip_charges: slipCharges,
+            total_amount: invoiceTotal,
+            paid_amount: paidAmount,
+            cash_tendered: paidAmount,
+            change_returned: 0,
+            requested_qty: invoiceRequestedTotal,
+            fulfilled_qty: invoiceFulfilledTotal,
+            deferred_qty: invoiceDeferredTotal,
+            status: paidAmount >= invoiceTotal ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID'),
+            notes: invPayload.notes || `POS Sale (${customerId ? 'Offline Sync' : 'Walk-in Customer'})`,
+            offline_id: offlineId,
+            offline_timestamp: Number(invPayload.timestamp || invPayload.offline_timestamp || Date.now()),
+            created_by: userId || null,
+            transport: invPayload.transport || null,
           })
           .returning('*');
 
-        savedItems.push(savedItem);
+        const savedItems: any[] = [];
 
-        // Record lineage
-        for (const dep of itemData.depletions) {
-          lineageRecords.push({
-            sales_invoice_item_id: savedItem.id,
-            inventory_batch_id: dep.batch_id,
-            qty_deducted: dep.qty,
-            cogs_per_kg: dep.cost,
-          });
+        for (const itemData of processedItems) {
+          const [savedItem] = await trx('sales_invoice_items')
+            .insert({
+              invoice_id: savedInvoice.id,
+              product_id: itemData.product_id,
+              size: itemData.size,
+              batch_id: itemData.batch_id,
+              quantity: itemData.requested_qty,
+              requested_qty: itemData.requested_qty,
+              fulfilled_qty: itemData.fulfilled_qty,
+              deferred_qty: itemData.deferred_qty,
+              selected_unit: itemData.selected_unit,
+              actual_weight_per_unit: itemData.actual_weight_per_unit,
+              net_kg_processed: itemData.net_kg_processed,
+              unit_price: itemData.unit_price,
+              total_price: itemData.total_price,
+              is_deferred: itemData.is_deferred,
+              estimated_cogs: itemData.estimated_cogs,
+              actual_cogs: itemData.actual_cogs,
+              applied_cogs_per_kg: itemData.applied_cogs_per_kg,
+              name_urdu: itemData.name_urdu,
+            })
+            .returning('*');
+
+          savedItems.push(savedItem);
+
+          for (const dep of itemData.depletions) {
+            lineageRecords.push({
+              sales_invoice_item_id: savedItem.id,
+              inventory_batch_id: dep.batch_id,
+              qty_deducted: dep.qty,
+              cogs_per_kg: dep.cost,
+            });
+          }
+
+          if (itemData.deferred_qty > 0) {
+            await trx('pending_deliveries').insert({
+              sales_invoice_id: savedInvoice.id,
+              sales_invoice_item_id: savedItem.id,
+              product_id: itemData.product_id,
+              pending_qty: itemData.deferred_qty,
+              fulfilled_qty: 0,
+              status: 'PENDING',
+            });
+          }
         }
 
-        // Insert pending deliveries if overdraft occurs
-        if (itemData.deferred_qty > 0) {
-          await trx('pending_deliveries').insert({
-            sales_invoice_id: savedInvoice.id,
-            sales_invoice_item_id: savedItem.id,
-            product_id: itemData.product_id,
-            pending_qty: itemData.deferred_qty,
-            fulfilled_qty: 0,
-            status: 'PENDING',
-          });
+        if (lineageRecords.length > 0) {
+          await trx('sales_invoice_item_batches').insert(lineageRecords);
         }
-      }
 
-      if (lineageRecords.length > 0) {
-        await trx('sales_invoice_item_batches').insert(lineageRecords);
-      }
+        // Record Customer Payment & Liquidity Inflows (Cash Drawer & Bank Balance)
+        if (paidAmount > 0) {
+          if (isSplit) {
+            const rawCash = Math.max(0, Number(invPayload.split_cash_amount || 0));
+            const rawBank = Math.max(0, Number(invPayload.split_bank_amount || 0));
+            const bankAmt = Math.min(paidAmount, rawBank);
+            const cashAmt = Math.max(0, Math.round((paidAmount - bankAmt) * 100) / 100 || Math.min(paidAmount, rawCash));
 
-      // Record direct customer payment if paidAmount > 0
-      if (paidAmount > 0) {
-        await trx('customer_payments').insert({
-          customer_id: customerId,
-          invoice_id: savedInvoice.id,
-          payment_number: `RCV-${invoiceNumber}`,
-          payment_date: invoiceDate,
-          amount: paidAmount,
-          payment_method: invPayload.payment_method || 'CASH',
-          created_by: userId || null,
-        });
-      }
+            if (cashAmt > 0) {
+              await trx('customer_payments').insert({
+                customer_id: customerId,
+                invoice_id: savedInvoice.id,
+                payment_number: `RCV-${invoiceNumber}-CASH`,
+                payment_date: invoiceDate,
+                amount: cashAmt,
+                payment_method: 'CASH',
+                cheque_status: 'CLEARED',
+                created_by: userId || null,
+              });
+              const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+              if (hasCdl) {
+                await trx('cash_drawer_ledger').insert({
+                  type: 'INFLOW',
+                  amount: cashAmt,
+                  reference_id: savedInvoice.id,
+                  description: `Offline Sync POS Split Cash: ${invoiceNumber}`,
+                  created_by: userId || null,
+                });
+              }
+            }
 
+            if (bankAmt > 0 && targetBankId) {
+              await trx('customer_payments').insert({
+                customer_id: customerId,
+                invoice_id: savedInvoice.id,
+                payment_number: `RCV-${invoiceNumber}-BANK`,
+                payment_date: invoiceDate,
+                amount: bankAmt,
+                payment_method: 'BANK_TRANSFER',
+                bank_account_id: targetBankId,
+                cheque_status: 'CLEARED',
+                created_by: userId || null,
+              });
+              await trx('bank_accounts').where('id', targetBankId).increment('current_balance', bankAmt);
+              const hasBankTx = await trx.schema.hasTable('bank_transactions');
+              if (hasBankTx) {
+                await trx('bank_transactions').insert({
+                  bank_account_id: targetBankId,
+                  transaction_type: 'DEPOSIT',
+                  type: 'INFLOW',
+                  amount: bankAmt,
+                  source_type: 'POS',
+                  source: 'POS',
+                  reference_id: savedInvoice.id,
+                  description: `Offline Sync POS Split Bank: ${invoiceNumber}`,
+                  transaction_date: new Date(),
+                  category: 'SALES',
+                  created_by: userId || null,
+                });
+              }
+            }
+          } else {
+            await trx('customer_payments').insert({
+              customer_id: customerId,
+              invoice_id: savedInvoice.id,
+              payment_number: `RCV-${invoiceNumber}`,
+              payment_date: invoiceDate,
+              amount: paidAmount,
+              payment_method: isBank && targetBankId ? 'BANK_TRANSFER' : rawMethod,
+              bank_account_id: isBank ? targetBankId : null,
+              cheque_status: 'CLEARED',
+              created_by: userId || null,
+            });
+
+            if (isBank && targetBankId) {
+              await trx('bank_accounts').where('id', targetBankId).increment('current_balance', paidAmount);
+              const hasBankTx = await trx.schema.hasTable('bank_transactions');
+              if (hasBankTx) {
+                await trx('bank_transactions').insert({
+                  bank_account_id: targetBankId,
+                  transaction_type: 'DEPOSIT',
+                  type: 'INFLOW',
+                  amount: paidAmount,
+                  source_type: 'POS',
+                  source: 'POS',
+                  reference_id: savedInvoice.id,
+                  description: `Offline Sync POS Bank Sale: ${invoiceNumber}`,
+                  transaction_date: new Date(),
+                  category: 'SALES',
+                  created_by: userId || null,
+                });
+              }
+            } else {
+              const hasCdl = await trx.schema.hasTable('cash_drawer_ledger');
+              if (hasCdl) {
+                await trx('cash_drawer_ledger').insert({
+                  type: 'INFLOW',
+                  amount: paidAmount,
+                  reference_id: savedInvoice.id,
+                  description: `Offline Sync POS Cash Sale: ${invoiceNumber}`,
+                  created_by: userId || null,
+                });
+              }
+            }
+          }
+        }
+
+        return {
+          ...savedInvoice,
+          offline_id: offlineId,
+          requested_qty: invoiceRequestedTotal,
+          fulfilled_qty: invoiceFulfilledTotal,
+          deferred_qty: invoiceDeferredTotal,
+          items: savedItems,
+        };
+      });
+
+      successCount++;
+      results.push(syncedPosRecord);
+    } catch (err: any) {
+      if (sortedInvoices.length === 1) {
+        throw err;
+      }
       results.push({
-        ...savedInvoice,
-        requested_qty: invoiceRequestedTotal,
-        fulfilled_qty: invoiceFulfilledTotal,
-        deferred_qty: invoiceDeferredTotal,
-        items: savedItems,
+        offline_id: offlineId,
+        id: null,
+        failed: true,
+        error: err?.message || 'Failed to sync offline invoice',
       });
     }
-  });
+  }
+
+  if (sortedInvoices.length > 0 && successCount === 0 && results.length > 0 && results[0]?.failed) {
+    throw new Error(results[0].error || 'Failed to sync offline invoices');
+  }
 
   return results;
 }

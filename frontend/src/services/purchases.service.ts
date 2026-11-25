@@ -76,6 +76,7 @@ export interface PurchaseInvoiceQuery {
   page?: number;
   limit?: number;
   search?: string;
+  city?: string;
   status?: string;
   supplier_id?: string;
   startDate?: string;

@@ -1,6 +1,7 @@
 import api from './api';
 import { Product, CreateProductData, UpdateProductData } from '../types/product.types';
 import { ApiSuccess } from '../types/api.types';
+import { offlineMasterCache } from './offline-master-cache.service';
 
 export interface ProductBatch {
   id: string;
@@ -18,17 +19,30 @@ export interface ProductBatch {
 export const productsService = {
   getProducts: async (params?: any): Promise<Product[]> => {
     const cleanParams = params && !params.queryKey ? params : undefined;
-    const response = await api.get<ApiSuccess<Product[]>>('/products', {
-      params: { limit: 2000, ...cleanParams },
-    });
-    return response.data.data;
+    const isUnfiltered = !cleanParams || Object.keys(cleanParams).length === 0;
+    const fetchFn = async () => {
+      const response = await api.get<ApiSuccess<Product[]>>('/products', {
+        params: { limit: 2000, ...cleanParams },
+      });
+      return response.data.data;
+    };
+    if (isUnfiltered) {
+      return offlineMasterCache.fetchWithCache('all_products', fetchFn);
+    }
+    return fetchFn();
   },
 
   getPOSAvailableProducts: async (search?: string): Promise<Product[]> => {
-    const response = await api.get<ApiSuccess<Product[]>>('/products/pos-available', {
-      params: { search },
-    });
-    return response.data.data;
+    const fetchFn = async () => {
+      const response = await api.get<ApiSuccess<Product[]>>('/products/pos-available', {
+        params: { search },
+      });
+      return response.data.data;
+    };
+    if (!search) {
+      return offlineMasterCache.fetchWithCache('pos_products', fetchFn);
+    }
+    return fetchFn();
   },
 
   getProductBatches: async (id: string): Promise<ProductBatch[]> => {

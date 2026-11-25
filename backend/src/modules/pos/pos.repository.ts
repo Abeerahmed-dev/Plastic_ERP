@@ -20,9 +20,27 @@ export async function processPOSCheckout(
   splitCashAmountInput?: number,
   splitBankAmountInput?: number,
   deliveryChargesInput: number = 0,
-  slipChargesInput: number = 2
+  slipChargesInput: number = 2,
+  options?: {
+    offline_id?: string | null;
+    offline_timestamp?: number | null;
+  }
 ) {
   return await db.transaction(async (trx: Knex.Transaction) => {
+    if (options?.offline_id) {
+      const existingInvoice = await trx('sales_invoices')
+        .where({ offline_id: options.offline_id })
+        .first();
+
+      if (existingInvoice) {
+        const existingItems = await trx('sales_invoice_items')
+          .where({ invoice_id: existingInvoice.id });
+        (existingInvoice as any).items = existingItems;
+        (existingInvoice as any).idempotent_duplicate = true;
+        return existingInvoice;
+      }
+    }
+
     const effectiveDiscount = Number(discount || 0);
 
     // 1. Customer Selection
@@ -412,6 +430,8 @@ export async function processPOSCheckout(
           : isSplit
             ? `POS Sale (${targetCustomer.name}) [Split: Rs. ${splitCashNet} Cash + Rs. ${splitBankNet} Bank]`
             : `POS Sale (${targetCustomer.name})`,
+        offline_id: options?.offline_id || null,
+        offline_timestamp: options?.offline_timestamp ? Number(options.offline_timestamp) : null,
         created_by: userId,
       })
       .returning('*');
