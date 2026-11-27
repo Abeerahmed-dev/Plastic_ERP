@@ -16,7 +16,15 @@ import {
   setForceOfflineMode,
 } from '../utils/networkError';
 
-export function OfflineSyncStatus() {
+interface OfflineSyncStatusProps {
+  compact?: boolean;
+  placement?: 'bottom-right' | 'top-left';
+}
+
+export function OfflineSyncStatus({
+  compact = false,
+  placement = 'bottom-right',
+}: OfflineSyncStatusProps = {}) {
   const queryClient = useQueryClient();
   const [navOffline, setNavOffline] = useState<boolean>(() => isNavigatorOffline());
   const [forceOffline, setForceOffline] = useState<boolean>(() => getForceOfflineMode());
@@ -145,7 +153,9 @@ export function OfflineSyncStatus() {
       <button
         type="button"
         onClick={() => setMenuOpen((prev) => !prev)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+        className={`flex items-center gap-1.5 ${
+          compact ? 'px-2 py-1.5 rounded-lg' : 'px-2.5 py-1.5 rounded-xl'
+        } text-xs font-bold border transition-all cursor-pointer ${
           offline
             ? 'bg-rose-500/15 text-rose-300 border-rose-500/50 hover:bg-rose-500/25'
             : pendingCount > 0
@@ -157,7 +167,16 @@ export function OfflineSyncStatus() {
             ? 'Offline billing active — invoices save locally & print immediately'
             : pendingCount > 0
               ? `${pendingCount} offline invoice(s) waiting to sync`
-              : 'Connected — Offline Vault Ready'
+              : 'Online — Offline Vault Ready'
+        }
+        aria-label={
+          forceOffline
+            ? 'Manual Offline'
+            : navOffline
+              ? 'Offline'
+              : pendingCount > 0
+                ? `${pendingCount} Pending`
+                : 'Online'
         }
       >
         {offline ? (
@@ -167,17 +186,19 @@ export function OfflineSyncStatus() {
         ) : (
           <Wifi className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
         )}
-        <span className="hidden md:inline">
-          {forceOffline
-            ? 'Manual Offline'
-            : navOffline
-              ? 'Offline'
-              : isSyncing
-                ? 'Syncing…'
-                : pendingCount > 0
-                  ? `${pendingCount} Pending`
-                  : 'Online'}
-        </span>
+        {!compact && (
+          <span className="hidden md:inline">
+            {forceOffline
+              ? 'Manual Offline'
+              : navOffline
+                ? 'Offline'
+                : isSyncing
+                  ? 'Syncing…'
+                  : pendingCount > 0
+                    ? `${pendingCount} Pending`
+                    : 'Online'}
+          </span>
+        )}
         {pendingCount > 0 && (
           <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
             {pendingCount}
@@ -186,7 +207,13 @@ export function OfflineSyncStatus() {
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3.5 z-50 text-slate-100">
+        <div
+          className={`absolute w-72 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-3.5 z-50 text-slate-100 ${
+            placement === 'top-left'
+              ? 'left-0 bottom-full mb-2'
+              : 'right-0 top-full mt-2'
+          }`}
+        >
           <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
             <div className="flex items-center gap-2">
               {offline ? (

@@ -31,7 +31,7 @@ export const createInvoiceSchema = z
       .nullable(),
     discount: z.number().min(0).optional().default(0),
     delivery_charge: z.number().min(0).optional().default(0),
-    slip_charges: z.number().min(0).optional().default(2),
+    slip_charges: z.number().min(0).optional().default(0),
     advance_applied_amount: z.number().min(0).optional().default(0),
     notes: z.string().optional().nullable(),
     transport: z.string().trim().optional().nullable(),

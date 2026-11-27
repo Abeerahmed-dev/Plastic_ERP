@@ -1,7 +1,7 @@
 import React from 'react';
 import { CheckCircle2, RotateCcw, AlertCircle } from 'lucide-react';
 import sabirLogo from '../../assets/sabirlogo.png';
-import { getUrduProductName } from '../../utils/bilingual';
+import { getUrduProductName, getUrduText } from '../../utils/bilingual';
 
 interface A4SalesInvoiceProps {
   data: any;
@@ -343,20 +343,61 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
             )}
           </div>
 
-          {/* Right Column: Party / Customer Name (with City), Phone, Status */}
+          {/* Right Column: Party / Customer Name (with City & Urdu, No Customer ID on Sales Invoice), Transport, Phone, Status */}
           <div className="space-y-1">
-            <div className="flex items-start">
-              <span className="w-24 font-bold text-slate-800">{entityLabel}:</span>
-              <span className="font-black text-black text-sm flex-1 break-words">
-                {entityName}{entityCode ? ` (${entityCode})` : ''} {entityCity ? `(${entityCity})` : ''}
-              </span>
-            </div>
-            {invoice.transport && String(invoice.transport).trim() !== '' && (
-              <div className="flex items-center">
-                <span className="w-24 font-semibold text-slate-700">Transport:</span>
-                <span className="text-black font-medium">{invoice.transport}</span>
-              </div>
-            )}
+            {(() => {
+              const hasUrduChars = (val?: string | null) => Boolean(val && /[\u0600-\u06FF]/.test(val));
+              const urduEntityName = !isPurchase && entityName && !hasUrduChars(entityName)
+                ? getUrduText(entityName)
+                : '';
+              const transportText = invoice.transport ? String(invoice.transport).trim() : '';
+              const urduTransport = !isPurchase && transportText && !hasUrduChars(transportText)
+                ? getUrduText(transportText)
+                : '';
+
+              return (
+                <>
+                  <div className="flex items-start">
+                    <span className="w-24 font-bold text-slate-800 shrink-0">{entityLabel}:</span>
+                    <div className="flex-1 min-w-0 font-black text-black text-sm break-words leading-snug">
+                      <span>{entityName}{isPurchase && entityCode ? ` (${entityCode})` : ''} {entityCity ? `(${entityCity})` : ''}</span>
+                      {urduEntityName && (
+                        <>
+                          {' '}/{' '}
+                          <span
+                            className="text-[13px] font-bold text-black inline-block"
+                            style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", unicodeBidi: 'isolate' }}
+                            dir="rtl"
+                          >
+                            {urduEntityName}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {transportText !== '' && (
+                    <div className="flex items-start">
+                      <span className="w-24 font-semibold text-slate-700 shrink-0">Transport:</span>
+                      <div className="flex-1 min-w-0 text-black font-medium break-words leading-snug">
+                        <span>{transportText}</span>
+                        {urduTransport && (
+                          <>
+                            {' '}/{' '}
+                            <span
+                              className="text-[13px] font-bold text-black inline-block"
+                              style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", unicodeBidi: 'isolate' }}
+                              dir="rtl"
+                            >
+                              {urduTransport}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             {entityPhone && (
               <div className="flex items-center">
                 <span className="w-24 font-semibold text-slate-700">Phone:</span>

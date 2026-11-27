@@ -1,5 +1,5 @@
 import sabirLogoThermal from '../assets/sabirlogo_thermal.png';
-import { getUrduProductName } from './bilingual';
+import { getUrduProductName, getUrduText } from './bilingual';
 
 export interface ThermalReceiptData {
   invoice: any;
@@ -198,16 +198,28 @@ export async function printThermalReceipt(data: ThermalReceiptData) {
           <span>Date:</span>
           <span style="font-weight: 600;">${invoiceDate}</span>
         </div>
-        <div class="flex">
-          <span>Customer:</span>
-          <span style="font-weight: bold;">${customerName || invoice.walk_in_customer_name || invoice.customer_name || 'Walk-in Customer'}</span>
-        </div>
-        ${invoice.transport && String(invoice.transport).trim() !== '' ? `
-        <div class="flex">
-          <span>Transport:</span>
-          <span style="font-weight: bold;">${invoice.transport}</span>
-        </div>
-        ` : ''}
+        ${(() => {
+          const displayCustomer = customerName || invoice.walk_in_customer_name || invoice.customer_name || 'Walk-in Customer';
+          const urduCustomer = displayCustomer && !/[\u0600-\u06FF]/.test(displayCustomer) ? getUrduText(displayCustomer) : '';
+          const displayTransport = invoice.transport && String(invoice.transport).trim() !== '' ? String(invoice.transport).trim() : '';
+          const urduTransport = displayTransport && !/[\u0600-\u06FF]/.test(displayTransport) ? getUrduText(displayTransport) : '';
+          return `
+            <div class="flex" style="align-items: flex-start;">
+              <span>Customer:</span>
+              <span style="text-align: right; max-width: 72%; word-break: break-word; font-weight: bold;">
+                ${displayCustomer}${urduCustomer ? ` / <span dir="rtl" style="font-size: 11px; font-weight: bold; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; unicode-bidi: isolate; display: inline-block;">${urduCustomer}</span>` : ''}
+              </span>
+            </div>
+            ${displayTransport ? `
+            <div class="flex" style="align-items: flex-start;">
+              <span>Transport:</span>
+              <span style="text-align: right; max-width: 72%; word-break: break-word; font-weight: bold;">
+                ${displayTransport}${urduTransport ? ` / <span dir="rtl" style="font-size: 11px; font-weight: bold; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; unicode-bidi: isolate; display: inline-block;">${urduTransport}</span>` : ''}
+              </span>
+            </div>
+            ` : ''}
+          `;
+        })()}
         <div class="flex">
           <span>Cashier:</span>
           <span style="font-weight: 600;">${cashierName}</span>

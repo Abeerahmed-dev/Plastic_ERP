@@ -116,7 +116,7 @@ export default function InvoicesListPage({ defaultType }: InvoicesListPageProps 
           subtotal: preview.subtotal ?? rec.subtotal ?? 0,
           discount: preview.discount ?? rec.discount ?? 0,
           delivery_charge: preview.delivery_charge ?? rec.delivery_charges ?? 0,
-          slip_charges: preview.slip_charges ?? rec.slip_charges ?? 2,
+          slip_charges: preview.slip_charges ?? rec.slip_charges ?? 0,
           total_amount: preview.total_amount ?? rec.total_amount ?? 0,
           paid_amount: preview.paid_amount ?? rec.amount_paid ?? 0,
           date: preview.date || rec.payload?.date || new Date(rec.timestamp).toISOString().split('T')[0],

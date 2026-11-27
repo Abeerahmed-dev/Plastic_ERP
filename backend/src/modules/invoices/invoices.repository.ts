@@ -312,7 +312,7 @@ export async function createInvoiceWithItems(
     const isAllReturns = sanitizedItems.length > 0 && sanitizedItems.every((item: any) => Number(item.quantity) < 0);
     const slipCharges = isAllReturns && (input as any).slip_charges === undefined
       ? 0
-      : Math.round(Number((input as any).slip_charges !== undefined ? (input as any).slip_charges : 2) * 100) / 100;
+      : Math.round(Number((input as any).slip_charges !== undefined ? (input as any).slip_charges : 0) * 100) / 100;
     const total_amount = Math.round((Math.max(0, subtotal - discount) + deliveryCharge + slipCharges) * 100) / 100;
 
     // ── Customer & Account Validation ──
@@ -1979,7 +1979,7 @@ export async function processOfflineSyncInvoices(
         const isOfflineAllReturns = processedItems.length > 0 && processedItems.every((item: any) => Number(item.quantity) < 0);
         const slipCharges = isOfflineAllReturns && invPayload.slip_charges === undefined
           ? 0
-          : Number(invPayload.slip_charges ?? 2);
+          : Number(invPayload.slip_charges ?? 0);
         invoiceTotal = Math.max(0, invoiceSubtotal - discount) + deliveryCharge + slipCharges;
 
         const rawMethod = String(invPayload.payment_method || 'CASH').toUpperCase();

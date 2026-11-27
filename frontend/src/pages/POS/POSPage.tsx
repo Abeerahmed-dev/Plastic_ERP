@@ -52,7 +52,7 @@ export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState<number>(0);
   const [deliveryCharges, setDeliveryCharges] = useState<number>(0);
-  const [slipCharges, setSlipCharges] = useState<number>(2);
+  const [slipCharges, setSlipCharges] = useState<number>(0);
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [splitCashAmount, setSplitCashAmount] = useState<number | ''>('');
@@ -458,7 +458,7 @@ export default function POSPage() {
       setCart([]);
       setDiscount(0);
       setDeliveryCharges(0);
-      setSlipCharges(2);
+      setSlipCharges(0);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -599,7 +599,7 @@ export default function POSPage() {
       setCart([]);
       setDiscount(0);
       setDeliveryCharges(0);
-      setSlipCharges(2);
+      setSlipCharges(0);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -640,7 +640,7 @@ export default function POSPage() {
       setCart([]);
       setDiscount(0);
       setDeliveryCharges(0);
-      setSlipCharges(2);
+      setSlipCharges(0);
       setAmountPaid('');
       setSplitCashAmount('');
       setSplitBankAmount('');
@@ -674,7 +674,7 @@ export default function POSPage() {
     setSelectedCustomerId(order.customer_id || '');
     setDiscount(Number(order.discount || 0));
     setDeliveryCharges(Number((order as any).delivery_charges || (order as any).delivery_charge || 0));
-    setSlipCharges((order as any).slip_charges !== undefined ? Number((order as any).slip_charges) : 2);
+    setSlipCharges((order as any).slip_charges !== undefined ? Number((order as any).slip_charges) : 0);
     setPaymentMethod(order.payment_method || 'CASH');
     setSplitCashAmount(order.split_cash_amount !== null && order.split_cash_amount !== undefined ? Number(order.split_cash_amount) : '');
     setSplitBankAmount(order.split_bank_amount !== null && order.split_bank_amount !== undefined ? Number(order.split_bank_amount) : '');
@@ -851,7 +851,7 @@ export default function POSPage() {
             setCart([]);
             setDiscount(0);
             setDeliveryCharges(0);
-            setSlipCharges(2);
+            setSlipCharges(0);
             setAmountPaid('');
             setSplitCashAmount('');
             setSplitBankAmount('');
@@ -1436,7 +1436,7 @@ className={`w-20 text-right text-xs font-bold rounded py-0.5 px-2 ${
               value={slipCharges === 0 ? '0' : (slipCharges || '')}
               onChange={(e) => setSlipCharges(e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0))}
               className="w-20 text-right text-xs font-bold rounded py-0.5 px-2 bg-white border border-slate-300 dark:bg-[#161925] dark:border-[#2D3349] dark:text-white"
-              placeholder="2"
+              placeholder="0"
             />
           </div>
 

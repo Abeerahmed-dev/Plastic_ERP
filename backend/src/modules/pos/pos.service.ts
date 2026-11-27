@@ -12,7 +12,7 @@ import { CheckoutInput, CreateHeldOrderInput } from './pos.schemas';
 export async function checkout(userId: string, data: CheckoutInput, userRole?: string) {
   const deliveryCharges = Number(data.delivery_charges ?? data.delivery_charge ?? 0);
   const isAllReturns = data.items && data.items.length > 0 && data.items.every((i) => Number(i.quantity) < 0);
-  const slipCharges = isAllReturns && data.slip_charges === undefined ? 0 : Number(data.slip_charges ?? 2);
+  const slipCharges = isAllReturns && data.slip_charges === undefined ? 0 : Number(data.slip_charges ?? 0);
   const invoice = await processPOSCheckout(
     userId,
     data.items,

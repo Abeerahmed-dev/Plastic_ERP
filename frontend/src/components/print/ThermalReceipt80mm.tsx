@@ -1,6 +1,6 @@
 import React from 'react';
 import sabirLogo from '../../assets/sabirlogo.png';
-import { getUrduProductName } from '../../utils/bilingual';
+import { getUrduProductName, getUrduText } from '../../utils/bilingual';
 
 interface ThermalReceiptProps {
   data: any;
@@ -156,12 +156,32 @@ export const ThermalReceipt80mm: React.FC<ThermalReceiptProps> = ({ data }) => {
           </div>
           <div className="flex justify-between items-start">
             <span className="font-semibold">Customer:</span>
-            <span className="font-bold text-right max-w-[48mm] break-words">{customerName}</span>
+            <span className="text-right max-w-[48mm] break-words font-bold">
+              <span>{customerName}</span>
+              {customerName && !/[\u0600-\u06FF]/.test(customerName) && (
+                <>
+                  {' '}/{' '}
+                  <span className="text-[11.5px] font-bold inline-block" style={{ unicodeBidi: 'isolate' }} dir="rtl">
+                    {getUrduText(customerName)}
+                  </span>
+                </>
+              )}
+            </span>
           </div>
           {data.transport && String(data.transport).trim() !== '' && (
             <div className="flex justify-between items-start">
               <span className="font-semibold">Transport:</span>
-              <span className="text-right">{data.transport}</span>
+              <span className="text-right max-w-[48mm] break-words">
+                <span>{data.transport}</span>
+                {!/[\u0600-\u06FF]/.test(String(data.transport)) && (
+                  <>
+                    {' '}/{' '}
+                    <span className="text-[11.5px] font-bold inline-block" style={{ unicodeBidi: 'isolate' }} dir="rtl">
+                      {getUrduText(String(data.transport))}
+                    </span>
+                  </>
+                )}
+              </span>
             </div>
           )}
           <div className="flex justify-between items-start">

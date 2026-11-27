@@ -184,6 +184,7 @@ type SidebarContentProps = {
 };
 
 function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: SidebarContentProps) {
+  const { theme, toggleTheme } = useThemeStore();
   const isCashierRole = (user?.role || '').toUpperCase() === 'CASHIER';
   const isAccountantRole = (user?.role || '').toUpperCase() === 'ACCOUNTANT';
   const sectionsToRender = isAccountantRole ? accountantNavSections : navSections;
@@ -239,19 +240,36 @@ function SidebarContent({ user, hasPermission, onLinkClick, handleLogout }: Side
         })}
       </nav>
 
-      {/* User + logout */}
+      {/* User + Online/Theme Controls + Logout */}
       <div className="border-t border-slate-800 px-3 py-4 shrink-0 bg-slate-900">
-        <div className="flex items-center gap-3 px-2 mb-2">
-          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shrink-0 shadow-sm">
-            <span className="text-slate-950 font-black text-xs">
-              {user?.name?.charAt(0).toUpperCase()}
-            </span>
+        <div className="flex items-center justify-between gap-2 px-1.5 mb-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shrink-0 shadow-sm">
+              <span className="text-slate-950 font-black text-xs">
+                {user?.name?.charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-sm font-semibold text-slate-200 truncate">{user?.name}</p>
+              <p className="text-xs text-amber-400 font-semibold capitalize truncate">
+                {user?.role}
+              </p>
+            </div>
           </div>
-          <div className="overflow-hidden">
-            <p className="text-sm font-semibold text-slate-200 truncate">{user?.name}</p>
-            <p className="text-xs text-amber-400 font-semibold capitalize truncate">
-              {user?.role}
-            </p>
+          <div className="flex items-center gap-1 shrink-0">
+            <OfflineSyncStatus compact placement="top-left" />
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-all cursor-pointer"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="h-4 w-4 text-amber-400" />
+              ) : (
+                <Moon className="h-4 w-4 text-purple-400" />
+              )}
+            </button>
           </div>
         </div>
         <button
@@ -622,34 +640,35 @@ export const MainLayout = () => {
               </Link>
             )}
 
-            {/* Offline Vault / Sync Indicator */}
-            <OfflineSyncStatus />
-
-            {/* Theme Quick Toggle */}
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="p-2 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-all cursor-pointer mr-1"
-              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
-              {theme === 'dark' ? (
-                <Sun className="h-4 w-4 text-amber-400" />
-              ) : (
-                <Moon className="h-4 w-4 text-purple-400" />
-              )}
-            </button>
-
-            <div className="hidden sm:flex flex-col items-end">
-              <span className="text-sm font-semibold text-slate-200">{user?.name}</span>
-              <span className="text-xs text-amber-400 font-semibold uppercase tracking-wider">
-                {user?.role}
-              </span>
-            </div>
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-xs">
-              <span className="text-slate-950 font-black text-xs">
-                {user?.name?.charAt(0).toUpperCase()}
-              </span>
-            </div>
+            {/* Show Online/Offline, Theme toggle & User chip in topbar only when sidebar is hidden (POS page) */}
+            {hideSidebar && (
+              <>
+                <OfflineSyncStatus />
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="p-2 rounded-xl text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-all cursor-pointer mr-1"
+                  title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-4 w-4 text-amber-400" />
+                  ) : (
+                    <Moon className="h-4 w-4 text-purple-400" />
+                  )}
+                </button>
+                <div className="hidden sm:flex flex-col items-end">
+                  <span className="text-sm font-semibold text-slate-200">{user?.name}</span>
+                  <span className="text-xs text-amber-400 font-semibold uppercase tracking-wider">
+                    {user?.role}
+                  </span>
+                </div>
+                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-xs">
+                  <span className="text-slate-950 font-black text-xs">
+                    {user?.name?.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </header>
 

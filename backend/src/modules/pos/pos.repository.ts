@@ -20,7 +20,7 @@ export async function processPOSCheckout(
   splitCashAmountInput?: number,
   splitBankAmountInput?: number,
   deliveryChargesInput: number = 0,
-  slipChargesInput: number = 2,
+  slipChargesInput: number = 0,
   options?: {
     offline_id?: string | null;
     offline_timestamp?: number | null;
@@ -329,7 +329,7 @@ export async function processPOSCheckout(
     }
 
     const deliveryCharges = Math.max(0, Math.round(Number(deliveryChargesInput || 0) * 100) / 100);
-    const slipCharges = Math.max(0, Math.round(Number(slipChargesInput !== undefined ? slipChargesInput : 2) * 100) / 100);
+    const slipCharges = Math.max(0, Math.round(Number(slipChargesInput !== undefined ? slipChargesInput : 0) * 100) / 100);
     const totalAmount = Math.round((subtotal - effectiveDiscount + deliveryCharges + slipCharges) * 100) / 100;
 
     const isSplit = String(paymentMethodInput || '').toUpperCase() === 'SPLIT';
