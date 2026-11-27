@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { X, Plus, Trash2, Loader2, Layers, Wallet, AlertCircle, RefreshCw, Printer, PauseCircle, Clock, Banknote, CheckCircle2, Split, CreditCard, User } from 'lucide-react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -138,7 +138,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
   const selectedCustomer = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
   const isCashCustomer = invoiceMode === 'CASH';
   const hasHoldCustomer = isCashCustomer
-    ? Boolean(selectedCustomerId || effectiveWalkIn)
+    ? true
     : Boolean(selectedCustomerId);
   const walletBalance = Number(selectedCustomer?.advance_credit || (selectedCustomer as any)?.advance_wallet || 0);
 
@@ -576,7 +576,7 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
       const cust = customersResponse?.data.find((c: any) => c.id === selectedCustomerId);
       const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
       const resolvedWalkIn = isCashCustomer && !selectedCustomerId && effectiveWalkIn ? effectiveWalkIn : '';
-      const currentCustName = (resolvedWalkIn || cust?.name) || 'Customer';
+      const currentCustName = resolvedWalkIn || cust?.name || (isCashCustomer ? 'Walk-In Customer' : 'Customer');
       const refNote = `[ERP] Sale - ${currentCustName} (${timeStr})`;
 
       const erpMeta = {
@@ -793,6 +793,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
     }
   }, [isOpen, initialHeldData]);
 
+  const holdInvoiceRef = useRef<() => void>(() => {});
+  const submitInvoiceRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    holdInvoiceRef.current = handleHoldInvoice;
+    submitInvoiceRef.current = () => handleSubmit(onSubmit)();
+  });
+
   // Global Keyboard Shortcuts for Invoice Creation
   useEffect(() => {
     if (!isOpen) return;
@@ -803,14 +811,14 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
         e.preventDefault();
         const canSubmit = !mutation.isPending && !isHolding && !hasAnyEmptySize && !(isCashCustomer && isSplitPayment && !isSplitBalanced);
         if (canSubmit) {
-          handleSubmit(onSubmit)();
+          submitInvoiceRef.current();
         }
       }
       // Alt+H or Ctrl+Shift+Enter -> Hold Invoice
       else if ((e.altKey && (e.key === 'h' || e.key === 'H')) || (e.ctrlKey && e.shiftKey && e.key === 'Enter')) {
         e.preventDefault();
         if (!mutation.isPending && !isHolding) {
-          handleHoldInvoice();
+          holdInvoiceRef.current();
         }
       }
       // Alt+P -> Toggle Print mode: ORIGINAL -> DUPLICATE -> BOTH
@@ -1102,6 +1110,16 @@ export const InvoiceFormModal = ({ isOpen = true, onClose, onSuccess, initialHel
                           setValue('walk_in_customer_name', '');
                           setWalkInName('');
                         }
+                      }}
+                      onInputChange={(text) => {
+                        const trimmed = text.trim();
+                        if (selectedCustomerId) {
+                          const currentLabel = customerOptions.find((o) => o.value === selectedCustomerId)?.label || '';
+                          if (text === currentLabel) return;
+                          setValue('customer_id', '', { shouldValidate: false });
+                        }
+                        setValue('walk_in_customer_name', trimmed, { shouldValidate: false });
+                        setWalkInName(trimmed);
                       }}
                       options={customerOptions}
                       placeholder="Search cash customer or type walk-in name..."

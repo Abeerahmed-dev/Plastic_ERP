@@ -372,7 +372,22 @@ export function SearchableCombobox({
             disabled={disabled}
             onClick={() => {
               if (!disabled) {
-                if (!isOpen) {
+                if (isOpen && allowCustom) {
+                  const q = searchQuery.trim();
+                  if (q) {
+                    if (!(value && selectedOption && q.toLowerCase() === selectedOption.label.trim().toLowerCase())) {
+                      if (onCustomSelect) {
+                        if (value) onChange('');
+                        if (customValue !== q) onCustomSelect(q);
+                      } else if (value !== q) {
+                        onChange(q);
+                      }
+                    }
+                  } else {
+                    if (value) onChange('');
+                    if (customValue) onCustomSelect?.('');
+                  }
+                } else if (!isOpen) {
                   inputRef.current?.focus();
                 }
                 setIsOpen(!isOpen);
