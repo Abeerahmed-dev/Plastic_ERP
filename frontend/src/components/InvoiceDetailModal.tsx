@@ -360,7 +360,7 @@ export default function InvoiceDetailModal({ isOpen, onClose, invoice, type = 's
                 <User className="w-4 h-4 text-purple-600 print:hidden" />
                 {entityName} {entityCode ? `(${entityCode})` : ''}
               </div>
-              {entityPhone && <p className="text-xs text-slate-600">Phone: {entityPhone}</p>}
+              {type === 'purchase' && entityPhone && <p className="text-xs text-slate-600">Phone: {entityPhone}</p>}
               {entityCity && <p className="text-xs text-slate-500">City: {entityCity}</p>}
               {invoice.transport && invoice.transport.trim() !== '' && (
                 <p className="text-xs text-slate-500">Transport: {invoice.transport}</p>

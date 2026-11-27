@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, UserX, ChevronLeft, ChevronRight, RefreshCw, ArrowDownLeft } from 'lucide-react';
 import { getCustomers, deactivateCustomer } from '../../services/customers.service';
@@ -26,9 +26,23 @@ export default function CustomersListPage() {
   const canDelete = !isCashier && (userRole === 'OWNER' || userRole === 'ADMIN' || hasPermission('customers:delete'));
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<'CREDIT' | 'CASH'>('CREDIT');
-  const [page, setPage] = useState(1);
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  const setPage = useCallback((next: number | ((prev: number) => number)) => {
+    setSearchParams((prevParams) => {
+      const current = Math.max(1, Number(prevParams.get('page')) || 1);
+      const resolved = typeof next === 'function' ? next(current) : next;
+      const updated = new URLSearchParams(prevParams);
+      if (resolved <= 1) {
+        updated.delete('page');
+      } else {
+        updated.set('page', String(resolved));
+      }
+      return updated;
+    }, { replace: true });
+  }, [setSearchParams]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Customer | undefined>();
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
@@ -81,6 +95,7 @@ export default function CustomersListPage() {
   }, [nameInput]);
 
   const handleCityChange = (city: string | null) => {
+    if (selectedCity === city && debouncedNameInput === '') return;
     setSelectedCity(city);
     setNameInput('');
     setDebouncedNameInput('');
@@ -88,6 +103,7 @@ export default function CustomersListPage() {
   };
 
   const handleNameChange = (name: string | null) => {
+    if (selectedName === name && debouncedNameInput === '') return;
     setSelectedName(name);
     setNameInput('');
     setDebouncedNameInput('');

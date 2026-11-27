@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -28,6 +28,8 @@ function formatRs(n: number | string | undefined | null) {
 export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const handleBack = () => (location.key !== 'default' ? navigate(-1) : navigate('/suppliers'));
   const qc = useQueryClient();
   const { user } = useAuthStore();
   const userRole = (user?.roleName || user?.role || '').toUpperCase();
@@ -60,7 +62,7 @@ export default function SupplierDetailPage() {
             <div className="h-6 w-36 bg-slate-200 animate-pulse rounded-md" />
           </div>
           <button
-            onClick={() => navigate('/suppliers')}
+            onClick={handleBack}
             className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold shadow-sm transition-all cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -83,7 +85,7 @@ export default function SupplierDetailPage() {
         <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-900">Party Record</h1>
           <button
-            onClick={() => navigate('/suppliers')}
+            onClick={handleBack}
             className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-semibold shadow-sm transition-all cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -99,7 +101,7 @@ export default function SupplierDetailPage() {
             The party record you requested could not be located or has been deleted.
           </p>
           <button
-            onClick={() => navigate('/suppliers')}
+            onClick={handleBack}
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-xs font-bold transition shadow-sm"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -119,7 +121,7 @@ export default function SupplierDetailPage() {
           <div className="flex items-center gap-3.5">
             <button
               type="button"
-              onClick={() => navigate('/suppliers')}
+              onClick={handleBack}
               className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 text-sm font-semibold shadow-sm transition-all hover:scale-[1.02] cursor-pointer shrink-0"
               title="Back to Party List"
             >

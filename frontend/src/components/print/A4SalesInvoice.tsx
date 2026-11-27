@@ -398,7 +398,7 @@ export const A4SalesInvoice: React.FC<A4SalesInvoiceProps> = ({ data }) => {
                 </>
               );
             })()}
-            {entityPhone && (
+            {isPurchase && entityPhone && (
               <div className="flex items-center">
                 <span className="w-24 font-semibold text-slate-700">Phone:</span>
                 <span className="text-black font-medium">{entityPhone}</span>

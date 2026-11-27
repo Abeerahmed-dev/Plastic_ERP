@@ -137,8 +137,10 @@ export function SearchableCombobox({
     }
   }, [disabled, value, customValue]);
 
-  // Click outside listener
+  // Click outside listener — only active while the dropdown is open so clicks
+  // elsewhere on the page (e.g. paginated table rows) never clear or reset filters.
   useEffect(() => {
+    if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
@@ -148,16 +150,16 @@ export function SearchableCombobox({
             if (value && selectedOption && q.toLowerCase() === selectedOption.label.trim().toLowerCase()) {
               setSearchQuery(selectedOption.label);
             } else if (onCustomSelect) {
-              onChange('');
-              onCustomSelect(q);
+              if (value) onChange('');
+              if (customValue !== q) onCustomSelect(q);
               setSearchQuery(q);
             } else {
-              onChange(q);
+              if (value !== q) onChange(q);
               setSearchQuery(q);
             }
           } else {
-            onChange('');
-            onCustomSelect?.('');
+            if (value) onChange('');
+            if (customValue) onCustomSelect?.('');
             setSearchQuery('');
           }
         } else {
@@ -167,7 +169,7 @@ export function SearchableCombobox({
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [selectedOption, searchQuery, allowCustom, value, onChange, onCustomSelect]);
+  }, [isOpen, selectedOption, searchQuery, allowCustom, value, customValue, onChange, onCustomSelect]);
 
   const scrollToOption = (index: number) => {
     if (optionsListRef.current) {
